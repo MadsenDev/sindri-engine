@@ -124,15 +124,23 @@ fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
 Underlying behavior:
 
 - `AssetManager::load_font_from_bytes(renderer, key, bytes)` – loads and caches the font
+- `AssetManager::load_font_from_file(renderer, path)` – loads and caches the font by path
 - `AssetManager::get_font(key)` – retrieves a cached `FontHandle` if available
 
 ### Convenience Methods (via EngineContext)
 
 - **`ctx.load_texture(path: &str) -> Result<TextureHandle>`** - Load texture (cached)
 - **`ctx.load_texture_from_bytes(id: &str, bytes: &[u8]) -> Result<TextureHandle>`** - Load texture from bytes (cached)
+- **`ctx.load_font(path: &str) -> Result<FontHandle>`** - Load font from file (cached)
 - **`ctx.load_font_from_bytes(id: &str, bytes: &[u8]) -> Result<FontHandle>`** - Load font from bytes (cached)
+- **`ctx.get_texture(id: &str) -> Option<TextureHandle>`** - Get cached texture by ID
 - **`ctx.get_font(id: &str) -> Option<FontHandle>`** - Get cached font by ID
 - **`ctx.assets() -> &mut AssetManager`** - Access asset manager directly
+
+### Asset Roots
+
+If you set `Engine::with_asset_root("assets")`, relative paths passed to
+`ctx.load_texture()` and `ctx.load_font()` will be resolved against that root.
 
 ## Best Practices
 
@@ -148,4 +156,3 @@ The `AssetManager` is designed to be extended for other asset types:
 - Audio files
 - Shaders
 - Data files
-

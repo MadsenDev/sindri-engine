@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::BufReader,
     path::Path,
@@ -8,11 +9,18 @@ use std::{
 use anyhow::{anyhow, Result};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
+/// Handle to a preloaded sound effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SoundHandle(u32);
+
 /// Manages audio playback for sound effects and music.
 pub struct AudioSystem {
     _stream: Option<OutputStream>,
     stream_handle: Option<OutputStreamHandle>,
     music_sink: Arc<Mutex<Option<Sink>>>,
+    sound_cache: HashMap<SoundHandle, Arc<[u8]>>,
+    sound_paths: HashMap<String, SoundHandle>,
+    next_sound_id: u32,
     available: bool,
 }
 
@@ -27,6 +35,9 @@ impl AudioSystem {
                 _stream: Some(stream),
                 stream_handle: Some(stream_handle),
                 music_sink: Arc::new(Mutex::new(None)),
+                sound_cache: HashMap::new(),
+                sound_paths: HashMap::new(),
+                next_sound_id: 1,
                 available: true,
             }),
             Err(e) => {
@@ -35,6 +46,9 @@ impl AudioSystem {
                     _stream: None,
                     stream_handle: None,
                     music_sink: Arc::new(Mutex::new(None)),
+                    sound_cache: HashMap::new(),
+                    sound_paths: HashMap::new(),
+                    next_sound_id: 1,
                     available: false,
                 })
             }
@@ -87,6 +101,58 @@ impl AudioSystem {
         sink.append(source);
         sink.detach();
 
+        Ok(())
+    }
+
+    /// Preload a sound effect from a file path and return a handle.
+    pub fn load_sound<P: AsRef<Path>>(&mut self, path: P) -> Result<SoundHandle> {
+        let path_ref = path.as_ref();
+        let key = path_ref.to_string_lossy().to_string();
+        if let Some(handle) = self.sound_paths.get(&key) {
+            return Ok(*handle);
+        }
+
+        let bytes = std::fs::read(path_ref)
+            .map_err(|e| anyhow!("Failed to open sound file {:?}: {}", path_ref, e))?;
+
+        let handle = SoundHandle(self.next_sound_id);
+        self.next_sound_id = self.next_sound_id.wrapping_add(1).max(1);
+        self.sound_cache.insert(handle, Arc::from(bytes));
+        self.sound_paths.insert(key, handle);
+        Ok(handle)
+    }
+
+    /// Preload a sound effect from bytes and return a handle.
+    pub fn load_sound_from_bytes(&mut self, key: &str, bytes: &[u8]) -> Result<SoundHandle> {
+        if let Some(handle) = self.sound_paths.get(key) {
+            return Ok(*handle);
+        }
+
+        let handle = SoundHandle(self.next_sound_id);
+        self.next_sound_id = self.next_sound_id.wrapping_add(1).max(1);
+        self.sound_cache.insert(handle, Arc::from(bytes.to_vec()));
+        self.sound_paths.insert(key.to_string(), handle);
+        Ok(handle)
+    }
+
+    /// Play a preloaded sound effect by handle.
+    pub fn play_sound_handle(&self, handle: SoundHandle) -> Result<()> {
+        let stream_handle = self
+            .stream_handle
+            .as_ref()
+            .ok_or_else(|| anyhow!("Audio system is not available"))?;
+        let bytes = self
+            .sound_cache
+            .get(&handle)
+            .ok_or_else(|| anyhow!("Unknown sound handle {:?}", handle))?;
+
+        let cursor = std::io::Cursor::new(bytes.as_ref().to_vec());
+        let source = Decoder::new(cursor)
+            .map_err(|e| anyhow!("Failed to decode cached sound: {}", e))?;
+        let sink = Sink::try_new(stream_handle)
+            .map_err(|e| anyhow!("Failed to create audio sink: {}", e))?;
+        sink.append(source);
+        sink.detach();
         Ok(())
     }
 
@@ -163,4 +229,3 @@ impl AudioSystem {
 
 // Note: Default implementation is intentionally omitted because AudioSystem::new()
 // can fail. Use AudioSystem::new() directly or handle errors appropriately.
-

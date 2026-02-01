@@ -67,7 +67,7 @@ impl PhysicsDemo {
         physics.set_gravity(Vec2::new(0.0, 400.0));
 
         Self {
-            camera: Camera2D::new(Vec2::new(0.0, 0.0)),
+            camera: Camera2D::default(),
             physics,
             world: forge2d::World::new(),
             textures: TextureSet {
@@ -220,6 +220,7 @@ impl PhysicsDemo {
 
 impl Game for PhysicsDemo {
     fn init(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+        self.camera = ctx.screen_camera();
         self.create_textures(&mut *ctx.renderer())?;
 
         let screen_size = ctx.window().inner_size();

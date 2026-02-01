@@ -14,6 +14,7 @@ impl Engine {
     pub fn with_title(self, title: impl Into<String>) -> Self;
     pub fn with_size(self, width: u32, height: u32) -> Self;
     pub fn with_vsync(self, vsync: bool) -> Self;
+    pub fn with_asset_root(self, root: impl Into<PathBuf>) -> Self;
     pub fn run<G: Game>(self, game: G) -> Result<()>;
 }
 ```
@@ -32,23 +33,29 @@ pub trait Game {
 ### EngineContext
 
 ```rust
-pub struct EngineContext<'a> { /* ... */ }
+pub struct EngineContext { /* ... */ }
 
 impl EngineContext {
     pub fn delta_time(&self) -> Duration;
+    pub fn delta_seconds(&self) -> f32;
     pub fn elapsed_time(&self) -> Duration;
-    pub fn should_run_fixed_update(&self) -> bool;
     pub fn fixed_delta_time(&self) -> Duration;
+    pub fn fixed_delta_seconds(&self) -> f32;
+    pub fn should_run_fixed_update(&mut self) -> bool;
     pub fn fixed_update_alpha(&self) -> f32;
     pub fn input(&self) -> &InputState;
     pub fn renderer(&mut self) -> &mut Renderer;
+    pub fn draw<F>(&mut self, draw_fn: F) -> Result<()>;
     pub fn assets(&mut self) -> &mut AssetManager;
     pub fn audio(&mut self) -> &mut AudioSystem;
     pub fn window(&self) -> &Window;
+    pub fn screen_camera(&self) -> Camera2D;
     pub fn mouse_world(&self, camera: &Camera2D) -> Vec2;
     pub fn load_texture(&mut self, path: &str) -> Result<TextureHandle>;
     pub fn load_texture_from_bytes(&mut self, id: &str, bytes: &[u8]) -> Result<TextureHandle>;
+    pub fn load_font(&mut self, path: &str) -> Result<FontHandle>;
     pub fn load_font_from_bytes(&mut self, id: &str, bytes: &[u8]) -> Result<FontHandle>;
+    pub fn get_texture(&self, id: &str) -> Option<TextureHandle>;
     pub fn builtin_font(&mut self, font: BuiltinFont) -> Result<FontHandle>;
     pub fn request_exit(&mut self);
 }
@@ -339,8 +346,11 @@ pub struct AssetManager { /* ... */ }
 impl AssetManager {
     pub fn new() -> Self;
     pub fn get_texture(&self, id: &str) -> Option<TextureHandle>;
+    pub fn get_font(&self, id: &str) -> Option<FontHandle>;
     pub fn load_texture(&mut self, renderer: &mut Renderer, path: &str) -> Result<TextureHandle>;
     pub fn load_texture_from_bytes(&mut self, renderer: &mut Renderer, id: &str, bytes: &[u8]) -> Result<TextureHandle>;
+    pub fn load_font_from_bytes(&mut self, renderer: &mut Renderer, id: &str, bytes: &[u8]) -> Result<FontHandle>;
+    pub fn load_font_from_file(&mut self, renderer: &mut Renderer, path: &str) -> Result<FontHandle>;
 }
 ```
 
@@ -354,9 +364,16 @@ pub struct AudioSystem { /* ... */ }
 impl AudioSystem {
     pub fn new() -> Self;
     pub fn is_available(&self) -> bool;
+    pub fn play_sound<P: AsRef<Path>>(&self, path: P) -> Result<()>;
     pub fn play_sound_from_bytes(&self, bytes: &[u8]) -> Result<()>;
+    pub fn load_sound<P: AsRef<Path>>(&mut self, path: P) -> Result<SoundHandle>;
+    pub fn load_sound_from_bytes(&mut self, key: &str, bytes: &[u8]) -> Result<SoundHandle>;
+    pub fn play_sound_handle(&self, handle: SoundHandle) -> Result<()>;
+    pub fn play_music_loop<P: AsRef<Path>>(&self, path: P) -> Result<()>;
     pub fn play_music_loop_from_bytes(&self, bytes: &[u8]) -> Result<()>;
     pub fn stop_music(&self);
+    pub fn set_music_volume(&self, volume: f32);
+    pub fn is_music_playing(&self) -> bool;
 }
 ```
 
@@ -372,6 +389,12 @@ pub struct TextureHandle(pub(crate) u32);
 
 ```rust
 pub struct FontHandle(pub(crate) u32);
+```
+
+### SoundHandle
+
+```rust
+pub struct SoundHandle(pub(crate) u32);
 ```
 
 ### Frame
@@ -802,4 +825,3 @@ Forge2D re-exports the following from `winit`:
 
 - `VirtualKeyCode` - Keyboard key codes
 - `MouseButton` - Mouse button types
-

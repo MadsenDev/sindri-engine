@@ -4,6 +4,12 @@ use crate::math::{Transform2D, Vec2};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextureHandle(pub(crate) u32);
 
+impl TextureHandle {
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 /// Simple sprite combining a texture and transform metadata.
 #[derive(Clone, Debug)]
 pub struct Sprite {

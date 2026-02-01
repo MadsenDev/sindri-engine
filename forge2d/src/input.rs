@@ -10,12 +10,16 @@ pub struct InputState {
     keys_down: HashSet<KeyCode>,
     keys_pressed: HashSet<KeyCode>,
     keys_released: HashSet<KeyCode>,
+    pending_keys_pressed: HashSet<KeyCode>,
+    pending_keys_released: HashSet<KeyCode>,
 
     mouse_x: f32,
     mouse_y: f32,
     mouse_down: [bool; 8],
     mouse_pressed: [bool; 8],
     mouse_released: [bool; 8],
+    pending_mouse_pressed: [bool; 8],
+    pending_mouse_released: [bool; 8],
 }
 
 impl InputState {
@@ -24,20 +28,28 @@ impl InputState {
             keys_down: HashSet::new(),
             keys_pressed: HashSet::new(),
             keys_released: HashSet::new(),
+            pending_keys_pressed: HashSet::new(),
+            pending_keys_released: HashSet::new(),
             mouse_x: 0.0,
             mouse_y: 0.0,
             mouse_down: [false; 8],
             mouse_pressed: [false; 8],
             mouse_released: [false; 8],
+            pending_mouse_pressed: [false; 8],
+            pending_mouse_released: [false; 8],
         }
     }
 
-    /// Clear per-frame pressed/released flags (held keys stay down).
+    /// Advance per-frame pressed/released flags.
+    ///
+    /// This snapshots any pending inputs gathered since the last frame boundary.
     pub fn begin_frame(&mut self) {
-        self.keys_pressed.clear();
-        self.keys_released.clear();
-        self.mouse_pressed.fill(false);
-        self.mouse_released.fill(false);
+        self.keys_pressed = std::mem::take(&mut self.pending_keys_pressed);
+        self.keys_released = std::mem::take(&mut self.pending_keys_released);
+        self.mouse_pressed = self.pending_mouse_pressed;
+        self.mouse_released = self.pending_mouse_released;
+        self.pending_mouse_pressed.fill(false);
+        self.pending_mouse_released.fill(false);
     }
 
     /// Handle a keyboard input event from winit.
@@ -49,13 +61,13 @@ impl InputState {
         match event.state {
             ElementState::Pressed => {
                 if !self.keys_down.contains(&keycode) {
-                    self.keys_pressed.insert(keycode);
+                    self.pending_keys_pressed.insert(keycode);
                 }
                 self.keys_down.insert(keycode);
             }
             ElementState::Released => {
                 self.keys_down.remove(&keycode);
-                self.keys_released.insert(keycode);
+                self.pending_keys_released.insert(keycode);
             }
         }
     }
@@ -66,13 +78,13 @@ impl InputState {
             match state {
                 ElementState::Pressed => {
                     if !self.mouse_down[idx] {
-                        self.mouse_pressed[idx] = true;
+                        self.pending_mouse_pressed[idx] = true;
                     }
                     self.mouse_down[idx] = true;
                 }
                 ElementState::Released => {
                     self.mouse_down[idx] = false;
-                    self.mouse_released[idx] = true;
+                    self.pending_mouse_released[idx] = true;
                 }
             }
         }

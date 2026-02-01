@@ -6,14 +6,15 @@ use wgpu::util::DeviceExt;
 use wgpu::{
     vertex_attr_array, AddressMode, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, Buffer,
-    BufferBindingType, BufferUsages, ColorTargetState, ColorWrites, CommandEncoder,
+    BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CommandEncoder,
     CommandEncoderDescriptor, CompositeAlphaMode, DeviceDescriptor, Extent3d, FilterMode,
-    FragmentState, Instance, LoadOp, MultisampleState, Operations, Origin3d,
+    FragmentState, Instance, LoadOp, MapMode, MultisampleState, Operations, Origin3d, PollType,
     PipelineLayoutDescriptor, PresentMode, PrimitiveState, RenderPassColorAttachment,
     RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, Sampler,
     SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource,
-    SurfaceConfiguration, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    SurfaceConfiguration, TexelCopyBufferInfo, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
+    TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages,
     TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 use winit::{dpi::PhysicalSize, window::Window};
@@ -38,13 +39,18 @@ struct SpriteDrawCommand {
 }
 
 /// Wrapper around wgpu surface/device setup and simple frame management.
-pub struct Renderer<'window> {
-    backend: WgpuBackend<'window>,
+pub struct Renderer {
+    backend: WgpuBackend,
 }
 
-impl<'window> Renderer<'window> {
-    pub fn new(window: &'window Window, vsync: bool) -> Result<Self> {
+impl Renderer {
+    pub fn new(window: &Window, vsync: bool) -> Result<Self> {
         let backend = WgpuBackend::new(window, vsync)?;
+        Ok(Self { backend })
+    }
+
+    pub fn new_offscreen(width: u32, height: u32) -> Result<Self> {
+        let backend = WgpuBackend::new_offscreen(width, height)?;
         Ok(Self { backend })
     }
 
@@ -109,6 +115,24 @@ impl<'window> Renderer<'window> {
         self.backend.end_frame(frame)
     }
 
+    pub fn render_offscreen_rgba<F>(
+        &mut self,
+        width: u32,
+        height: u32,
+        draw_fn: F,
+    ) -> Result<Vec<u8>>
+    where
+        F: FnOnce(&mut Renderer, &mut Frame) -> Result<()>,
+    {
+        let (current_w, current_h) = self.surface_size();
+        if current_w != width || current_h != height {
+            self.resize(PhysicalSize::new(width, height));
+        }
+        let mut frame = self.begin_frame()?;
+        draw_fn(self, &mut frame)?;
+        self.backend.end_frame_readback(frame)
+    }
+
     pub fn load_texture_from_file(&mut self, path: &str) -> Result<TextureHandle> {
         self.backend.load_texture_from_file(path)
     }
@@ -146,7 +170,7 @@ impl<'window> Renderer<'window> {
     }
 
     /// Rasterize all glyphs needed for a text string.
-    /// Call this before draw_text() to ensure glyphs are cached.
+    /// This is optional when using the default text backend.
     pub fn rasterize_text_glyphs(&mut self, text: &str, font: FontHandle, size: f32) -> Result<()> {
         self.backend.ensure_glyphs_rasterized(text, font, size)
     }
@@ -163,7 +187,7 @@ impl<'window> Renderer<'window> {
     /// * `camera` - Camera for view projection
     ///
     /// # Note
-    /// All glyphs must be pre-rasterized using `rasterize_text_glyphs()` before calling this.
+    /// Glyph caching is handled internally, so pre-rasterization is optional.
     pub fn draw_text(
         &mut self,
         frame: &mut Frame,
@@ -273,6 +297,7 @@ impl<'window> Renderer<'window> {
 
 pub struct Frame {
     surface_texture: Option<wgpu::SurfaceTexture>,
+    output_texture: Option<Texture>,
     view: TextureView,
     encoder: Option<CommandEncoder>,
     sprite_draws: Vec<SpriteDrawCommand>, // Queue of sprite draws for batching
@@ -320,8 +345,8 @@ struct SpritePipeline {
 const MAX_SPRITES_PER_FRAME: usize = 2048;
 const UNIFORM_BUFFER_SIZE: u64 = MAX_SPRITES_PER_FRAME as u64 * 512; // Increased for larger uniform struct
 
-struct WgpuBackend<'window> {
-    surface: wgpu::Surface<'window>,
+struct WgpuBackend {
+    surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface_config: SurfaceConfiguration,
@@ -330,6 +355,8 @@ struct WgpuBackend<'window> {
     shape_pipeline: ShapePipeline,
     light_pipeline: LightPipeline,
     composite_pipeline: CompositePipeline,
+    circle_texture: Option<TextureHandle>,
+    circle_texture_size: u32,
     textures: HashMap<TextureHandle, TextureEntry>,
     light_uniform_write_offset: u64,
     next_texture_id: u32,
@@ -442,10 +469,16 @@ const SPRITE_VERTICES: [SpriteVertex; 6] = [
     },
 ];
 
-impl<'window> WgpuBackend<'window> {
-    fn new(window: &'window Window, vsync: bool) -> Result<Self> {
+impl WgpuBackend {
+    fn new(window: &Window, vsync: bool) -> Result<Self> {
         let instance = Instance::default();
         let surface = instance.create_surface(window)?;
+        let surface = unsafe {
+            // Safety: the window is owned by EngineContext and outlives the renderer.
+            // Renderer is dropped before the window (field order), so the surface
+            // never outlives its window.
+            std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(surface)
+        };
 
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -490,9 +523,8 @@ impl<'window> WgpuBackend<'window> {
         let shape_pipeline = create_shape_pipeline(&device, format);
         let light_pipeline = create_light_pipeline(&device, format);
         let composite_pipeline = create_composite_pipeline(&device, format);
-
         Ok(Self {
-            surface,
+            surface: Some(surface),
             device,
             queue,
             surface_config,
@@ -501,6 +533,63 @@ impl<'window> WgpuBackend<'window> {
             shape_pipeline,
             light_pipeline,
             composite_pipeline,
+            circle_texture: None,
+            circle_texture_size: 64,
+            textures: HashMap::new(),
+            next_texture_id: 1,
+            uniform_write_offset: 0,
+            light_uniform_write_offset: 0,
+            bind_group_cache: HashMap::new(),
+            text_renderer: TextRenderer::new(),
+        })
+    }
+
+    fn new_offscreen(width: u32, height: u32) -> Result<Self> {
+        let instance = Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))?;
+
+        let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
+            label: Some("forge2d-offscreen-device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            experimental_features: Default::default(),
+            memory_hints: Default::default(),
+            trace: wgpu::Trace::Off,
+        }))?;
+
+        let format = TextureFormat::Rgba8UnormSrgb;
+        let surface_config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: width.max(1),
+            height: height.max(1),
+            present_mode: PresentMode::Fifo,
+            alpha_mode: CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+
+        let sprite_pipeline = create_sprite_pipeline(&device, format);
+        let shape_pipeline = create_shape_pipeline(&device, format);
+        let light_pipeline = create_light_pipeline(&device, format);
+        let composite_pipeline = create_composite_pipeline(&device, format);
+
+        Ok(Self {
+            surface: None,
+            device,
+            queue,
+            surface_config,
+            present_mode: PresentMode::Fifo,
+            sprite_pipeline,
+            shape_pipeline,
+            light_pipeline,
+            composite_pipeline,
+            circle_texture: None,
+            circle_texture_size: 64,
             textures: HashMap::new(),
             next_texture_id: 1,
             uniform_write_offset: 0,
@@ -543,7 +632,9 @@ impl<'window> WgpuBackend<'window> {
         self.surface_config.width = new_size.width;
         self.surface_config.height = new_size.height;
         self.surface_config.present_mode = self.present_mode;
-        self.surface.configure(&self.device, &self.surface_config);
+        if let Some(surface) = self.surface.as_ref() {
+            surface.configure(&self.device, &self.surface_config);
+        }
     }
 
     fn begin_frame(&mut self) -> Result<Frame> {
@@ -553,91 +644,94 @@ impl<'window> WgpuBackend<'window> {
         // Clear bind group cache each frame (they're frame-specific)
         self.bind_group_cache.clear();
 
-        loop {
-            match self.surface.get_current_texture() {
-                Ok(surface_texture) => {
-                    let view = surface_texture
-                        .texture
-                        .create_view(&TextureViewDescriptor::default());
-                    let encoder = self
-                        .device
-                        .create_command_encoder(&CommandEncoderDescriptor {
-                            label: Some("frame-encoder"),
+        if let Some(surface) = self.surface.as_ref() {
+            loop {
+                match surface.get_current_texture() {
+                    Ok(surface_texture) => {
+                        let view = surface_texture
+                            .texture
+                            .create_view(&TextureViewDescriptor::default());
+                        let encoder = self
+                            .device
+                            .create_command_encoder(&CommandEncoderDescriptor {
+                                label: Some("frame-encoder"),
+                            });
+
+                        // Create render target textures for scene and light map
+                        let (width, height) =
+                            (self.surface_config.width, self.surface_config.height);
+                        let format = self.surface_config.format;
+                        let scene_texture = self.device.create_texture(&TextureDescriptor {
+                            label: Some("scene-texture"),
+                            size: Extent3d {
+                                width,
+                                height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format,
+                            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
                         });
+                        let scene_texture_view =
+                            scene_texture.create_view(&TextureViewDescriptor::default());
 
-                    // Create render target textures for scene and light map
-                    let (width, height) = (self.surface_config.width, self.surface_config.height);
-                    let format = self.surface_config.format;
-                    let scene_texture = self.device.create_texture(&TextureDescriptor {
-                        label: Some("scene-texture"),
-                        size: Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format,
-                        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    });
-                    let scene_texture_view =
-                        scene_texture.create_view(&TextureViewDescriptor::default());
+                        let light_map_texture = self.device.create_texture(&TextureDescriptor {
+                            label: Some("light-map-texture"),
+                            size: Extent3d {
+                                width,
+                                height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format,
+                            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        });
+                        let light_map_texture_view =
+                            light_map_texture.create_view(&TextureViewDescriptor::default());
 
-                    let light_map_texture = self.device.create_texture(&TextureDescriptor {
-                        label: Some("light-map-texture"),
-                        size: Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format,
-                        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    });
-                    let light_map_texture_view =
-                        light_map_texture.create_view(&TextureViewDescriptor::default());
+                        // Create occlusion texture (R8)
+                        let occlusion_texture = self.device.create_texture(&TextureDescriptor {
+                            label: Some("occlusion-texture"),
+                            size: Extent3d {
+                                width,
+                                height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format: TextureFormat::R8Unorm, // Single channel for occlusion mask
+                            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        });
+                        let occlusion_texture_view =
+                            occlusion_texture.create_view(&TextureViewDescriptor::default());
 
-                    // Create occlusion texture (R8)
-                    let occlusion_texture = self.device.create_texture(&TextureDescriptor {
-                        label: Some("occlusion-texture"),
-                        size: Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: TextureFormat::R8Unorm, // Single channel for occlusion mask
-                        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    });
-                    let occlusion_texture_view =
-                        occlusion_texture.create_view(&TextureViewDescriptor::default());
-
-                    return Ok(Frame {
-                        surface_texture: Some(surface_texture),
-                        view,
-                        encoder: Some(encoder),
-                        sprite_draws: Vec::new(),
-                        light_draws: Vec::new(),
-                        scene_texture: Some(scene_texture),
-                        scene_texture_view: Some(scene_texture_view),
-                        occlusion_texture: Some(occlusion_texture),
-                        occlusion_texture_view: Some(occlusion_texture_view),
-                        light_map_texture: Some(light_map_texture),
-                        light_map_texture_view: Some(light_map_texture_view),
-                        scene_cleared: false,
-                    });
-                }
-                Err(e) => match e {
+                        return Ok(Frame {
+                            surface_texture: Some(surface_texture),
+                            output_texture: None,
+                            view,
+                            encoder: Some(encoder),
+                            sprite_draws: Vec::new(),
+                            light_draws: Vec::new(),
+                            scene_texture: Some(scene_texture),
+                            scene_texture_view: Some(scene_texture_view),
+                            occlusion_texture: Some(occlusion_texture),
+                            occlusion_texture_view: Some(occlusion_texture_view),
+                            light_map_texture: Some(light_map_texture),
+                            light_map_texture_view: Some(light_map_texture_view),
+                            scene_cleared: false,
+                        });
+                    }
+                    Err(e) => match e {
                         wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated => {
-                            self.surface.configure(&self.device, &self.surface_config);
+                            surface.configure(&self.device, &self.surface_config);
                             continue;
                         }
                         wgpu::SurfaceError::Timeout => {
@@ -649,9 +743,97 @@ impl<'window> WgpuBackend<'window> {
                         wgpu::SurfaceError::Other => {
                             return Err(anyhow!("Surface error: Other"));
                         }
-                },
+                    },
+                }
             }
         }
+
+        let (width, height) = (self.surface_config.width, self.surface_config.height);
+        let format = self.surface_config.format;
+        let output_texture = self.device.create_texture(&TextureDescriptor {
+            label: Some("offscreen-output"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = output_texture.create_view(&TextureViewDescriptor::default());
+        let encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("offscreen-encoder"),
+            });
+
+        let scene_texture = self.device.create_texture(&TextureDescriptor {
+            label: Some("scene-texture"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let scene_texture_view = scene_texture.create_view(&TextureViewDescriptor::default());
+
+        let light_map_texture = self.device.create_texture(&TextureDescriptor {
+            label: Some("light-map-texture"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let light_map_texture_view = light_map_texture.create_view(&TextureViewDescriptor::default());
+
+        let occlusion_texture = self.device.create_texture(&TextureDescriptor {
+            label: Some("occlusion-texture"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R8Unorm,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let occlusion_texture_view = occlusion_texture.create_view(&TextureViewDescriptor::default());
+
+        Ok(Frame {
+            surface_texture: None,
+            output_texture: Some(output_texture),
+            view,
+            encoder: Some(encoder),
+            sprite_draws: Vec::new(),
+            light_draws: Vec::new(),
+            scene_texture: Some(scene_texture),
+            scene_texture_view: Some(scene_texture_view),
+            occlusion_texture: Some(occlusion_texture),
+            occlusion_texture_view: Some(occlusion_texture_view),
+            light_map_texture: Some(light_map_texture),
+            light_map_texture_view: Some(light_map_texture_view),
+            scene_cleared: false,
+        })
     }
 
     fn clear(&mut self, frame: &mut Frame, color: [f32; 4]) -> Result<()> {
@@ -1284,12 +1466,116 @@ impl<'window> WgpuBackend<'window> {
         drop(frame.light_map_texture.take());
         drop(frame.light_map_texture_view.take());
 
-        let surface_texture = frame
-            .surface_texture
+        if let Some(surface_texture) = frame.surface_texture.take() {
+            surface_texture.present();
+        }
+        Ok(())
+    }
+
+    fn end_frame_readback(&mut self, mut frame: Frame) -> Result<Vec<u8>> {
+        // Step 0: Clear scene texture if not already cleared (shapes may have cleared it)
+        if !frame.scene_cleared {
+            self.clear_scene_texture(&mut frame)?;
+            frame.scene_cleared = true;
+        }
+
+        self.flush_sprites(&mut frame)?;
+
+        if frame.light_draws.is_empty() {
+            self.clear_light_map_to_white(&mut frame)?;
+        } else {
+            self.flush_lights(&mut frame)?;
+        }
+
+        self.composite_scene_and_lights(&mut frame)?;
+
+        let output_texture = frame
+            .output_texture
+            .as_ref()
+            .ok_or_else(|| anyhow!("Offscreen output texture not available"))?;
+
+        let (width, height) = (self.surface_config.width, self.surface_config.height);
+        let bytes_per_pixel = 4u32;
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row =
+            ((unpadded_bytes_per_row + align - 1) / align) * align;
+        let buffer_size = padded_bytes_per_row as u64 * height as u64;
+
+        let output_buffer = self.device.create_buffer(&BufferDescriptor {
+            label: Some("offscreen-readback"),
+            size: buffer_size,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let encoder = frame
+            .encoder
+            .as_mut()
+            .ok_or_else(|| anyhow!("Frame already ended"))?;
+
+        encoder.copy_texture_to_buffer(
+            TexelCopyTextureInfo {
+                texture: output_texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyBufferInfo {
+                buffer: &output_buffer,
+                layout: TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let encoder = frame
+            .encoder
             .take()
             .ok_or_else(|| anyhow!("Frame already ended"))?;
-        surface_texture.present();
-        Ok(())
+        self.queue.submit(Some(encoder.finish()));
+
+        let buffer_slice = output_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.device
+            .poll(PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })?;
+        rx.recv()
+            .map_err(|_| anyhow!("Failed to read back render buffer"))?
+            .map_err(|e| anyhow!("Render buffer map error: {:?}", e))?;
+        let data = buffer_slice.get_mapped_range();
+
+        let mut rgba = vec![0u8; (unpadded_bytes_per_row * height) as usize];
+        for row in 0..height as usize {
+            let src_offset = row * padded_bytes_per_row as usize;
+            let dst_offset = row * unpadded_bytes_per_row as usize;
+            let src = &data[src_offset..src_offset + unpadded_bytes_per_row as usize];
+            rgba[dst_offset..dst_offset + unpadded_bytes_per_row as usize].copy_from_slice(src);
+        }
+
+        drop(data);
+        output_buffer.unmap();
+
+        drop(frame.scene_texture.take());
+        drop(frame.scene_texture_view.take());
+        drop(frame.occlusion_texture.take());
+        drop(frame.occlusion_texture_view.take());
+        drop(frame.light_map_texture.take());
+        drop(frame.light_map_texture_view.take());
+
+        Ok(rgba)
     }
 
     fn composite_scene_and_lights(&mut self, frame: &mut Frame) -> Result<()> {
@@ -1783,126 +2069,40 @@ impl<'window> WgpuBackend<'window> {
             return Ok(());
         }
 
-        // Generate circle vertices using triangle fan
-        const SEGMENTS: usize = 32;
-        let mut vertices = Vec::with_capacity((SEGMENTS + 2) * 3);
-        
-        // Center vertex
-        vertices.push(ShapeVertex {
-            position: [center.x, center.y],
-        });
-
-        // Generate circle points
-        for i in 0..=SEGMENTS {
-            let angle = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
-            vertices.push(ShapeVertex {
-                position: [
-                    center.x + radius * angle.cos(),
-                    center.y + radius * angle.sin(),
-                ],
-            });
-        }
-
-        // Create triangles (fan from center)
-        let mut triangles = Vec::with_capacity(SEGMENTS * 3);
-        for i in 0..SEGMENTS {
-            triangles.push(ShapeVertex {
-                position: vertices[0].position,
-            });
-            triangles.push(vertices[i + 1]);
-            triangles.push(vertices[i + 2]);
-        }
-
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("circle-vertices"),
-            contents: bytemuck::cast_slice(&triangles),
-            usage: BufferUsages::VERTEX,
-        });
-
-        // Create MVP matrix
-        let vp = camera.view_projection(self.surface_config.width, self.surface_config.height);
-        let mvp = vp.to_cols_array_2d();
-
-        let uniforms = ShapeUniforms {
-             mvp,
-             color,
-             is_occluder: 1.0, // Default to occluder
-             _pad: [0.0; 3],
-        };
-
-        // Write uniforms
-        self.queue.write_buffer(
-            &self.shape_pipeline.uniform_buffer,
-            0,
-            bytemuck::bytes_of(&uniforms),
+        let (handle, texture_size) = self.ensure_circle_texture()?;
+        let scale = Vec2::new(
+            (radius * 2.0) / texture_size as f32,
+            (radius * 2.0) / texture_size as f32,
         );
 
-        // Create bind group
-        let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
-            label: Some("shape-bind-group"),
-            layout: &self.shape_pipeline.bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &self.shape_pipeline.uniform_buffer,
-                    offset: 0,
-                    size: std::num::NonZeroU64::new(std::mem::size_of::<ShapeUniforms>() as u64),
-                }),
-            }],
-        });
+        let transform = Transform2D::new(center, scale, 0.0);
+        self.draw_texture_region(frame, handle, None, &transform, color, true, camera)
+    }
 
-        // Draw in a render pass to scene texture
-        let encoder = frame
-            .encoder
-            .as_mut()
-            .ok_or_else(|| anyhow!("Frame already ended"))?;
+    fn ensure_circle_texture(&mut self) -> Result<(TextureHandle, u32)> {
+        if let Some(handle) = self.circle_texture {
+            return Ok((handle, self.circle_texture_size));
+        }
 
-        let scene_view = frame
-            .scene_texture_view
-            .as_ref()
-            .ok_or_else(|| anyhow!("Scene texture view not available"))?;
-        
-        let occlusion_view = frame
-            .occlusion_texture_view
-            .as_ref()
-            .ok_or_else(|| anyhow!("Occlusion texture view not available"))?;
+        let size = self.circle_texture_size;
+        let radius = (size as f32) * 0.5 - 1.0;
+        let center = Vec2::new(radius + 1.0, radius + 1.0);
+        let mut data = Vec::with_capacity((size * size * 4) as usize);
 
-        let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("shape-pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: scene_view,
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Load, // Load existing scene content
-                    store: wgpu::StoreOp::Store,
-                },
-                depth_slice: None,
-            }),
-            Some(RenderPassColorAttachment {
-                view: occlusion_view,
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Load, // Load existing occlusion content
-                    store: wgpu::StoreOp::Store,
-                },
-                depth_slice: None,
-            })],
-            depth_stencil_attachment: None,
-            multiview_mask: None,
-            occlusion_query_set: None,
-            timestamp_writes: None,
-        });
+        for y in 0..size {
+            for x in 0..size {
+                let pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+                let dist = (pos - center).length();
+                let edge = radius - dist;
+                let alpha = (edge + 1.0).clamp(0.0, 1.0);
+                let a = (alpha * 255.0) as u8;
+                data.extend_from_slice(&[255, 255, 255, a]);
+            }
+        }
 
-        pass.set_pipeline(&self.shape_pipeline.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.draw(0..triangles.len() as u32, 0..1);
-
-        drop(pass);
-
-        Ok(())
+        let handle = self.load_texture_from_rgba(&data, size, size, false)?;
+        self.circle_texture = Some(handle);
+        Ok((handle, size))
     }
 
     /// Triangulate a polygon using ear clipping algorithm

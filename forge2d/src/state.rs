@@ -63,6 +63,7 @@ impl<'a> StateMachineLike for StateTransitionHelper<'a> {
 /// 
 /// States are drawn from bottom to top (oldest to newest).
 /// Only the top state receives update calls.
+/// Pending transitions are applied at the start of the next update.
 /// 
 /// # Example
 /// 
@@ -131,7 +132,7 @@ impl StateMachine {
     /// The new state will be entered and will receive updates.
     /// 
     /// # Note
-    /// State transitions are deferred until after the current update/draw cycle.
+    /// State transitions are applied at the start of the next update.
     pub fn push(&mut self, state: Box<dyn State>) {
         self.pending_push = Some(state);
     }
@@ -140,7 +141,7 @@ impl StateMachine {
     /// The previous state (if any) will resume receiving updates.
     /// 
     /// # Note
-    /// State transitions are deferred until after the current update/draw cycle.
+    /// State transitions are applied at the start of the next update.
     pub fn pop(&mut self) {
         self.pending_pop = true;
     }
@@ -149,7 +150,7 @@ impl StateMachine {
     /// Equivalent to `pop()` followed by `push()`.
     /// 
     /// # Note
-    /// State transitions are deferred until after the current update/draw cycle.
+    /// State transitions are applied at the start of the next update.
     pub fn replace(&mut self, state: Box<dyn State>) {
         self.pending_replace = Some(state);
     }
@@ -238,4 +239,3 @@ impl Default for StateMachine {
         Self::new()
     }
 }
-

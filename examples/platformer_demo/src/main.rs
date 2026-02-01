@@ -38,7 +38,7 @@ impl PlatformerDemo {
         physics.set_gravity(Vec2::new(0.0, 600.0)); // Platformer gravity
         
         Self {
-            camera: Camera2D::new(Vec2::new(0.0, 0.0)),
+            camera: Camera2D::default(),
             physics,
             world: forge2d::World::new(),
             player_entity: unsafe { std::mem::zeroed() }, // Will be set in init
@@ -111,6 +111,8 @@ impl PlatformerDemo {
 
 impl Game for PlatformerDemo {
     fn init(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+        self.camera = ctx.screen_camera();
+
         // Create textures first
         self.create_textures(&mut *ctx.renderer())?;
         
@@ -350,4 +352,3 @@ fn main() -> Result<()> {
         .with_vsync(true)
         .run(PlatformerDemo::new())
 }
-

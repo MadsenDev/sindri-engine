@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use anyhow::{anyhow, Result};
-use mlua::{Lua, UserData, UserDataMethods};
+use mlua::{Lua, UserData, UserDataMethods, Value};
 
-use crate::entities::{SpriteComponent, Transform};
+use crate::entities::{CameraComponent, SpriteComponent, Transform};
 use crate::render::AnimatedSprite;
 use crate::input::InputState;
 use crate::math::Vec2;
-use crate::physics::{PhysicsEvent, PhysicsWorld, RigidBodyType};
+use crate::physics::{ColliderShape, PhysicsEvent, PhysicsWorld, RigidBodyType};
 use crate::world::{EntityId, World};
 
 // Implement Lua conversion for Vec2
@@ -135,20 +135,51 @@ struct ScriptInstance {
     script_path: String,
     has_started: bool,
     last_loaded: Option<SystemTime>,
+    env: Option<mlua::RegistryKey>,
+    fns: ScriptFns,
+}
+
+#[derive(Default)]
+struct ScriptFns {
+    on_create: Option<mlua::RegistryKey>,
+    on_start: Option<mlua::RegistryKey>,
+    on_update: Option<mlua::RegistryKey>,
+    on_fixed_update: Option<mlua::RegistryKey>,
+    on_post_physics: Option<mlua::RegistryKey>,
+    on_draw: Option<mlua::RegistryKey>,
+    on_destroy: Option<mlua::RegistryKey>,
+    on_collision_enter: Option<mlua::RegistryKey>,
+    on_collision_exit: Option<mlua::RegistryKey>,
+    on_trigger_enter: Option<mlua::RegistryKey>,
+    on_trigger_exit: Option<mlua::RegistryKey>,
+}
+
+impl ScriptFns {
+    fn clear(&mut self, lua: &Lua) {
+        let keys = [
+            self.on_create.take(),
+            self.on_start.take(),
+            self.on_update.take(),
+            self.on_fixed_update.take(),
+            self.on_post_physics.take(),
+            self.on_draw.take(),
+            self.on_destroy.take(),
+            self.on_collision_enter.take(),
+            self.on_collision_exit.take(),
+            self.on_trigger_enter.take(),
+            self.on_trigger_exit.take(),
+        ];
+        for key in keys.into_iter().flatten() {
+            let _ = lua.remove_registry_value(key);
+        }
+    }
 }
 
 impl ScriptInstance {
-    fn new(
-        key: ScriptInstanceKey,
-        script_path: String,
-        params: &ScriptParams,
-        module: &ScriptModule,
-    ) -> Self {
-        Self {
-            key,
-            script_path,
-            has_started: false,
-            last_loaded: module.modified,
+    fn clear_registry(&mut self, lua: &Lua) {
+        self.fns.clear(lua);
+        if let Some(key) = self.env.take() {
+            let _ = lua.remove_registry_value(key);
         }
     }
 }
@@ -211,6 +242,36 @@ pub enum ScriptCommand {
         width: u32,
         height: u32,
         tile_id: u32,
+    },
+    SetCameraActive {
+        entity: EntityId,
+        active: bool,
+    },
+    SetCameraZoom {
+        entity: EntityId,
+        zoom: f32,
+    },
+    SetCameraOffset {
+        entity: EntityId,
+        offset: Vec2,
+    },
+    SetCameraBounds {
+        entity: EntityId,
+        min: Vec2,
+        max: Vec2,
+    },
+    ClearCameraBounds {
+        entity: EntityId,
+    },
+    ShakeCamera {
+        entity: EntityId,
+        intensity: f32,
+        duration: f32,
+    },
+    ZoomCamera {
+        entity: EntityId,
+        target: f32,
+        speed: f32,
     },
     Despawn {
         entity: EntityId,
@@ -288,6 +349,34 @@ impl ScriptCommandBuffer {
 
     pub fn fill_tilemap_rect(&mut self, entity: EntityId, x: u32, y: u32, width: u32, height: u32, tile_id: u32) {
         self.commands.push(ScriptCommand::FillTilemapRect { entity, x, y, width, height, tile_id });
+    }
+
+    pub fn set_camera_active(&mut self, entity: EntityId, active: bool) {
+        self.commands.push(ScriptCommand::SetCameraActive { entity, active });
+    }
+
+    pub fn set_camera_zoom(&mut self, entity: EntityId, zoom: f32) {
+        self.commands.push(ScriptCommand::SetCameraZoom { entity, zoom });
+    }
+
+    pub fn set_camera_offset(&mut self, entity: EntityId, offset: Vec2) {
+        self.commands.push(ScriptCommand::SetCameraOffset { entity, offset });
+    }
+
+    pub fn set_camera_bounds(&mut self, entity: EntityId, min: Vec2, max: Vec2) {
+        self.commands.push(ScriptCommand::SetCameraBounds { entity, min, max });
+    }
+
+    pub fn clear_camera_bounds(&mut self, entity: EntityId) {
+        self.commands.push(ScriptCommand::ClearCameraBounds { entity });
+    }
+
+    pub fn shake_camera(&mut self, entity: EntityId, intensity: f32, duration: f32) {
+        self.commands.push(ScriptCommand::ShakeCamera { entity, intensity, duration });
+    }
+
+    pub fn zoom_camera(&mut self, entity: EntityId, target: f32, speed: f32) {
+        self.commands.push(ScriptCommand::ZoomCamera { entity, target, speed });
     }
 
     pub fn spawn(&mut self, request: SpawnRequest) {
@@ -391,6 +480,43 @@ impl ScriptCommandBuffer {
                         tilemap_comp.tilemap.fill_rect(x, y, width, height, tile_id);
                     }
                 }
+                ScriptCommand::SetCameraActive { entity, active } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.active = active;
+                    }
+                }
+                ScriptCommand::SetCameraZoom { entity, zoom } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.camera.zoom = zoom;
+                        cam.camera.target_zoom = zoom;
+                        cam.camera.zoom_speed = 0.0;
+                    }
+                }
+                ScriptCommand::SetCameraOffset { entity, offset } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.camera.offset = offset;
+                    }
+                }
+                ScriptCommand::SetCameraBounds { entity, min, max } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.camera.bounds = Some((min, max));
+                    }
+                }
+                ScriptCommand::ClearCameraBounds { entity } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.camera.bounds = None;
+                    }
+                }
+                ScriptCommand::ShakeCamera { entity, intensity, duration } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.camera.shake(intensity, duration);
+                    }
+                }
+                ScriptCommand::ZoomCamera { entity, target, speed } => {
+                    if let Some(cam) = world.get_mut::<CameraComponent>(entity) {
+                        cam.camera.zoom_to(target, speed);
+                    }
+                }
                 ScriptCommand::Despawn { entity } => {
                     physics.remove_body(entity);
                     world.despawn(entity);
@@ -433,6 +559,7 @@ impl UserData for ScriptSelf {
         methods.add_method("world", |_, this, ()| {
             Ok(WorldFacet {
                 world: this.world,
+                physics: this.physics,
                 commands: Arc::clone(&this.commands),
             })
         });
@@ -475,6 +602,18 @@ impl UserData for ScriptSelf {
             let world = unsafe { &*this.world };
             if world.get::<AnimatedSprite>(this.entity).is_some() {
                 Ok(Some(AnimationFacet {
+                    entity: this.entity,
+                    world: this.world,
+                    commands: Arc::clone(&this.commands),
+                }))
+            } else {
+                Ok(None)
+            }
+        });
+        methods.add_method("camera", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            if world.get::<CameraComponent>(this.entity).is_some() {
+                Ok(Some(CameraFacet {
                     entity: this.entity,
                     world: this.world,
                     commands: Arc::clone(&this.commands),
@@ -604,6 +743,7 @@ impl UserData for InputFacet {
 #[derive(Clone)]
 pub struct WorldFacet {
     world: *const World,
+    physics: *const PhysicsWorld,
     commands: Arc<Mutex<ScriptCommandBuffer>>,
 }
 
@@ -617,6 +757,17 @@ impl UserData for WorldFacet {
             }
             Ok(None)
         });
+        methods.add_method("find_all_by_tag", |lua, this, tag: String| {
+            let table = lua.create_table()?;
+            let mut index = 1;
+            for (entity, t) in unsafe { &*this.world }.query::<ScriptTag>() {
+                if t.0 == tag {
+                    table.set(index, entity.to_u32() as i64)?;
+                    index += 1;
+                }
+            }
+            Ok(table)
+        });
         methods.add_method("despawn", |_, this, entity_raw: i64| {
             if entity_raw < 0 {
                 return Err(mlua::Error::RuntimeError("Entity id must be non-negative".to_string()));
@@ -629,6 +780,49 @@ impl UserData for WorldFacet {
                 commands.despawn(entity);
             }
             Ok(())
+        });
+        methods.add_method("tag_of", |_, this, entity_raw: i64| {
+            if entity_raw < 0 {
+                return Ok(None);
+            }
+            let entity = EntityId(entity_raw as u32);
+            Ok(unsafe { &*this.world }
+                .get::<ScriptTag>(entity)
+                .map(|tag| tag.0.clone()))
+        });
+        methods.add_method("position", |_, this, entity_raw: i64| {
+            if entity_raw < 0 {
+                return Ok(Vec2::ZERO);
+            }
+            let entity = EntityId(entity_raw as u32);
+            let physics = unsafe { &*this.physics };
+            if let Some(pos) = physics.body_position(entity) {
+                return Ok(pos);
+            }
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<Transform>(entity)
+                .map(|t| t.position)
+                .unwrap_or(Vec2::ZERO))
+        });
+        methods.add_method("collider_size", |_, this, entity_raw: i64| {
+            if entity_raw < 0 {
+                return Ok(Vec2::ZERO);
+            }
+            let entity = EntityId(entity_raw as u32);
+            let physics = unsafe { &*this.physics };
+            let colliders = physics.get_colliders(entity);
+            let Some((shape, _, _, _, _, _)) = colliders.first().cloned() else {
+                return Ok(Vec2::ZERO);
+            };
+            let size = match shape {
+                ColliderShape::Box { hx, hy } => Vec2::new(hx * 2.0, hy * 2.0),
+                ColliderShape::Circle { radius } => Vec2::new(radius * 2.0, radius * 2.0),
+                ColliderShape::CapsuleY { half_height, radius } => {
+                    Vec2::new(radius * 2.0, half_height * 2.0 + radius * 2.0)
+                }
+            };
+            Ok(size)
         });
         methods.add_method("spawn_dynamic", |_, this, (position, velocity): (Vec2, Vec2)| {
             if let Ok(mut commands) = this.commands.lock() {
@@ -744,6 +938,81 @@ impl UserData for SpriteFacet {
             let a: f64 = tint.get(4)?;
             if let Ok(mut commands) = this.commands.lock() {
                 commands.set_sprite_tint(this.entity, [r as f32, g as f32, b as f32, a as f32]);
+            }
+            Ok(())
+        });
+    }
+}
+
+#[derive(Clone)]
+pub struct CameraFacet {
+    entity: EntityId,
+    world: *const World,
+    commands: Arc<Mutex<ScriptCommandBuffer>>,
+}
+
+impl UserData for CameraFacet {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method("is_active", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<CameraComponent>(this.entity)
+                .map(|cam| cam.active)
+                .unwrap_or(false))
+        });
+        methods.add_method("set_active", |_, this, active: bool| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.set_camera_active(this.entity, active);
+            }
+            Ok(())
+        });
+        methods.add_method("zoom", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<CameraComponent>(this.entity)
+                .map(|cam| cam.camera.zoom)
+                .unwrap_or(1.0))
+        });
+        methods.add_method("set_zoom", |_, this, zoom: f64| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.set_camera_zoom(this.entity, zoom as f32);
+            }
+            Ok(())
+        });
+        methods.add_method("zoom_to", |_, this, (target, speed): (f64, f64)| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.zoom_camera(this.entity, target as f32, speed as f32);
+            }
+            Ok(())
+        });
+        methods.add_method("offset", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<CameraComponent>(this.entity)
+                .map(|cam| cam.camera.offset)
+                .unwrap_or(Vec2::ZERO))
+        });
+        methods.add_method("set_offset", |_, this, offset: Vec2| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.set_camera_offset(this.entity, offset);
+            }
+            Ok(())
+        });
+        methods.add_method("set_bounds", |_, this, (min, max): (Vec2, Vec2)| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.set_camera_bounds(this.entity, min, max);
+            }
+            Ok(())
+        });
+        methods.add_method("clear_bounds", |_, this, ()| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.clear_camera_bounds(this.entity);
+            }
+            Ok(())
+        });
+        methods.add_method("shake", |_, this, (intensity, duration): (f64, f64)| {
+            if let Ok(mut commands) = this.commands.lock() {
+                commands.shake_camera(this.entity, intensity as f32, duration as f32);
             }
             Ok(())
         });
@@ -979,6 +1248,29 @@ impl ScriptRuntime {
         Ok(())
     }
 
+    /// Drive `on_post_physics` for all scripts (run after physics step).
+    pub fn post_physics_update(
+        &mut self,
+        world: &mut World,
+        physics: &mut PhysicsWorld,
+        input: &InputState,
+        fixed_dt: f32,
+    ) -> Result<()> {
+        self.sync_instances(world, physics, input)?;
+        self.run_stage(
+            world,
+            physics,
+            input,
+            0.0,
+            fixed_dt,
+            ScriptStage::PostPhysics,
+        )?;
+        if let Ok(mut buffer) = self.command_buffer.lock() {
+            buffer.apply(world, physics);
+        }
+        Ok(())
+    }
+
     /// Dispatch physics collision/trigger events into script callbacks.
     pub fn handle_physics_events(
         &mut self,
@@ -1023,7 +1315,7 @@ impl ScriptRuntime {
             .collect();
 
         for key in key_filter {
-            if let Some(instance) = self.instances.get_mut(&key) {
+            if let Some(instance) = self.instances.get(&key) {
                 let ctx = ScriptSelf::new(
                     entity,
                     world,
@@ -1033,14 +1325,18 @@ impl ScriptRuntime {
                     0.0,
                     0.0,
                 );
-                let function_name = match (is_trigger, started) {
-                    (false, true) => "on_collision_enter",
-                    (false, false) => "on_collision_exit",
-                    (true, true) => "on_trigger_enter",
-                    (true, false) => "on_trigger_exit",
+                let fn_key = match (is_trigger, started) {
+                    (false, true) => &instance.fns.on_collision_enter,
+                    (false, false) => &instance.fns.on_collision_exit,
+                    (true, true) => &instance.fns.on_trigger_enter,
+                    (true, false) => &instance.fns.on_trigger_exit,
                 };
-                let globals = self.lua.globals();
-                self.call_script_fn(&globals, function_name, (ctx, other.to_u32() as i64))?;
+                self.call_script_fn(
+                    fn_key,
+                    (ctx, other.to_u32() as i64),
+                    "event",
+                    &instance.script_path,
+                )?;
             }
         }
 
@@ -1068,92 +1364,24 @@ impl ScriptRuntime {
                 self.load_module(&attachment.path)?;
                 let module_modified = self.modules[&attachment.path].modified;
 
-                if !self.instances.contains_key(&key) {
-                    let module = &self.modules[&attachment.path];
-                    // Set up params in globals for this script
-                    let globals = self.lua.globals();
-                    let params_table = self.lua.create_table()?;
-                    for (k, v) in &attachment.params.values {
-                        match v {
-                            ScriptValue::Number(n) => params_table.set(k.as_str(), *n)?,
-                            ScriptValue::Bool(b) => params_table.set(k.as_str(), *b)?,
-                            ScriptValue::Text(s) => params_table.set(k.as_str(), s.as_str())?,
-                            ScriptValue::Vec2(v) => params_table.set(k.as_str(), v.clone())?,
-                        }
-                    }
-                    globals.set("params", params_table)?;
-                    
-                    self.instances.insert(
-                        key,
-                        ScriptInstance::new(
-                            key,
-                            attachment.path.clone(),
-                            &attachment.params,
-                            module,
-                        ),
-                    );
-                }
-
-                let needs_reload = {
-                    let entry = self.instances.get(&key).expect("entry just inserted");
-                    self.hot_reload && module_modified != entry.last_loaded
+                let needs_reload = match self.instances.get(&key) {
+                    Some(entry) => self.hot_reload && module_modified != entry.last_loaded,
+                    None => false,
                 };
 
                 if needs_reload {
                     if let Some(mut instance) = self.instances.remove(&key) {
                         self.run_destroy(&mut instance, world, physics, input)?;
+                        instance.clear_registry(&self.lua);
                     }
-
-                    let module = &self.modules[&attachment.path];
-                    // Set up params in globals
-                    let globals = self.lua.globals();
-                    let params_table = self.lua.create_table()?;
-                    for (k, v) in &attachment.params.values {
-                        match v {
-                            ScriptValue::Number(n) => params_table.set(k.as_str(), *n)?,
-                            ScriptValue::Bool(b) => params_table.set(k.as_str(), *b)?,
-                            ScriptValue::Text(s) => params_table.set(k.as_str(), s.as_str())?,
-                            ScriptValue::Vec2(v) => params_table.set(k.as_str(), v.clone())?,
-                        }
-                    }
-                    globals.set("params", params_table)?;
-                    
-                    self.instances.insert(
-                        key,
-                        ScriptInstance::new(
-                            key,
-                            attachment.path.clone(),
-                            &attachment.params,
-                            module,
-                        ),
-                    );
                 }
 
-                if let Some(mut instance) = self.instances.remove(&key) {
+                if !self.instances.contains_key(&key) {
+                    let mut instance =
+                        self.create_instance(key, attachment, module_modified)?;
                     if !instance.has_started {
-                        // Execute the script to load functions into globals
-                        let module = &self.modules[&instance.script_path];
-                        eprintln!("[Script] Executing script for instance: {}", instance.script_path);
-                        let chunk = self.lua.load(&module.source).set_name(&instance.script_path);
-                        if let Err(e) = chunk.exec() {
-                            eprintln!("[Script] Error executing script {}: {}", instance.script_path, e);
-                            return Err(anyhow!("Failed to execute script: {}", e));
-                        }
-                        eprintln!("[Script] Script executed successfully");
-                        
-                        // Verify functions are in globals (drop the reference before mutable borrow)
-                        {
-                            let globals = self.lua.globals();
-                            if globals.get::<_, mlua::Function>("on_fixed_update").is_ok() {
-                                eprintln!("[Script] on_fixed_update found in globals");
-                            } else {
-                                eprintln!("[Script] WARNING: on_fixed_update NOT found in globals after execution!");
-                            }
-                        }
-                        
                         self.run_create_and_start(&mut instance, world, physics, input)?;
                     }
-
                     self.instances.insert(key, instance);
                 }
             }
@@ -1164,6 +1392,7 @@ impl ScriptRuntime {
             if !desired.contains(&key) {
                 if let Some(mut inst) = self.instances.remove(&key) {
                     self.run_destroy(&mut inst, world, physics, input)?;
+                    inst.clear_registry(&self.lua);
                 }
             }
         }
@@ -1181,15 +1410,6 @@ impl ScriptRuntime {
         stage: ScriptStage,
     ) -> Result<()> {
         for instance in self.instances.values() {
-            // Re-execute the script to ensure functions are in globals
-            // This is needed because functions might not persist between calls
-            let module = &self.modules[&instance.script_path];
-            let chunk = self.lua.load(&module.source).set_name(&instance.script_path);
-            if let Err(e) = chunk.exec() {
-                eprintln!("[Script] Error re-executing script {}: {}", instance.script_path, e);
-                continue;
-            }
-            
             let ctx = ScriptSelf::new(
                 instance.key.entity,
                 world,
@@ -1200,21 +1420,22 @@ impl ScriptRuntime {
                 fixed_dt,
             );
 
-            let (fn_name, include_dt) = match stage {
-                ScriptStage::Update => ("on_update", true),
-                ScriptStage::FixedUpdate => ("on_fixed_update", true),
-                ScriptStage::Draw => ("on_draw", false),
+            let (fn_key, include_dt) = match stage {
+                ScriptStage::Update => (&instance.fns.on_update, true),
+                ScriptStage::FixedUpdate => (&instance.fns.on_fixed_update, true),
+                ScriptStage::PostPhysics => (&instance.fns.on_post_physics, true),
+                ScriptStage::Draw => (&instance.fns.on_draw, false),
             };
 
-            let globals = self.lua.globals();
             if include_dt {
                 self.call_script_fn(
-                    &globals,
-                    fn_name,
+                    fn_key,
                     (ctx, if stage == ScriptStage::Update { dt } else { fixed_dt }),
+                    "stage",
+                    &instance.script_path,
                 )?;
             } else {
-                self.call_script_fn(&globals, fn_name, (ctx,))?;
+                self.call_script_fn(fn_key, (ctx,), "stage", &instance.script_path)?;
             }
         }
         Ok(())
@@ -1227,8 +1448,6 @@ impl ScriptRuntime {
         physics: &PhysicsWorld,
         input: &InputState,
     ) -> Result<()> {
-        // Script should already be executed in sync_instances
-        let globals = self.lua.globals();
         let ctx = ScriptSelf::new(
             instance.key.entity,
             world,
@@ -1239,13 +1458,18 @@ impl ScriptRuntime {
             0.0,
         );
 
-        // Check if functions exist before calling
-        if globals.get::<_, mlua::Function>("on_create").is_ok() {
-            self.call_script_fn(&globals, "on_create", (ctx.clone(),))?;
-        }
-        if globals.get::<_, mlua::Function>("on_start").is_ok() {
-            self.call_script_fn(&globals, "on_start", (ctx,))?;
-        }
+        self.call_script_fn(
+            &instance.fns.on_create,
+            (ctx.clone(),),
+            "on_create",
+            &instance.script_path,
+        )?;
+        self.call_script_fn(
+            &instance.fns.on_start,
+            (ctx,),
+            "on_start",
+            &instance.script_path,
+        )?;
 
         instance.has_started = true;
         Ok(())
@@ -1258,7 +1482,6 @@ impl ScriptRuntime {
         physics: &PhysicsWorld,
         input: &InputState,
     ) -> Result<()> {
-        let globals = self.lua.globals();
         let ctx = ScriptSelf::new(
             instance.key.entity,
             world,
@@ -1269,7 +1492,12 @@ impl ScriptRuntime {
             0.0,
         );
 
-        self.call_script_fn(&globals, "on_destroy", (ctx,))?;
+        self.call_script_fn(
+            &instance.fns.on_destroy,
+            (ctx,),
+            "on_destroy",
+            &instance.script_path,
+        )?;
 
         Ok(())
     }
@@ -1290,29 +1518,89 @@ impl ScriptRuntime {
 
     fn call_script_fn<'lua, A>(
         &'lua self,
-        globals: &mlua::Table<'lua>,
-        name: &str,
+        func_key: &Option<mlua::RegistryKey>,
         args: A,
+        label: &str,
+        script_path: &str,
     ) -> Result<()>
     where
         A: mlua::IntoLuaMulti<'lua>,
     {
-        match globals.get::<_, mlua::Function<'lua>>(name) {
-            Ok(func) => {
-                if let Err(e) = func.call::<_, ()>(args) {
-                    eprintln!("[Script] Error calling {}: {}", name, e);
-                    return Err(anyhow!("Lua error in {}: {}", name, e));
-                }
-                Ok(())
+        let Some(key) = func_key else {
+            return Ok(());
+        };
+        let func: mlua::Function = self.lua.registry_value(key)?;
+        if let Err(e) = func.call::<_, ()>(args) {
+            eprintln!("[Script] Error calling {}: {}", label, e);
+            return Err(anyhow!("Lua error in {label} ({script_path}): {e}"));
+        }
+        Ok(())
+    }
+
+    fn create_instance(
+        &mut self,
+        key: ScriptInstanceKey,
+        attachment: &ScriptAttachment,
+        module_modified: Option<SystemTime>,
+    ) -> Result<ScriptInstance> {
+        let module = &self.modules[&attachment.path];
+        let env = self.lua.create_table()?;
+        let globals = self.lua.globals();
+        let meta = self.lua.create_table()?;
+        meta.set("__index", globals)?;
+        env.set_metatable(Some(meta));
+
+        let params_table = self.lua.create_table()?;
+        for (k, v) in &attachment.params.values {
+            match v {
+                ScriptValue::Number(n) => params_table.set(k.as_str(), *n)?,
+                ScriptValue::Bool(b) => params_table.set(k.as_str(), *b)?,
+                ScriptValue::Text(s) => params_table.set(k.as_str(), s.as_str())?,
+                ScriptValue::Vec2(v) => params_table.set(k.as_str(), v.clone())?,
             }
-            Err(e) => {
-                // Function doesn't exist, which is OK for optional callbacks
-                // Only log if it's not a "key not found" type error
-                if !e.to_string().contains("bad argument") {
-                    // This is expected for optional callbacks, so we don't error
-                }
-                Ok(())
-            }
+        }
+        env.set("params", params_table)?;
+
+        let chunk = self.lua.load(&module.source).set_name(&attachment.path);
+        let chunk = chunk.set_environment(env.clone());
+        if let Err(e) = chunk.exec() {
+            return Err(anyhow!("Failed to execute script {}: {}", attachment.path, e));
+        }
+
+        let fns = ScriptFns {
+            on_create: self.capture_fn(&env, "on_create")?,
+            on_start: self.capture_fn(&env, "on_start")?,
+            on_update: self.capture_fn(&env, "on_update")?,
+            on_fixed_update: self.capture_fn(&env, "on_fixed_update")?,
+            on_post_physics: self.capture_fn(&env, "on_post_physics")?,
+            on_draw: self.capture_fn(&env, "on_draw")?,
+            on_destroy: self.capture_fn(&env, "on_destroy")?,
+            on_collision_enter: self.capture_fn(&env, "on_collision_enter")?,
+            on_collision_exit: self.capture_fn(&env, "on_collision_exit")?,
+            on_trigger_enter: self.capture_fn(&env, "on_trigger_enter")?,
+            on_trigger_exit: self.capture_fn(&env, "on_trigger_exit")?,
+        };
+
+        let env_key = self.lua.create_registry_value(env)?;
+        Ok(ScriptInstance {
+            key,
+            script_path: attachment.path.clone(),
+            has_started: false,
+            last_loaded: module_modified,
+            env: Some(env_key),
+            fns,
+        })
+    }
+
+    fn capture_fn(
+        &self,
+        env: &mlua::Table<'_>,
+        name: &str,
+    ) -> Result<Option<mlua::RegistryKey>> {
+        let value = env.get::<_, Value>(name)?;
+        match value {
+            Value::Function(func) => Ok(Some(self.lua.create_registry_value(func)?)),
+            _ => Ok(None),
         }
     }
 }
@@ -1321,6 +1609,7 @@ impl ScriptRuntime {
 enum ScriptStage {
     Update,
     FixedUpdate,
+    PostPhysics,
     Draw,
 }
 

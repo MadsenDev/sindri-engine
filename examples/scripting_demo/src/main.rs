@@ -52,7 +52,7 @@ impl ScriptingDemo {
             runtime: ScriptRuntime::new()?,
             world: World::new(),
             physics,
-            camera: Camera2D::new(Vec2::ZERO),
+            camera: Camera2D::default(),
             player: None,
             player_texture: None,
             platform_texture: None,
@@ -363,6 +363,7 @@ impl ScriptingDemo {
 
 impl Game for ScriptingDemo {
     fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
+        self.camera = ctx.screen_camera();
         self.create_textures(ctx.renderer())?;
         
         // Load a default font for HUD (using built-in font if available, or create a simple one)

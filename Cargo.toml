@@ -19,6 +19,9 @@ members = [
     "examples/scripting_demo",
     "examples/scripted_grid_demo",
     "examples/tilemap_editor_demo",
+    "examples/fireflies_demo",
+    "examples/solar_system_demo",
+    "examples/walljump_demo",
     "editor",
 ]
 resolver = "2"

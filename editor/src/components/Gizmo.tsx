@@ -7,6 +7,18 @@ interface TransformData {
   scale: [number, number];
 }
 
+interface TransformHierarchyData {
+  local_position: [number, number];
+  local_rotation: number;
+  local_scale: [number, number];
+  world_position: [number, number];
+  world_rotation: number;
+  world_scale: [number, number];
+  parent_world_position: [number, number];
+  parent_world_rotation: number;
+  parent_world_scale: [number, number];
+}
+
 import { Tool } from "./Toolbar";
 
 interface GizmoProps {
@@ -21,6 +33,13 @@ interface GizmoProps {
 
 type GizmoHandle = "x" | "y" | "rotate" | "scale" | null;
 
+const GRID_SNAP = 25;
+const ROTATE_SNAP_DEG = 15;
+const SCALE_SNAP = 0.1;
+
+const snapValue = (value: number, step: number) =>
+  Math.round(value / step) * step;
+
 export default function Gizmo({
   entityId,
   camera,
@@ -31,11 +50,11 @@ export default function Gizmo({
   onTransformUpdate,
 }: GizmoProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [transform, setTransform] = useState<TransformData | null>(null);
+  const [transform, setTransform] = useState<TransformHierarchyData | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragHandle, setDragHandle] = useState<GizmoHandle>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [dragStartTransform, setDragStartTransform] = useState<TransformData | null>(null);
+  const [dragStartTransform, setDragStartTransform] = useState<TransformHierarchyData | null>(null);
   const [dragAxisGrabOffset, setDragAxisGrabOffset] = useState(0);
 
   // Load transform when entity changes or when transform updates
@@ -46,7 +65,7 @@ export default function Gizmo({
     }
 
     const loadTransform = async () => {
-      const t = await invoke<TransformData | null>("transform_get", {
+      const t = await invoke<TransformHierarchyData | null>("transform_get_hierarchy", {
         entityId,
       });
       if (t) {
@@ -119,13 +138,16 @@ export default function Gizmo({
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const [screenX, screenY] = worldToScreen(transform.position[0], transform.position[1]);
+      const [screenX, screenY] = worldToScreen(
+        transform.world_position[0],
+        transform.world_position[1]
+      );
 
       ctx.save();
       ctx.translate(screenX, screenY);
       // Only rotate for rotate tool - move gizmo stays world-aligned
       if (tool === "rotate") {
-        ctx.rotate(transform.rotation);
+        ctx.rotate(transform.world_rotation);
       }
 
       const arrowLength = 40;
@@ -215,7 +237,10 @@ export default function Gizmo({
   const getHandleAt = (x: number, y: number): GizmoHandle | null => {
     if (!transform) return null;
 
-    const [screenX, screenY] = worldToScreen(transform.position[0], transform.position[1]);
+    const [screenX, screenY] = worldToScreen(
+      transform.world_position[0],
+      transform.world_position[1]
+    );
     const dx = x - screenX;
     const dy = y - screenY;
 
@@ -275,9 +300,9 @@ export default function Gizmo({
       // Calculate grab offset to prevent jumping
       const [wx, wy] = screenToWorld(x, y);
       if (handle === "x") {
-        setDragAxisGrabOffset(wx - transform.position[0]);
+        setDragAxisGrabOffset(wx - transform.world_position[0]);
       } else if (handle === "y") {
-        setDragAxisGrabOffset(wy - transform.position[1]);
+        setDragAxisGrabOffset(wy - transform.world_position[1]);
       } else {
         setDragAxisGrabOffset(0);
       }
@@ -295,36 +320,61 @@ export default function Gizmo({
 
     if (isDragging && dragHandle && dragStartTransform) {
       let newTransform = { ...dragStartTransform };
+      const parentWorldPos = dragStartTransform.parent_world_position;
+      const parentWorldRot = dragStartTransform.parent_world_rotation;
+      const parentWorldScale = dragStartTransform.parent_world_scale;
 
       if (tool === "move") {
         // Convert mouse position to world space
         const [wx, wy] = screenToWorld(x, y);
+        let newWorldX = dragStartTransform.world_position[0];
+        let newWorldY = dragStartTransform.world_position[1];
         
         if (dragHandle === "x") {
           // Use grab offset to prevent jumping
-          newTransform.position[0] = wx - dragAxisGrabOffset;
-          // Keep Y unchanged
-          newTransform.position[1] = dragStartTransform.position[1];
+          newWorldX = wx - dragAxisGrabOffset;
+          if (e.shiftKey) {
+            newWorldX = snapValue(newWorldX, GRID_SNAP);
+          }
+          newWorldY = dragStartTransform.world_position[1];
         } else if (dragHandle === "y") {
           // Use grab offset to prevent jumping
-          newTransform.position[1] = wy - dragAxisGrabOffset;
-          // Keep X unchanged
-          newTransform.position[0] = dragStartTransform.position[0];
+          newWorldY = wy - dragAxisGrabOffset;
+          if (e.shiftKey) {
+            newWorldY = snapValue(newWorldY, GRID_SNAP);
+          }
+          newWorldX = dragStartTransform.world_position[0];
         }
+
+        newTransform.world_position = [newWorldX, newWorldY];
+        newTransform.local_position = [
+          newWorldX - parentWorldPos[0],
+          newWorldY - parentWorldPos[1],
+        ];
       } else if (tool === "rotate" && dragHandle === "rotate") {
         // Rotate around entity center
         const [entityScreenX, entityScreenY] = worldToScreen(
-          dragStartTransform.position[0],
-          dragStartTransform.position[1]
+          dragStartTransform.world_position[0],
+          dragStartTransform.world_position[1]
         );
         const startAngle = Math.atan2(dragStart.y - entityScreenY, dragStart.x - entityScreenX);
         const currentAngle = Math.atan2(y - entityScreenY, x - entityScreenX);
-        newTransform.rotation = dragStartTransform.rotation + (currentAngle - startAngle);
+        let worldRotation =
+          dragStartTransform.world_rotation + (currentAngle - startAngle);
+        if (e.shiftKey) {
+          const snapRad = (ROTATE_SNAP_DEG * Math.PI) / 180;
+          worldRotation = snapValue(worldRotation, snapRad);
+        }
+        newTransform.world_rotation = worldRotation;
+        newTransform.local_rotation = worldRotation - parentWorldRot;
       } else if (tool === "scale" && dragHandle === "scale") {
         // Scale: make the scale handle follow the cursor
         // Convert mouse position to world space
         const [currentWorldX, currentWorldY] = screenToWorld(x, y);
-        const [entityWorldX, entityWorldY] = [dragStartTransform.position[0], dragStartTransform.position[1]];
+        const [entityWorldX, entityWorldY] = [
+          dragStartTransform.world_position[0],
+          dragStartTransform.world_position[1],
+        ];
         
         // Calculate distance from entity center to cursor in world space
         const currentDist = Math.sqrt(
@@ -344,11 +394,26 @@ export default function Gizmo({
         // Scale factor based on distance change
         if (startDist > 0.001) { // Use small epsilon instead of 0
           const scaleFactor = currentDist / startDist;
-          newTransform.scale[0] = dragStartTransform.scale[0] * scaleFactor;
-          newTransform.scale[1] = dragStartTransform.scale[1] * scaleFactor;
+          let worldScaleX = dragStartTransform.world_scale[0] * scaleFactor;
+          let worldScaleY = dragStartTransform.world_scale[1] * scaleFactor;
+          if (e.shiftKey) {
+            worldScaleX = Math.max(
+              SCALE_SNAP,
+              snapValue(worldScaleX, SCALE_SNAP)
+            );
+            worldScaleY = Math.max(
+              SCALE_SNAP,
+              snapValue(worldScaleY, SCALE_SNAP)
+            );
+          }
+          newTransform.world_scale = [worldScaleX, worldScaleY];
+          newTransform.local_scale = [
+            worldScaleX / Math.max(parentWorldScale[0], 0.0001),
+            worldScaleY / Math.max(parentWorldScale[1], 0.0001),
+          ];
         } else {
           // If startDist is too small, keep original scale
-          newTransform.scale = [...dragStartTransform.scale];
+          newTransform.local_scale = [...dragStartTransform.local_scale];
         }
       }
 
@@ -357,14 +422,18 @@ export default function Gizmo({
         console.log("Sending transform_set", { entityId, position: newTransform.position, rotation: newTransform.rotation, scale: newTransform.scale });
         await invoke("transform_set", {
           entityId,
-          position: newTransform.position,
-          rotation: newTransform.rotation,
-          scale: newTransform.scale,
+          position: newTransform.local_position,
+          rotation: newTransform.local_rotation,
+          scale: newTransform.local_scale,
         });
         setTransform(newTransform);
         // Update viewport cache immediately for smooth rendering
         if (onTransformUpdate) {
-          onTransformUpdate(newTransform);
+          onTransformUpdate({
+            position: newTransform.world_position,
+            rotation: newTransform.world_rotation,
+            scale: newTransform.world_scale,
+          });
         }
       } catch (error) {
         console.error("Failed to update transform:", error);
@@ -424,4 +493,3 @@ export default function Gizmo({
     />
   );
 }
-

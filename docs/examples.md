@@ -124,6 +124,12 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 }
 ```
 
+## Highlighted Examples
+
+- `fireflies_demo` — fixed-step swarm with interpolation, mouse attract/repel, and `ctx.draw()` usage.
+- `solar_system_demo` — orbital system with zoom controls, center dragging, and fixed-step interpolation.
+- `walljump_demo` — physics-driven platformer with wall jumps, camera follow, and reset key.
+
 ### Collision Detection
 
 ```rust
@@ -449,4 +455,3 @@ Performance benchmark:
 ```bash
 cargo run -p performance_demo
 ```
-

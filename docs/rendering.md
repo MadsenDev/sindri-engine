@@ -173,7 +173,7 @@ fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
 
 ### Pre-rasterizing Glyphs
 
-**Important:** You must rasterize glyphs before drawing text:
+Pre-rasterizing is optional; the default text backend caches glyphs automatically.
 
 ```rust
 // Rasterize all glyphs needed for a text string
@@ -196,7 +196,7 @@ renderer.draw_text(
 
 ### Text Rendering Notes
 
-- Glyphs are cached automatically - re-rasterize only when the text string changes
+- Glyphs are cached automatically - pre-rasterize only if you want to warm the cache
 - Position is the bottom-left corner of the first character
 - Text is rendered as sprites (one sprite per glyph)
 

@@ -26,6 +26,34 @@ if ctx.audio().is_available() {
 }
 ```
 
+### Preload and Reuse (Recommended)
+
+```rust
+struct MyGame {
+    jump_sound: Option<forge2d::SoundHandle>,
+}
+
+impl Game for MyGame {
+    fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
+        if ctx.audio().is_available() {
+            self.jump_sound = Some(
+                ctx.audio().load_sound("assets/jump.wav")?
+            );
+        }
+        Ok(())
+    }
+
+    fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
+        if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+            if let Some(handle) = self.jump_sound {
+                ctx.audio().play_sound_handle(handle)?;
+            }
+        }
+        Ok(())
+    }
+}
+```
+
 ### Supported Formats
 
 The audio system supports formats supported by `rodio`:
@@ -58,6 +86,9 @@ ctx.audio().stop_music();
 
 - **`is_available() -> bool`** - Check if audio system is available
 - **`play_sound_from_bytes(bytes: &[u8]) -> Result<()>`** - Play sound effect from bytes
+- **`load_sound(path: impl AsRef<Path>) -> Result<SoundHandle>`** - Preload a sound effect from disk
+- **`load_sound_from_bytes(key: &str, bytes: &[u8]) -> Result<SoundHandle>`** - Preload a sound effect from bytes
+- **`play_sound_handle(handle: SoundHandle) -> Result<()>`** - Play a preloaded sound effect
 - **`play_music_loop_from_bytes(bytes: &[u8]) -> Result<()>`** - Play looping background music
 - **`stop_music()`** - Stop currently playing music
 
@@ -106,4 +137,3 @@ Potential future additions to the audio system:
 - Sound effect pooling
 - 3D positional audio
 - Audio streaming for large files
-

@@ -36,11 +36,34 @@ impl Game for MyGame {
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Called every frame (variable timestep)
         // Use for input, UI, interpolation, etc.
-        
-        // Interpolate visual positions
+        Ok(())
+    }
+}
+```
+
+## Canonical Interpolation Recipe
+
+```rust
+struct MyGame {
+    pos: Vec2,
+    prev_pos: Vec2,
+}
+
+impl Game for MyGame {
+    fn fixed_update(&mut self, ctx: &mut EngineContext) -> Result<()> {
+        let dt = ctx.fixed_delta_seconds();
+        self.prev_pos = self.pos;
+        self.pos += Vec2::new(1.0, 0.0) * dt;
+        Ok(())
+    }
+
+    fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
         let alpha = ctx.fixed_update_alpha();
-        interpolate_positions(alpha);
-        
+        let render_pos = self.prev_pos.lerp(self.pos, alpha);
+        ctx.draw(|_renderer, _frame| {
+            // draw sprite at render_pos
+            Ok(())
+        })?;
         Ok(())
     }
 }
@@ -56,7 +79,7 @@ if ctx.should_run_fixed_update() {
 }
 ```
 
-Returns `true` when a fixed update should run. The engine may call `fixed_update()` multiple times per frame if needed to catch up.
+Returns `true` when a fixed update should run. Most games should not call this directly because the engine already drives `fixed_update()`. Use it only for custom loops or tooling.
 
 ### fixed_delta_time()
 
@@ -165,16 +188,15 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 struct MyGame {
     // Fixed timestep state
     position: Vec2,
+    previous_position: Vec2,
     velocity: Vec2,
-    
-    // Visual state (for interpolation)
-    visual_position: Vec2,
 }
 
 impl Game for MyGame {
     fn fixed_update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         let fixed_dt = ctx.fixed_delta_time().as_secs_f32();
-        
+        self.previous_position = self.position;
+
         // Update physics
         self.velocity += acceleration * fixed_dt;
         self.position += self.velocity * fixed_dt;
@@ -186,19 +208,15 @@ impl Game for MyGame {
     }
     
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        // Interpolate visual position
-        let alpha = ctx.fixed_update_alpha();
-        self.visual_position = self.last_position.lerp(self.position, alpha);
-        
         Ok(())
     }
     
     fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Draw using interpolated visual position
-        sprite.transform.position = self.visual_position;
-        // ... render ...
+        let alpha = ctx.fixed_update_alpha();
+        let visual_position = self.previous_position.lerp(self.position, alpha);
+        // ... render using visual_position ...
         Ok(())
     }
 }
 ```
-

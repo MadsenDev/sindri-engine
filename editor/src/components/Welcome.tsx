@@ -67,7 +67,7 @@ export default function Welcome({ onProjectOpen }: WelcomeProps) {
   };
 
   return (
-    <div className="flex items-center justify-center h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+    <div className="flex items-center justify-center h-full w-full bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       <div className="bg-gray-800 rounded-lg shadow-2xl p-8 w-full max-w-2xl border border-gray-700">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">Forge2D Editor</h1>

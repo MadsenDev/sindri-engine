@@ -4,11 +4,9 @@ import Splitter from "./Splitter";
 interface SplitterOverlayProps {
   gridRef: React.RefObject<HTMLDivElement>;
   sceneRef: React.RefObject<HTMLDivElement>;
-  gameRef: React.RefObject<HTMLDivElement>;
   hierarchyRef: React.RefObject<HTMLDivElement>;
   projectRef: React.RefObject<HTMLDivElement>;
   inspectorRef: React.RefObject<HTMLDivElement>;
-  onResizeVertical: (delta: number) => void;
   onResizeHorizontal1: (delta: number) => void;
   onResizeHorizontal2: (delta: number) => void;
   onResizeHorizontal3: (delta: number) => void;
@@ -17,22 +15,18 @@ interface SplitterOverlayProps {
 export default function SplitterOverlay({
   gridRef,
   sceneRef,
-  gameRef,
   hierarchyRef,
   projectRef,
   inspectorRef,
-  onResizeVertical,
   onResizeHorizontal1,
   onResizeHorizontal2,
   onResizeHorizontal3,
 }: SplitterOverlayProps) {
   const [positions, setPositions] = useState<{
-    vertical: { left: number; top: number; width: number; height: number } | null;
     horizontal1: { left: number; top: number; width: number; height: number } | null;
     horizontal2: { left: number; top: number; width: number; height: number } | null;
     horizontal3: { left: number; top: number; width: number; height: number } | null;
   }>({
-    vertical: null,
     horizontal1: null,
     horizontal2: null,
     horizontal3: null,
@@ -40,7 +34,7 @@ export default function SplitterOverlay({
 
   useEffect(() => {
     const updatePositions = () => {
-      if (!gridRef.current || !sceneRef.current || !gameRef.current || !hierarchyRef.current || !projectRef.current || !inspectorRef.current) {
+      if (!gridRef.current || !sceneRef.current || !hierarchyRef.current || !projectRef.current || !inspectorRef.current) {
         return;
       }
 
@@ -48,12 +42,6 @@ export default function SplitterOverlay({
       const sceneRect = sceneRef.current.getBoundingClientRect();
       const hierarchyRect = hierarchyRef.current.getBoundingClientRect();
       const projectRect = projectRef.current.getBoundingClientRect();
-
-      // Vertical splitter between Scene and Game (at the bottom of Scene, top of Game)
-      const verticalLeft = 0;
-      const verticalTop = sceneRect.bottom - gridRect.top;
-      const verticalWidth = sceneRect.width;
-      const verticalHeight = 8;
 
       // Horizontal splitter 1: between Scene/Game and Hierarchy
       const horizontal1Left = sceneRect.right - gridRect.left;
@@ -74,12 +62,6 @@ export default function SplitterOverlay({
       const horizontal3Height = gridRect.height;
 
       setPositions({
-        vertical: {
-          left: verticalLeft,
-          top: verticalTop - 4,
-          width: verticalWidth,
-          height: verticalHeight,
-        },
         horizontal1: {
           left: horizontal1Left - 4,
           top: horizontal1Top,
@@ -109,28 +91,14 @@ export default function SplitterOverlay({
       window.removeEventListener("resize", updatePositions);
       clearInterval(interval);
     };
-  }, [gridRef, sceneRef, gameRef, hierarchyRef, projectRef, inspectorRef]);
+  }, [gridRef, sceneRef, hierarchyRef, projectRef, inspectorRef]);
 
-  if (!positions.vertical || !positions.horizontal1 || !positions.horizontal2 || !positions.horizontal3) {
+  if (!positions.horizontal1 || !positions.horizontal2 || !positions.horizontal3) {
     return null;
   }
 
   return (
     <>
-      {/* Vertical splitter between Scene and Game */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${positions.vertical.left}px`,
-          top: `${positions.vertical.top}px`,
-          width: `${positions.vertical.width}px`,
-          height: `${positions.vertical.height}px`,
-          zIndex: 1000,
-        }}
-      >
-        <Splitter direction="vertical" onResize={onResizeVertical} />
-      </div>
-
       {/* Horizontal splitter 1: Scene/Game <-> Hierarchy */}
       <div
         style={{

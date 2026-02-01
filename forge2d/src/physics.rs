@@ -204,6 +204,7 @@ impl PhysicsWorld {
             .friction(friction)
             .restitution(restitution)
             .sensor(false) // Explicitly ensure it's NOT a sensor (ChatGPT's fix)
+            .active_events(ActiveEvents::COLLISION_EVENTS)
             .build();
 
         self.colliders

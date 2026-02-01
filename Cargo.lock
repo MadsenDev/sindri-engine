@@ -1383,6 +1383,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
+name = "fireflies_demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fastrand",
+ "forge2d",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5012,6 +5021,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "solar_system_demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fastrand",
+ "forge2d",
+]
+
+[[package]]
 name = "soup3"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6184,6 +6202,14 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
+]
+
+[[package]]
+name = "walljump_demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "forge2d",
 ]
 
 [[package]]

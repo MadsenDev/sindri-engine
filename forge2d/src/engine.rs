@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use winit::{
@@ -18,6 +21,7 @@ pub struct EngineConfig {
     pub width: u32,
     pub height: u32,
     pub vsync: bool,
+    pub asset_root: Option<PathBuf>,
 }
 
 impl Default for EngineConfig {
@@ -27,6 +31,7 @@ impl Default for EngineConfig {
             width: 1280,
             height: 720,
             vsync: true,
+            asset_root: None,
         }
     }
 }
@@ -66,6 +71,13 @@ impl Engine {
         self
     }
 
+    /// Set a base path for asset loading.
+    #[must_use]
+    pub fn with_asset_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.config.asset_root = Some(root.into());
+        self
+    }
+
     /// Run the provided game until the window is closed or the game requests exit.
     pub fn run<G: Game + 'static>(self, mut game: G) -> Result<()> {
         let config = self.config;
@@ -76,19 +88,12 @@ impl Engine {
         window_attributes.inner_size = Some(LogicalSize::new(config.width, config.height).into());
         let window = event_loop.create_window(window_attributes)?;
 
-        // Leak the window to get a 'static reference
-        // This is safe because the window lives for the entire program duration
-        let window: &'static Window = Box::leak(Box::new(window));
-
         let mut ctx = EngineContext::new(window, &config)?;
         game.init(&mut ctx)?;
 
         let mut last_frame = Instant::now();
         event_loop.run(move |event, elwt| {
             match event {
-                Event::NewEvents(_) => {
-                    ctx.begin_frame();
-                }
                 Event::WindowEvent { event, .. } => {
                     ctx.handle_window_event(&event);
 
@@ -125,6 +130,15 @@ impl Engine {
                     let now = Instant::now();
                     ctx.update_time(now - last_frame);
                     last_frame = now;
+                    ctx.begin_frame();
+
+                    while ctx.should_run_fixed_update() {
+                        if let Err(err) = game.fixed_update(&mut ctx) {
+                            eprintln!("Encountered error during fixed update: {err:?}");
+                            elwt.exit();
+                            return;
+                        }
+                    }
 
                     if let Err(err) = game.update(&mut ctx) {
                         eprintln!("Encountered error during update: {err:?}");
@@ -137,7 +151,7 @@ impl Engine {
                         return;
                     }
 
-                    ctx.window.request_redraw();
+                    ctx.window().request_redraw();
                 }
                 _ => {}
             }
@@ -156,34 +170,37 @@ fn is_escape_pressed(event: &KeyEvent) -> bool {
 }
 
 /// Shared context provided to game code each frame.
-pub struct EngineContext<'window> {
-    window: &'window winit::window::Window,
+pub struct EngineContext {
+    // Renderer must be dropped before window to keep the wgpu surface valid.
+    renderer: Renderer,
+    window: winit::window::Window,
+    asset_root: Option<PathBuf>,
     delta_time: Duration,
     elapsed_time: Duration,
     fixed_delta_time: Duration,
     fixed_time_accumulator: Duration,
     exit_requested: bool,
     input: InputState,
-    renderer: Renderer<'window>,
     assets: AssetManager,
     audio: AudioSystem,
 }
 
-impl<'window> EngineContext<'window> {
-    fn new(window: &'window winit::window::Window, config: &EngineConfig) -> Result<Self> {
-        let renderer = Renderer::new(window, config.vsync)?;
+impl EngineContext {
+    fn new(window: winit::window::Window, config: &EngineConfig) -> Result<Self> {
+        let renderer = Renderer::new(&window, config.vsync)?;
         // Audio initialization is graceful - engine continues even if audio fails
         let audio = AudioSystem::new()?;
 
         Ok(Self {
+            renderer,
             window,
+            asset_root: config.asset_root.clone(),
             delta_time: Duration::ZERO,
             elapsed_time: Duration::ZERO,
             fixed_delta_time: Duration::from_secs_f64(1.0 / 60.0), // 60 FPS fixed timestep
             fixed_time_accumulator: Duration::ZERO,
             exit_requested: false,
             input: InputState::new(),
-            renderer,
             assets: AssetManager::new(),
             audio,
         })
@@ -194,10 +211,12 @@ impl<'window> EngineContext<'window> {
     }
 
     fn update_time(&mut self, delta: Duration) {
-        self.delta_time = delta;
-        self.elapsed_time += delta;
+        let max_delta = Duration::from_millis(250);
+        let clamped = if delta > max_delta { max_delta } else { delta };
+        self.delta_time = clamped;
+        self.elapsed_time += clamped;
         // Accumulate time for fixed timestep
-        self.fixed_time_accumulator += delta;
+        self.fixed_time_accumulator += clamped;
     }
 
     fn handle_window_event(&mut self, event: &WindowEvent) {
@@ -222,6 +241,11 @@ impl<'window> EngineContext<'window> {
         self.delta_time
     }
 
+    /// Duration between the current and previous frames, in seconds.
+    pub fn delta_seconds(&self) -> f32 {
+        self.delta_time.as_secs_f32()
+    }
+
     /// Total time elapsed since the engine started running.
     pub fn elapsed_time(&self) -> Duration {
         self.elapsed_time
@@ -232,10 +256,17 @@ impl<'window> EngineContext<'window> {
         self.fixed_delta_time
     }
 
+    /// Fixed timestep duration, in seconds.
+    pub fn fixed_delta_seconds(&self) -> f32 {
+        self.fixed_delta_time.as_secs_f32()
+    }
+
     /// Check if a fixed timestep update should run and consume accumulated time.
     ///
     /// Returns `true` if enough time has accumulated for a fixed update.
     /// Call this in a loop until it returns `false` to handle multiple fixed updates per frame.
+    /// The engine now drives fixed updates automatically via `Game::fixed_update()`,
+    /// but this remains available for custom loops or tooling.
     ///
     /// Example:
     /// ```rust,no_run
@@ -274,6 +305,18 @@ impl<'window> EngineContext<'window> {
         &self.window
     }
 
+    /// Create a camera centered on the current window size.
+    ///
+    /// This sets the camera position so the top-left of world space is (0, 0)
+    /// when your world coordinates are screen-sized.
+    pub fn screen_camera(&self) -> crate::math::Camera2D {
+        let (width, height) = self.renderer.surface_size();
+        crate::math::Camera2D::new(crate::math::Vec2::new(
+            width as f32 * 0.5,
+            height as f32 * 0.5,
+        ))
+    }
+
     /// Access the current input state.
     pub fn input(&self) -> &InputState {
         &self.input
@@ -285,8 +328,19 @@ impl<'window> EngineContext<'window> {
     }
 
     /// Access the renderer for drawing operations.
-    pub fn renderer(&mut self) -> &mut Renderer<'window> {
+    pub fn renderer(&mut self) -> &mut Renderer {
         &mut self.renderer
+    }
+
+    /// Run a render pass with an auto-managed frame.
+    pub fn draw<F>(&mut self, draw_fn: F) -> Result<()>
+    where
+        F: FnOnce(&mut Renderer, &mut crate::render::Frame) -> Result<()>,
+    {
+        let mut frame = self.renderer.begin_frame()?;
+        draw_fn(&mut self.renderer, &mut frame)?;
+        self.renderer.end_frame(frame)?;
+        Ok(())
     }
 
     /// Access the asset manager for loading and caching assets.
@@ -294,12 +348,19 @@ impl<'window> EngineContext<'window> {
         &mut self.assets
     }
 
+    /// Run a scoped asset operation to keep borrows short and predictable.
+    pub fn with_assets<R>(&mut self, f: impl FnOnce(&mut AssetManager) -> R) -> R {
+        f(&mut self.assets)
+    }
+
     /// Load a texture using the asset manager (convenience method).
     ///
     /// This is equivalent to `ctx.assets().load_texture(ctx.renderer(), path)`
     /// but avoids borrowing issues.
     pub fn load_texture(&mut self, path: &str) -> Result<crate::render::TextureHandle> {
-        self.assets.load_texture(&mut self.renderer, path)
+        let resolved = self.resolve_asset_path(path);
+        let path = resolved.to_string_lossy().to_string();
+        self.assets.load_texture(&mut self.renderer, &path)
     }
 
     /// Load a texture from bytes using the asset manager (convenience method).
@@ -323,6 +384,18 @@ impl<'window> EngineContext<'window> {
     ) -> Result<crate::render::FontHandle> {
         self.assets
             .load_font_from_bytes(&mut self.renderer, key, bytes)
+    }
+
+    /// Load a font from a file path using the asset manager (convenience method).
+    pub fn load_font(&mut self, path: &str) -> Result<crate::render::FontHandle> {
+        let resolved = self.resolve_asset_path(path);
+        let path = resolved.to_string_lossy().to_string();
+        self.assets.load_font_from_file(&mut self.renderer, &path)
+    }
+
+    /// Get a cached texture handle by key, if it exists.
+    pub fn get_texture(&self, key: &str) -> Option<crate::render::TextureHandle> {
+        self.assets.get_texture(key)
     }
 
     /// Get a cached font handle by key, if it exists.
@@ -356,26 +429,41 @@ impl<'window> EngineContext<'window> {
     pub fn audio(&mut self) -> &mut AudioSystem {
         &mut self.audio
     }
+
+    fn resolve_asset_path(&self, path: &str) -> PathBuf {
+        let path = Path::new(path);
+        if let Some(root) = &self.asset_root {
+            if path.is_relative() {
+                return root.join(path);
+            }
+        }
+        path.to_path_buf()
+    }
 }
 
 /// Trait implemented by user code to hook into the engine lifecycle.
 pub trait Game {
     /// Called once after the window is created but before the first frame.
-    fn init(&mut self, _ctx: &mut EngineContext<'_>) -> Result<()> {
+    fn init(&mut self, _ctx: &mut EngineContext) -> Result<()> {
+        Ok(())
+    }
+
+    /// Update game state using a fixed timestep. Called zero or more times per frame.
+    fn fixed_update(&mut self, _ctx: &mut EngineContext) -> Result<()> {
         Ok(())
     }
 
     /// Update game state. Called once per frame before drawing.
-    fn update(&mut self, ctx: &mut EngineContext<'_>) -> Result<()>;
+    fn update(&mut self, ctx: &mut EngineContext) -> Result<()>;
 
     /// Draw the current frame. Called after update when a redraw is requested.
-    fn draw(&mut self, ctx: &mut EngineContext<'_>) -> Result<()>;
+    fn draw(&mut self, ctx: &mut EngineContext) -> Result<()>;
 }
 
 /// Adapter to use StateMachine as a Game.
 /// This allows StateMachine to be used directly with Engine::run().
 impl Game for crate::state::StateMachine {
-    fn init(&mut self, ctx: &mut EngineContext<'_>) -> Result<()> {
+    fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Call on_enter for the initial state (if any)
         self.init_top_state(ctx)?;
         // Apply any initial state transitions
@@ -383,7 +471,7 @@ impl Game for crate::state::StateMachine {
         Ok(())
     }
 
-    fn update(&mut self, ctx: &mut EngineContext<'_>) -> Result<()> {
+    fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Apply pending state transitions first
         self.apply_transitions(ctx)?;
 
@@ -394,15 +482,12 @@ impl Game for crate::state::StateMachine {
         Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut EngineContext<'_>) -> Result<()> {
-        let renderer = ctx.renderer();
-        let mut frame = renderer.begin_frame()?;
-        
-        // Draw all states from bottom to top (oldest to newest)
-        // This allows background states to be visible behind foreground states
-        self.draw_all(renderer, &mut frame)?;
-        
-        renderer.end_frame(frame)?;
+    fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
+        ctx.draw(|renderer, frame| {
+            // Draw all states from bottom to top (oldest to newest)
+            // This allows background states to be visible behind foreground states
+            self.draw_all(renderer, frame)
+        })?;
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs};
 
 use crate::render::{FontHandle, Renderer, TextureHandle};
 
@@ -77,6 +77,22 @@ impl AssetManager {
         Ok(handle)
     }
 
+    /// Load a font from a file path, caching it by the path.
+    pub fn load_font_from_file(
+        &mut self,
+        renderer: &mut Renderer,
+        path: &str,
+    ) -> anyhow::Result<FontHandle> {
+        if let Some(handle) = self.fonts.get(path) {
+            return Ok(*handle);
+        }
+
+        let bytes = fs::read(path)?;
+        let handle = renderer.load_font_from_bytes(&bytes)?;
+        self.fonts.insert(path.to_string(), handle);
+        Ok(handle)
+    }
+
     /// Get a cached texture handle by key, if it exists.
     pub fn get_texture(&self, key: &str) -> Option<TextureHandle> {
         self.textures.get(key).copied()
@@ -119,4 +135,3 @@ impl Default for AssetManager {
         Self::new()
     }
 }
-

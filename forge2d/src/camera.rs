@@ -1,6 +1,9 @@
 //! Camera follow system for tracking entities with dead-zone support.
 
+use crate::entities::{CameraComponent, Transform};
+use crate::hierarchy;
 use crate::math::{Camera2D, Vec2};
+use crate::world::World;
 
 /// Camera follow behavior configuration.
 #[derive(Clone, Copy, Debug)]
@@ -142,3 +145,35 @@ pub fn update_camera_follow(
     camera.update(dt);
 }
 
+/// Resolve the active camera from the world and update it for this frame.
+///
+/// If the camera entity has a Transform, its world position/rotation drives the camera.
+pub fn active_camera(world: &mut World, dt: f32) -> Option<Camera2D> {
+    let mut active_entity: Option<crate::world::EntityId> = None;
+    for (entity, cam) in world.query::<CameraComponent>() {
+        if cam.active {
+            active_entity = match active_entity {
+                Some(current) if current.to_u32() <= entity.to_u32() => Some(current),
+                _ => Some(entity),
+            };
+        }
+    }
+
+    let entity = active_entity?;
+    let mut world_pos = None;
+    let mut world_rot = None;
+    if world.get::<Transform>(entity).is_some() {
+        world_pos = Some(hierarchy::get_world_position(world, entity));
+        world_rot = Some(hierarchy::get_world_rotation(world, entity));
+    }
+
+    let Some(cam) = world.get_mut::<CameraComponent>(entity) else {
+        return None;
+    };
+    if let (Some(pos), Some(rot)) = (world_pos, world_rot) {
+        cam.camera.position = pos;
+        cam.camera.rotation = rot;
+    }
+    cam.camera.update(dt);
+    Some(cam.camera)
+}

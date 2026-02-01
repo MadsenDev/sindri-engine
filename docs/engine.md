@@ -11,6 +11,7 @@ Engine::new()
     .with_title("My Game")           // Window title
     .with_size(1280, 720)            // Window size (logical pixels)
     .with_vsync(true)                 // Enable/disable VSync
+    .with_asset_root("assets")        // Optional asset base directory
     .run(my_game)
 ```
 
@@ -19,6 +20,7 @@ Engine::new()
 - **`with_title(title: impl Into<String>)`** - Set the window title
 - **`with_size(width: u32, height: u32)`** - Set window size in logical pixels
 - **`with_vsync(vsync: bool)`** - Enable or disable VSync (default: true)
+- **`with_asset_root(root: impl Into<PathBuf>)`** - Base directory for asset loading
 
 ## The Game Trait
 
@@ -35,6 +37,12 @@ impl Game for MyGame {
         Ok(())
     }
 
+    fn fixed_update(&mut self, ctx: &mut EngineContext) -> Result<()> {
+        // Optional: Called at fixed intervals (default: 60 FPS)
+        // Use for physics, collision detection, deterministic systems
+        Ok(())
+    }
+
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Called every frame (variable timestep)
         // Handle input, update game logic, move entities
@@ -42,14 +50,8 @@ impl Game for MyGame {
     }
 
     fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        // Called every frame
+        // Called when a redraw is requested (the engine requests one each update)
         // Render your game using the renderer
-        Ok(())
-    }
-    
-    fn fixed_update(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        // Optional: Called at fixed intervals (default: 60 FPS)
-        // Use for physics, collision detection, deterministic systems
         Ok(())
     }
 }
@@ -58,9 +60,9 @@ impl Game for MyGame {
 ### Method Execution Order
 
 1. **`init()`** - Called once when the engine starts
-2. **`fixed_update()`** - Called at fixed intervals (if implemented)
-3. **`update()`** - Called every frame
-4. **`draw()`** - Called every frame after update
+2. **`fixed_update()`** - Called at fixed intervals (zero or more times per frame)
+3. **`update()`** - Called once per frame (variable timestep)
+4. **`draw()`** - Called when a redraw is requested (typically once per update)
 
 ## EngineContext
 
@@ -71,16 +73,14 @@ The `EngineContext` provides access to all engine systems:
 ```rust
 let dt = ctx.delta_time();              // Duration since last frame
 let elapsed = ctx.elapsed_time();      // Total time since engine started
-let dt_seconds = ctx.delta_time().as_secs_f32();  // Delta as f32
+let dt_seconds = ctx.delta_seconds();  // Delta as f32
 ```
 
 ### Fixed Timestep
 
 ```rust
-if ctx.should_run_fixed_update() {
-    let fixed_dt = ctx.fixed_delta_time();  // Fixed timestep duration
-    let alpha = ctx.fixed_update_alpha();    // Interpolation factor (0.0-1.0)
-}
+let fixed_dt = ctx.fixed_delta_time();   // Fixed timestep duration
+let alpha = ctx.fixed_update_alpha();    // Interpolation factor (0.0-1.0)
 ```
 
 ### Input
@@ -119,6 +119,13 @@ let window = ctx.window();
 let size = window.inner_size();
 ```
 
+### Camera
+
+```rust
+// Camera centered on the current screen size (top-left world = 0,0 for screen-sized worlds)
+let camera = ctx.screen_camera();
+```
+
 ### Utilities
 
 ```rust
@@ -135,10 +142,15 @@ The engine runs a game loop that:
 
 1. Processes window events (resize, close, etc.)
 2. Updates input state
-3. Calls `fixed_update()` if needed
+3. Calls `fixed_update()` zero or more times if needed
 4. Calls `update()`
 5. Calls `draw()`
 6. Presents the frame to the screen
+
+## Update/Draw Contract
+
+- `update()` is where game state should change.
+- `draw()` should be render-only (no game state mutations) to avoid subtle frame ordering issues.
 
 The loop continues until:
 - The window is closed
@@ -148,4 +160,3 @@ The loop continues until:
 ## Fixed Timestep
 
 Forge2D supports fixed timestep updates for deterministic game logic. See [Fixed Timestep](fixed-timestep.md) for details.
-

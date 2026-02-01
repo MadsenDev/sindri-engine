@@ -1,0 +1,12 @@
+[package]
+name = "fireflies_demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+forge2d = { path = "../../forge2d" }
+fastrand.workspace = true
+
+[package.metadata]
+# Placeholder for future example metadata

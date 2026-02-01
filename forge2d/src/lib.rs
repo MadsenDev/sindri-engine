@@ -24,8 +24,8 @@ pub mod state;
 pub mod world;
 
 pub use crate::assets::AssetManager;
-pub use crate::audio::AudioSystem;
-pub use crate::camera::{update_camera_follow, CameraFollow};
+pub use crate::audio::{AudioSystem, SoundHandle};
+pub use crate::camera::{active_camera, update_camera_follow, CameraFollow};
 pub use crate::commands::{
     AddComponent, Command, CommandHistory, CreateEntity, DeleteEntity, RemoveComponent,
     SetTransform,
