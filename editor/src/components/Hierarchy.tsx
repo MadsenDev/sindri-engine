@@ -15,6 +15,7 @@ interface HierarchyProps {
   selectedEntityId: number | null;
   onEntityClick: (entityId: number) => void;
   onContextMenuOpen?: (screen: { x: number; y: number }) => void;
+  onReparent?: (entityId: number, parentId: number | null) => void;
 }
 
 function HierarchyNode({
@@ -22,12 +23,14 @@ function HierarchyNode({
   entities,
   selectedEntityId,
   onEntityClick,
+  onReparent,
   level = 0,
 }: {
   entity: EntityInfo;
   entities: EntityInfo[];
   selectedEntityId: number | null;
   onEntityClick: (entityId: number) => void;
+  onReparent?: (entityId: number, parentId: number | null) => void;
   level?: number;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -44,6 +47,23 @@ function HierarchyNode({
         className={`hierarchy-item ${isSelected ? "selected" : ""}`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
         onClick={() => onEntityClick(entity.id)}
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.setData("application/x-forge2d-entity", String(entity.id));
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const draggedId = Number(event.dataTransfer.getData("application/x-forge2d-entity"));
+          if (!draggedId || draggedId === entity.id || !onReparent) {
+            return;
+          }
+          onReparent(draggedId, entity.id);
+        }}
       >
         {hasChildren && (
           <button
@@ -80,6 +100,7 @@ function HierarchyNode({
               entities={entities}
               selectedEntityId={selectedEntityId}
               onEntityClick={onEntityClick}
+              onReparent={onReparent}
               level={level + 1}
             />
           ))}
@@ -94,6 +115,7 @@ export default function Hierarchy({
   selectedEntityId,
   onEntityClick,
   onContextMenuOpen,
+  onReparent,
 }: HierarchyProps) {
   // Find root entities (those with no parent)
   const rootEntities = entities.filter((e) => e.parent_id === null);
@@ -105,6 +127,18 @@ export default function Hierarchy({
         if (!onContextMenuOpen) return;
         e.preventDefault();
         onContextMenuOpen({ x: e.clientX, y: e.clientY });
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        const draggedId = Number(event.dataTransfer.getData("application/x-forge2d-entity"));
+        if (!draggedId || !onReparent) {
+          return;
+        }
+        onReparent(draggedId, null);
       }}
     >
       {rootEntities.length === 0 ? (
@@ -118,6 +152,7 @@ export default function Hierarchy({
               entities={entities}
               selectedEntityId={selectedEntityId}
               onEntityClick={onEntityClick}
+              onReparent={onReparent}
             />
           ))}
         </div>

@@ -33,3 +33,21 @@ export interface SceneTab {
   path: string | null;
   isDirty: boolean;
 }
+
+export type PlayState = "stopped" | "playing" | "paused";
+
+export interface ConsoleEntry {
+  id: number;
+  level: "info" | "error";
+  message: string;
+  timestamp: string;
+}
+
+export interface CameraInfo {
+  entity_id: number;
+  world_position: [number, number];
+  rotation: number;
+  zoom: number;
+  offset: [number, number];
+  active: boolean;
+}

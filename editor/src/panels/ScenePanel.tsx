@@ -29,6 +29,10 @@ interface ScenePanelProps {
     screen: { x: number; y: number },
     world?: { x: number; y: number }
   ) => void;
+  onAssetDrop: (
+    asset: { path: string; kind: string },
+    world: { x: number; y: number }
+  ) => void;
   isPlaying: boolean;
   tool: Tool;
 }
@@ -50,6 +54,7 @@ export default function ScenePanel({
   onSelectionChange,
   onTransformChange,
   onContextMenuOpen,
+  onAssetDrop,
   isPlaying,
   tool,
 }: ScenePanelProps) {
@@ -116,6 +121,7 @@ export default function ScenePanel({
             onSelectionChange={onSelectionChange}
             onTransformChange={onTransformChange}
             onContextMenuOpen={onContextMenuOpen}
+            onAssetDrop={onAssetDrop}
             isPlaying={isPlaying}
             tool={tool}
           />

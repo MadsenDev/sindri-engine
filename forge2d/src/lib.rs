@@ -28,7 +28,7 @@ pub use crate::audio::{AudioSystem, SoundHandle};
 pub use crate::camera::{active_camera, update_camera_follow, CameraFollow};
 pub use crate::commands::{
     AddComponent, Command, CommandHistory, CreateEntity, DeleteEntity, RemoveComponent,
-    SetTransform,
+    ReparentEntity, SetTransform,
 };
 pub use crate::component_metadata::{
     register_builtin_metadata, ComponentMetadataHandler, ComponentMetadataRegistry,

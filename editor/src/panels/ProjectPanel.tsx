@@ -4,12 +4,16 @@ interface ProjectPanelProps {
   refreshToken: number;
   onRefresh: () => void;
   onImportTexture: () => void;
+  onOpenScene: (path: string) => void;
+  onInstantiatePrefab: (path: string) => void;
 }
 
 export default function ProjectPanel({
   refreshToken,
   onRefresh,
   onImportTexture,
+  onOpenScene,
+  onInstantiatePrefab,
 }: ProjectPanelProps) {
   return (
     <div className="panel dock-panel">
@@ -24,7 +28,11 @@ export default function ProjectPanel({
         </div>
       </div>
       <div className="panel-body muted-bg">
-        <FileExplorer refreshToken={refreshToken} />
+        <FileExplorer
+          refreshToken={refreshToken}
+          onOpenScene={onOpenScene}
+          onInstantiatePrefab={onInstantiatePrefab}
+        />
       </div>
     </div>
   );

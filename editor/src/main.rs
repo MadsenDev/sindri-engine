@@ -19,6 +19,35 @@ struct ProjectConfig {
     // Future: engine version, settings, etc.
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum PlayState {
+    Stopped,
+    Playing,
+    Paused,
+}
+
+impl PlayState {
+    fn is_running(self) -> bool {
+        matches!(self, Self::Playing | Self::Paused)
+    }
+
+    fn is_advancing(self) -> bool {
+        matches!(self, Self::Playing)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ViewportCacheKey {
+    width: u32,
+    height: u32,
+    camera_x_bits: u32,
+    camera_y_bits: u32,
+    zoom_bits: u32,
+    rotation_bits: u32,
+    world_revision: u64,
+}
+
 // Editor state
 struct EditorState {
     world: World,
@@ -26,7 +55,7 @@ struct EditorState {
     command_history: CommandHistory,
     metadata_registry: ComponentMetadataRegistry,
     scene_dirty: bool,
-    is_playing: bool,
+    play_state: PlayState,
     play_snapshot: Option<forge2d::Scene>, // Snapshot taken before play mode
     play_snapshot_dirty: Option<bool>,
     // Texture registry: maps entity ID -> texture file path (for sprites)
@@ -37,6 +66,9 @@ struct EditorState {
     offscreen_renderer: Option<Renderer>,
     offscreen_textures: HashMap<String, forge2d::TextureHandle>,
     offscreen_fallback: Option<forge2d::TextureHandle>,
+    world_revision: u64,
+    viewport_cache_key: Option<ViewportCacheKey>,
+    viewport_cache_rgba: Option<Vec<u8>>,
 }
 
 impl EditorState {
@@ -50,7 +82,7 @@ impl EditorState {
             command_history: CommandHistory::default(),
             metadata_registry: registry,
             scene_dirty: false,
-            is_playing: false,
+            play_state: PlayState::Stopped,
             play_snapshot: None,
             play_snapshot_dirty: None,
             entity_texture_paths: std::collections::HashMap::new(),
@@ -59,6 +91,9 @@ impl EditorState {
             offscreen_renderer: None,
             offscreen_textures: HashMap::new(),
             offscreen_fallback: None,
+            world_revision: 0,
+            viewport_cache_key: None,
+            viewport_cache_rgba: None,
         }
     }
 }
@@ -73,6 +108,31 @@ fn get_state() -> &'static mut EditorState {
         }
         EDITOR_STATE.as_mut().unwrap()
     }
+}
+
+fn can_edit_scene(state: &EditorState) -> bool {
+    !state.play_state.is_running()
+}
+
+fn bump_world_revision(state: &mut EditorState) {
+    state.world_revision = state.world_revision.wrapping_add(1);
+    state.viewport_cache_key = None;
+    state.viewport_cache_rgba = None;
+}
+
+fn is_descendant(
+    state: &EditorState,
+    candidate_parent: forge2d::EntityId,
+    entity: forge2d::EntityId,
+) -> bool {
+    let mut current = Some(candidate_parent);
+    while let Some(node) = current {
+        if node == entity {
+            return true;
+        }
+        current = forge2d::hierarchy::get_parent(&state.world, node);
+    }
+    false
 }
 
 // Helper to find entity by ID (since EntityId constructor is private)
@@ -570,9 +630,15 @@ fn entities_list() -> Vec<EntityInfo> {
 }
 
 #[tauri::command]
+fn world_revision_get() -> u64 {
+    let state = get_state();
+    state.world_revision
+}
+
+#[tauri::command]
 fn entity_delete(entity_id: u32) -> Result<(), String> {
     let state = get_state();
-    if state.is_playing {
+    if !can_edit_scene(state) {
         return Err("Cannot delete entities in play mode".to_string());
     }
 
@@ -586,6 +652,7 @@ fn entity_delete(entity_id: u32) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -646,13 +713,14 @@ fn entity_duplicate(entity_id: u32) -> Result<u32, String> {
         .map_err(|e| format!("Failed to add command to history: {}", e))?;
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(new_entity_id.to_u32())
 }
 
 #[tauri::command]
 fn entity_create() -> Result<u32, String> {
     let state = get_state();
-    if state.is_playing {
+    if !can_edit_scene(state) {
         return Err("Cannot create entities in play mode".to_string());
     }
     let state = get_state();
@@ -683,13 +751,14 @@ fn entity_create() -> Result<u32, String> {
         .map_err(|e| format!("Failed to add command to history: {}", e))?;
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(entity_id.to_u32())
 }
 
 #[tauri::command]
 fn entity_create_preset(preset: String, position: Option<[f32; 2]>) -> Result<u32, String> {
     let state = get_state();
-    if state.is_playing {
+    if !can_edit_scene(state) {
         return Err("Cannot create entities in play mode".to_string());
     }
 
@@ -752,6 +821,7 @@ fn entity_create_preset(preset: String, position: Option<[f32; 2]>) -> Result<u3
         .map_err(|e| format!("Failed to add command to history: {}", e))?;
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(entity_id.to_u32())
 }
 
@@ -761,7 +831,9 @@ fn undo() -> Result<(), String> {
     state
         .command_history
         .undo(&mut state.world)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    bump_world_revision(state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -770,7 +842,9 @@ fn redo() -> Result<(), String> {
     state
         .command_history
         .redo(&mut state.world)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    bump_world_revision(state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -816,6 +890,45 @@ fn selection_clear() {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct ScriptTagData {
+    tag: String,
+}
+
+#[tauri::command]
+fn entity_reparent(entity_id: u32, parent_id: Option<u32>) -> Result<(), String> {
+    let state = get_state();
+    if !can_edit_scene(state) {
+        return Err("Cannot reparent entities in play mode".to_string());
+    }
+
+    let entity =
+        find_entity_by_id(state, entity_id).ok_or_else(|| "Entity not found".to_string())?;
+    let parent = match parent_id {
+        Some(id) => Some(
+            find_entity_by_id(state, id).ok_or_else(|| "Parent entity not found".to_string())?,
+        ),
+        None => None,
+    };
+
+    if parent == Some(entity) {
+        return Err("Entity cannot be parented to itself".to_string());
+    }
+    if let Some(parent_entity) = parent {
+        if is_descendant(state, parent_entity, entity) {
+            return Err("Cannot create hierarchy cycles".to_string());
+        }
+    }
+
+    state
+        .command_history
+        .execute(Box::new(forge2d::ReparentEntity::new(entity, parent)), &mut state.world)
+        .map_err(|e| e.to_string())?;
+    state.scene_dirty = true;
+    bump_world_revision(state);
+    Ok(())
+}
+
 // Transform operations
 #[derive(Serialize, Deserialize)]
 struct TransformData {
@@ -835,6 +948,12 @@ struct TransformHierarchyData {
     parent_world_position: [f32; 2],
     parent_world_rotation: f32,
     parent_world_scale: [f32; 2],
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransformHierarchyEntry {
+    entity_id: u32,
+    transform: TransformHierarchyData,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -870,12 +989,11 @@ fn transform_get(entity_id: u32) -> Option<TransformData> {
     None
 }
 
-#[tauri::command]
-fn transform_get_hierarchy(entity_id: u32) -> Option<TransformHierarchyData> {
-    let state = get_state();
-    let entity = find_entity_by_id(state, entity_id)?;
+fn build_transform_hierarchy_data(
+    state: &EditorState,
+    entity: forge2d::EntityId,
+) -> Option<TransformHierarchyData> {
     let transform = state.world.get::<forge2d::entities::Transform>(entity)?;
-
     let parent = transform.parent;
     let world_pos = forge2d::get_world_position(&state.world, entity);
     let world_rot = forge2d::get_world_rotation(&state.world, entity);
@@ -902,6 +1020,29 @@ fn transform_get_hierarchy(entity_id: u32) -> Option<TransformHierarchyData> {
         parent_world_rotation: parent_world_rot,
         parent_world_scale: [parent_world_scale.x, parent_world_scale.y],
     })
+}
+
+#[tauri::command]
+fn transform_get_hierarchy(entity_id: u32) -> Option<TransformHierarchyData> {
+    let state = get_state();
+    let entity = find_entity_by_id(state, entity_id)?;
+    build_transform_hierarchy_data(state, entity)
+}
+
+#[tauri::command]
+fn transforms_list() -> Vec<TransformHierarchyEntry> {
+    let state = get_state();
+    state
+        .world
+        .query::<forge2d::entities::Transform>()
+        .into_iter()
+        .filter_map(|(entity, _)| {
+            build_transform_hierarchy_data(state, entity).map(|transform| TransformHierarchyEntry {
+                entity_id: entity.to_u32(),
+                transform,
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -937,6 +1078,7 @@ fn camera_set(
     cam.camera.offset = forge2d::Vec2::new(offset[0], offset[1]);
     cam.camera.rotation = rotation;
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -964,6 +1106,16 @@ fn camera_entities() -> Vec<CameraInfo> {
         });
     }
     cameras
+}
+
+#[tauri::command]
+fn active_camera_info() -> Option<CameraInfo> {
+    let mut cameras = camera_entities();
+    if cameras.is_empty() {
+        return None;
+    }
+    cameras.sort_by_key(|cam| (!cam.active, cam.entity_id));
+    cameras.into_iter().next()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1020,7 +1172,32 @@ fn sprite_set_texture_path(entity_id: u32, path: String) -> Result<(), String> {
         state.entity_texture_paths.insert(entity_id, path);
     }
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
+}
+
+#[tauri::command]
+fn script_tag_get(entity_id: u32) -> Option<ScriptTagData> {
+    let state = get_state();
+    let entity = find_entity_by_id(state, entity_id)?;
+    let tag = state.world.get::<forge2d::script::ScriptTag>(entity)?;
+    Some(ScriptTagData {
+        tag: tag.0.clone(),
+    })
+}
+
+#[tauri::command]
+fn script_tag_set(entity_id: u32, tag: String) -> Result<(), String> {
+    let state = get_state();
+    let entity =
+        find_entity_by_id(state, entity_id).ok_or_else(|| "Entity not found".to_string())?;
+    if let Some(script_tag) = state.world.get_mut::<forge2d::script::ScriptTag>(entity) {
+        script_tag.0 = tag;
+        state.scene_dirty = true;
+        bump_world_revision(state);
+        return Ok(());
+    }
+    Err("Entity does not have ScriptTag".to_string())
 }
 
 #[tauri::command]
@@ -1033,6 +1210,25 @@ fn viewport_render(
     rotation: f32,
 ) -> Result<ViewportFrame, String> {
     let state = get_state();
+    let cache_key = ViewportCacheKey {
+        width,
+        height,
+        camera_x_bits: camera_x.to_bits(),
+        camera_y_bits: camera_y.to_bits(),
+        zoom_bits: zoom.to_bits(),
+        rotation_bits: rotation.to_bits(),
+        world_revision: state.world_revision,
+    };
+    if state.viewport_cache_key == Some(cache_key) {
+        if let Some(rgba) = &state.viewport_cache_rgba {
+            return Ok(ViewportFrame {
+                width,
+                height,
+                rgba: rgba.clone(),
+            });
+        }
+    }
+
     if state.offscreen_renderer.is_none() {
         state.offscreen_renderer = Some(
             Renderer::new_offscreen(width, height).map_err(|e| e.to_string())?,
@@ -1116,11 +1312,27 @@ fn viewport_render(
         })
         .map_err(|e| e.to_string())?;
 
+    state.viewport_cache_key = Some(cache_key);
+    state.viewport_cache_rgba = Some(rgba.clone());
+
     Ok(ViewportFrame {
         width,
         height,
         rgba,
     })
+}
+
+#[tauri::command]
+fn viewport_render_raw(
+    width: u32,
+    height: u32,
+    camera_x: f32,
+    camera_y: f32,
+    zoom: f32,
+    rotation: f32,
+) -> Result<tauri::ipc::Response, String> {
+    let frame = viewport_render(width, height, camera_x, camera_y, zoom, rotation)?;
+    Ok(tauri::ipc::Response::new(frame.rgba))
 }
 
 #[tauri::command]
@@ -1151,7 +1363,7 @@ fn transform_set(
         .map_err(|e| e.to_string())?;
 
     // Update physics body if it exists (only in edit mode)
-    if !state.is_playing {
+    if can_edit_scene(state) {
         if state
             .world
             .get::<forge2d::entities::PhysicsBody>(entity)
@@ -1166,6 +1378,7 @@ fn transform_set(
     }
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -1175,6 +1388,17 @@ struct ComponentFieldInfo {
     name: String,
     type_name: String,
     value: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InspectorSnapshot {
+    component_types: Vec<String>,
+    attachable_types: Vec<String>,
+    attached_components: Vec<String>,
+    fields: HashMap<String, Vec<ComponentFieldInfo>>,
+    sprite_data: Option<SpriteData>,
+    camera_data: Option<CameraData>,
+    script_data: Option<ScriptTagData>,
 }
 
 #[tauri::command]
@@ -1203,6 +1427,49 @@ fn component_fields(entity_id: u32, component_type: String) -> Option<Vec<Compon
 }
 
 #[tauri::command]
+fn inspector_snapshot(entity_id: u32) -> Option<InspectorSnapshot> {
+    let state = get_state();
+    let entity = find_entity_by_id(state, entity_id)?;
+    let component_types = state.metadata_registry.type_names();
+    let attachable_types = component_attachable_types();
+    let attached_components = entity_components(entity_id);
+    let mut fields = HashMap::new();
+
+    for component_type in &component_types {
+        if let Some(handler) = state.metadata_registry.get(component_type) {
+            let component_fields = handler
+                .fields()
+                .into_iter()
+                .map(|field| ComponentFieldInfo {
+                    name: field.name.clone(),
+                    type_name: field.type_name,
+                    value: handler
+                        .get_field(&state.world, entity, &field.name)
+                        .unwrap_or(serde_json::Value::Null),
+                })
+                .collect::<Vec<_>>();
+            if !component_fields.is_empty() {
+                fields.insert(component_type.clone(), component_fields);
+            }
+        }
+    }
+
+    let sprite_data = sprite_get(entity_id);
+    let camera_data = camera_get(entity_id);
+    let script_data = script_tag_get(entity_id);
+
+    Some(InspectorSnapshot {
+        component_types,
+        attachable_types,
+        attached_components,
+        fields,
+        sprite_data,
+        camera_data,
+        script_data,
+    })
+}
+
+#[tauri::command]
 fn component_set_field(
     entity_id: u32,
     component_type: String,
@@ -1221,10 +1488,11 @@ fn component_set_field(
     handler
         .set_field(&mut state.world, entity, &field_name, value)
         .map_err(|e| e.to_string())?;
-    if component_type == "PhysicsBody" && !state.is_playing {
+    if component_type == "PhysicsBody" && can_edit_scene(state) {
         ensure_physics_body(state, entity)?;
     }
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -1327,7 +1595,7 @@ fn component_add(entity_id: u32, component_type: String) -> Result<(), String> {
                     forge2d::physics::RigidBodyType::Dynamic,
                 );
                 state.world.insert(entity, body);
-                if !state.is_playing {
+                if can_edit_scene(state) {
                     ensure_physics_body(state, entity)?;
                 }
             }
@@ -1358,6 +1626,7 @@ fn component_add(entity_id: u32, component_type: String) -> Result<(), String> {
     }
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -1397,6 +1666,7 @@ fn component_remove(entity_id: u32, component_type: String) -> Result<(), String
     }
 
     state.scene_dirty = true;
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -1603,7 +1873,14 @@ fn prefab_instantiate(path: String) -> Result<Vec<u32>, String> {
     let state = get_state();
     let json = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let prefab: PrefabAsset = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    instantiate_prefab(state, prefab, None)
+}
 
+fn instantiate_prefab(
+    state: &mut EditorState,
+    prefab: PrefabAsset,
+    position: Option<forge2d::Vec2>,
+) -> Result<Vec<u32>, String> {
     let mut id_map: HashMap<u32, forge2d::EntityId> = HashMap::new();
     for entity in &prefab.entities {
         let new_entity = state.world.spawn();
@@ -1678,8 +1955,26 @@ fn prefab_instantiate(path: String) -> Result<Vec<u32>, String> {
         }
     }
 
+    if let Some(position) = position {
+        let roots = prefab
+            .roots
+            .iter()
+            .filter_map(|root_id| id_map.get(root_id).copied())
+            .collect::<Vec<_>>();
+        if let Some(first_root) = roots.first().copied() {
+            let origin = forge2d::get_world_position(&state.world, first_root);
+            let delta = position - origin;
+            for root in roots {
+                if let Some(transform) = state.world.get_mut::<forge2d::entities::Transform>(root) {
+                    transform.position += delta;
+                }
+            }
+        }
+    }
+
     sync_physics_bodies(state)?;
     state.scene_dirty = true;
+    bump_world_revision(state);
 
     let roots = prefab
         .roots
@@ -1688,6 +1983,18 @@ fn prefab_instantiate(path: String) -> Result<Vec<u32>, String> {
         .collect::<Vec<u32>>();
 
     Ok(roots)
+}
+
+#[tauri::command]
+fn prefab_instantiate_at(path: String, position: [f32; 2]) -> Result<Vec<u32>, String> {
+    let state = get_state();
+    let json = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let prefab: PrefabAsset = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    instantiate_prefab(
+        state,
+        prefab,
+        Some(forge2d::Vec2::new(position[0], position[1])),
+    )
 }
 
 #[tauri::command]
@@ -1845,6 +2152,7 @@ fn scene_load(path: String) -> Result<(), String> {
 
     restore_entities(state, &scene)?;
     sync_physics_bodies(state)?;
+    bump_world_revision(state);
 
     Ok(())
 }
@@ -1857,6 +2165,7 @@ fn scene_new() -> Result<(), String> {
     state.command_history.clear();
     state.scene_dirty = false;
     state.entity_texture_paths.clear();
+    bump_world_revision(state);
     Ok(())
 }
 
@@ -1869,7 +2178,7 @@ fn scene_is_dirty() -> bool {
 #[tauri::command]
 fn play_start() -> Result<(), String> {
     let state = get_state();
-    if state.is_playing {
+    if state.play_state.is_running() {
         return Err("Already in play mode".to_string());
     }
 
@@ -1880,60 +2189,38 @@ fn play_start() -> Result<(), String> {
     state.play_snapshot_dirty = Some(state.scene_dirty);
 
     // Enable physics simulation
-    state.is_playing = true;
+    state.play_state = PlayState::Playing;
 
     Ok(())
 }
 
 #[tauri::command]
-fn play_stop() -> Result<(), String> {
+fn play_pause() -> Result<(), String> {
     let state = get_state();
-    if !state.is_playing {
-        return Err("Not in play mode".to_string());
+    if state.play_state != PlayState::Playing {
+        return Err("Play mode is not running".to_string());
     }
-
-    // Restore snapshot
-    if let Some(snapshot) = state.play_snapshot.take() {
-        // Clear world and physics
-        state.world = World::new();
-        state.physics = PhysicsWorld::new();
-
-        // Restore physics first
-        restore_scene_physics(&mut state.physics, &snapshot)
-            .map_err(|e| format!("Failed to restore scene physics: {}", e))?;
-
-        restore_entities(state, &snapshot)?;
-        sync_physics_bodies(state)?;
-
-        // Clear command history after restore
-        state.command_history.clear();
-    }
-
-    state.is_playing = false;
-    if let Some(was_dirty) = state.play_snapshot_dirty.take() {
-        state.scene_dirty = was_dirty;
-    }
+    state.play_state = PlayState::Paused;
     Ok(())
 }
 
 #[tauri::command]
-fn play_is_playing() -> bool {
+fn play_resume() -> Result<(), String> {
     let state = get_state();
-    state.is_playing
+    if state.play_state != PlayState::Paused {
+        return Err("Play mode is not paused".to_string());
+    }
+    state.play_state = PlayState::Playing;
+    Ok(())
 }
 
-#[tauri::command]
-fn play_step_physics(dt: f32) -> Result<(), String> {
-    let state = get_state();
-    if !state.is_playing {
+fn advance_play_state(state: &mut EditorState, dt: f32) -> Result<(), String> {
+    if !state.play_state.is_running() {
         return Err("Not in play mode".to_string());
     }
 
-    // Step physics simulation
     state.physics.step(dt);
 
-    // Sync physics positions back to Transform components
-    // Collect entity IDs first to avoid borrow checker issues
     let entity_ids: Vec<_> = state
         .world
         .query::<forge2d::entities::Transform>()
@@ -1955,7 +2242,64 @@ fn play_step_physics(dt: f32) -> Result<(), String> {
         }
     }
 
+    bump_world_revision(state);
     Ok(())
+}
+
+#[tauri::command]
+fn play_stop() -> Result<(), String> {
+    let state = get_state();
+    if !state.play_state.is_running() {
+        return Err("Not in play mode".to_string());
+    }
+
+    // Restore snapshot
+    if let Some(snapshot) = state.play_snapshot.take() {
+        // Clear world and physics
+        state.world = World::new();
+        state.physics = PhysicsWorld::new();
+
+        // Restore physics first
+        restore_scene_physics(&mut state.physics, &snapshot)
+            .map_err(|e| format!("Failed to restore scene physics: {}", e))?;
+
+        restore_entities(state, &snapshot)?;
+        sync_physics_bodies(state)?;
+
+        // Clear command history after restore
+        state.command_history.clear();
+        bump_world_revision(state);
+    }
+
+    state.play_state = PlayState::Stopped;
+    if let Some(was_dirty) = state.play_snapshot_dirty.take() {
+        state.scene_dirty = was_dirty;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn play_state_get() -> PlayState {
+    let state = get_state();
+    state.play_state
+}
+
+#[tauri::command]
+fn play_step_physics(dt: f32) -> Result<(), String> {
+    let state = get_state();
+    if !state.play_state.is_advancing() {
+        return Ok(());
+    }
+    advance_play_state(state, dt)
+}
+
+#[tauri::command]
+fn play_step_frame(dt: Option<f32>) -> Result<(), String> {
+    let state = get_state();
+    if state.play_state != PlayState::Paused {
+        return Err("Play mode must be paused to step".to_string());
+    }
+    advance_play_state(state, dt.unwrap_or(1.0 / 60.0))
 }
 
 fn main() {
@@ -1970,8 +2314,10 @@ fn main() {
             asset_import_texture,
             prefab_save,
             prefab_instantiate,
+            prefab_instantiate_at,
             project_list,
             entities_list,
+            world_revision_get,
             entity_create,
             entity_create_preset,
             entity_delete,
@@ -1984,15 +2330,22 @@ fn main() {
             selection_set,
             selection_add,
             selection_clear,
+            entity_reparent,
             transform_get,
             transform_get_hierarchy,
+            transforms_list,
             transform_set,
             camera_get,
             camera_set,
             camera_entities,
+            active_camera_info,
             sprite_get,
             sprite_set_texture_path,
+            script_tag_get,
+            script_tag_set,
             viewport_render,
+            viewport_render_raw,
+            inspector_snapshot,
             component_fields,
             component_set_field,
             component_types,
@@ -2004,9 +2357,12 @@ fn main() {
             scene_load,
             scene_new,
             play_start,
+            play_pause,
+            play_resume,
             play_stop,
-            play_is_playing,
+            play_state_get,
             play_step_physics,
+            play_step_frame,
             scene_is_dirty,
         ])
         .run(tauri::generate_context!())

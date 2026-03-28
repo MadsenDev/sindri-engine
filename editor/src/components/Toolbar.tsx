@@ -1,9 +1,11 @@
 export type Tool = "move" | "rotate" | "scale";
 
+import type { PlayState } from "../app/types";
+
 interface ToolbarProps {
   currentTool: Tool;
   onToolChange: (tool: Tool) => void;
-  isPlaying: boolean;
+  playState: PlayState;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -12,13 +14,16 @@ interface ToolbarProps {
   onSave?: () => void;
   onLoad?: () => void;
   onPlay?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  onStep?: () => void;
   onStop?: () => void;
 }
 
 export default function Toolbar({
   currentTool,
   onToolChange,
-  isPlaying,
+  playState,
   onUndo = () => {},
   onRedo = () => {},
   canUndo = false,
@@ -27,8 +32,13 @@ export default function Toolbar({
   onSave = () => {},
   onLoad = () => {},
   onPlay = () => {},
+  onPause = () => {},
+  onResume = () => {},
+  onStep = () => {},
   onStop = () => {},
 }: ToolbarProps) {
+  const isPlaying = playState !== "stopped";
+
   return (
     <div className="toolbar">
       <div className="toolbar-group">
@@ -105,12 +115,25 @@ export default function Toolbar({
             ▶ Play
           </button>
         ) : (
-          <button onClick={onStop} className="toolbar-button danger">
-            ⏹ Stop
-          </button>
+          <>
+            {playState === "playing" ? (
+              <button onClick={onPause} className="toolbar-button subtle">
+                Ⅱ Pause
+              </button>
+            ) : (
+              <button onClick={onResume} className="toolbar-button subtle">
+                ▶ Resume
+              </button>
+            )}
+            <button onClick={onStep} className="toolbar-button subtle" title="Step one frame">
+              ⇥ Step
+            </button>
+            <button onClick={onStop} className="toolbar-button danger">
+              ⏹ Stop
+            </button>
+          </>
         )}
       </div>
     </div>
   );
 }
-

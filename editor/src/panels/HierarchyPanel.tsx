@@ -10,6 +10,7 @@ interface HierarchyPanelProps {
   onInstantiatePrefab: () => void;
   onEntityClick: (entityId: number) => void;
   onContextMenuOpen: (screen: { x: number; y: number }) => void;
+  onReparent: (entityId: number, parentId: number | null) => void;
 }
 
 export default function HierarchyPanel({
@@ -21,6 +22,7 @@ export default function HierarchyPanel({
   onInstantiatePrefab,
   onEntityClick,
   onContextMenuOpen,
+  onReparent,
 }: HierarchyPanelProps) {
   return (
     <div className="panel dock-panel">
@@ -46,6 +48,7 @@ export default function HierarchyPanel({
           selectedEntityId={selectedEntityId}
           onEntityClick={onEntityClick}
           onContextMenuOpen={onContextMenuOpen}
+          onReparent={onReparent}
         />
       </div>
     </div>

@@ -1,5 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { decodeRawFrame } from "../app/frameDecoder";
+import { presentImageData } from "../app/framePresenter";
 import Gizmo from "./Gizmo";
 import { Tool } from "./Toolbar";
 
@@ -31,6 +33,11 @@ interface TransformHierarchyData {
   parent_world_scale: [number, number];
 }
 
+interface TransformHierarchyEntry {
+  entity_id: number;
+  transform: TransformHierarchyData;
+}
+
 interface CameraInfo {
   entity_id: number;
   world_position: [number, number];
@@ -38,12 +45,6 @@ interface CameraInfo {
   zoom: number;
   offset: [number, number];
   active: boolean;
-}
-
-interface ViewportFrame {
-  width: number;
-  height: number;
-  rgba: number[];
 }
 
 interface ViewportProps {
@@ -54,6 +55,7 @@ interface ViewportProps {
   onContextMenuOpen?: (screen: { x: number; y: number }, world: { x: number; y: number }) => void;
   onSelectionChange?: (ids: number[]) => void;
   onTransformChange?: () => void;
+  onAssetDrop?: (asset: { path: string; kind: string }, world: { x: number; y: number }) => void;
   isPlaying?: boolean;
   tool: Tool;
 }
@@ -72,6 +74,7 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
   onContextMenuOpen,
   onSelectionChange,
   onTransformChange,
+  onAssetDrop,
   isPlaying = false,
   tool,
 }, ref) => {
@@ -82,7 +85,11 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
   const [transformCache, setTransformCache] = useState<Map<number, TransformData>>(new Map());
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const renderInFlight = useRef(false);
-  const [renderNonce, setRenderNonce] = useState(0);
+  const renderQueued = useRef(false);
+  const overlayQueued = useRef(false);
+  const lastFrameRef = useRef<ImageData | null>(null);
+  const [sceneRenderNonce, setSceneRenderNonce] = useState(0);
+  const [overlayRenderNonce, setOverlayRenderNonce] = useState(0);
   const [gridSize, setGridSize] = useState(50);
   const [cameraEntities, setCameraEntities] = useState<CameraInfo[]>([]);
   const [boxSelect, setBoxSelect] = useState<{
@@ -152,29 +159,22 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
   useEffect(() => {
     const fetchData = async () => {
       const transforms = new Map<number, TransformData>();
-      
-      const promises = entities
-        .filter((e) => e.has_transform)
-        .map(async (entity) => {
-          const transform = await invoke<TransformHierarchyData | null>(
-            "transform_get_hierarchy",
-            {
-              entityId: entity.id,
-            }
-          );
-          if (transform) {
-            transforms.set(entity.id, {
-              position: transform.world_position,
-              rotation: transform.world_rotation,
-              scale: transform.world_scale,
-            });
-          }
+      const data = await invoke<TransformHierarchyEntry[]>("transforms_list");
+      const allowed = new Set(entities.filter((e) => e.has_transform).map((e) => e.id));
+      for (const entry of data) {
+        if (!allowed.has(entry.entity_id)) continue;
+        transforms.set(entry.entity_id, {
+          position: entry.transform.world_position,
+          rotation: entry.transform.world_rotation,
+          scale: entry.transform.world_scale,
         });
-      await Promise.all(promises);
+      }
       setTransformCache(transforms);
     };
 
-    fetchData();
+    fetchData().catch((error) => {
+      console.error("Failed to fetch transforms", error);
+    });
   }, [entities]);
 
   useEffect(() => {
@@ -191,19 +191,42 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
     };
 
     fetchCameras();
-    const interval = window.setInterval(fetchCameras, 1000);
+    const interval = window.setInterval(fetchCameras, isPlaying ? 1000 : 2500);
     return () => {
       active = false;
       window.clearInterval(interval);
     };
-  }, [entities]);
+  }, [entities, isPlaying]);
 
-  const requestRender = () => {
-    setRenderNonce((prev) => prev + 1);
+  const requestSceneRender = () => {
+    if (renderQueued.current) return;
+    renderQueued.current = true;
+    requestAnimationFrame(() => {
+      renderQueued.current = false;
+      setSceneRenderNonce((prev) => prev + 1);
+    });
+  };
+
+  const requestOverlayRender = () => {
+    if (overlayQueued.current) return;
+    overlayQueued.current = true;
+    requestAnimationFrame(() => {
+      overlayQueued.current = false;
+      setOverlayRenderNonce((prev) => prev + 1);
+    });
   };
 
   useEffect(() => {
-    requestRender();
+    requestSceneRender();
+  }, [
+    camera,
+    transformCache,
+    canvasSize.width,
+    canvasSize.height,
+  ]);
+
+  useEffect(() => {
+    requestOverlayRender();
   }, [
     camera,
     gridSize,
@@ -221,39 +244,8 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    const renderFrame = async () => {
-      if (renderInFlight.current) return;
-      const width = canvas.width;
-      const height = canvas.height;
-      if (width === 0 || height === 0) return;
-
-      renderInFlight.current = true;
-      try {
-        const frame = await invoke<ViewportFrame>("viewport_render", {
-          width,
-          height,
-          cameraX: camera.x,
-          cameraY: camera.y,
-          zoom: camera.zoom,
-          rotation: 0,
-        });
-
-        const image = new ImageData(
-          new Uint8ClampedArray(frame.rgba),
-          frame.width,
-          frame.height
-        );
-        ctx.putImageData(image, 0, 0);
-        drawGridOverlay();
-        drawCameraOverlay();
-        drawSelectionOverlay();
-      } catch (error) {
-        console.error("Viewport render failed:", error);
-      } finally {
-        renderInFlight.current = false;
-      }
-    };
+    const width = canvas.width;
+    const height = canvas.height;
 
     const drawGridOverlay = () => {
       const size = gridSize * camera.zoom;
@@ -433,8 +425,82 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
       }
     };
 
-    renderFrame();
-  }, [renderNonce, camera, cameraEntities, gridSize, canvasSize.width, canvasSize.height]);
+    const drawCachedFrame = async () => {
+      const cached = lastFrameRef.current;
+      if (cached) {
+        await presentImageData(canvas, cached);
+      } else {
+        ctx.clearRect(0, 0, width, height);
+      }
+      drawGridOverlay();
+      drawCameraOverlay();
+      drawSelectionOverlay();
+    };
+
+    const renderFrame = async () => {
+      if (overlayRenderNonce > 0 || sceneRenderNonce > 0) {
+        await drawCachedFrame();
+      }
+
+      if (sceneRenderNonce === 0) {
+        return;
+      }
+
+      if (renderInFlight.current) return;
+      if (width === 0 || height === 0) return;
+
+      renderInFlight.current = true;
+      try {
+        const frame = await invoke<Uint8Array>("viewport_render_raw", {
+          width,
+          height,
+          cameraX: camera.x,
+          cameraY: camera.y,
+          zoom: camera.zoom,
+          rotation: 0,
+        });
+
+        const image = decodeRawFrame(frame, width, height);
+        lastFrameRef.current = image;
+        await drawCachedFrame();
+      } catch (error) {
+        console.error("Viewport render failed:", error);
+      } finally {
+        renderInFlight.current = false;
+      }
+    };
+
+    renderFrame().catch((error) => {
+      console.error("Viewport frame pipeline failed:", error);
+    });
+  }, [
+    sceneRenderNonce,
+    overlayRenderNonce,
+    camera,
+    cameraEntities,
+    gridSize,
+    selectedEntityId,
+    selectedEntityIds,
+    boxSelect,
+    transformCache,
+    canvasSize.width,
+    canvasSize.height,
+  ]);
+
+  const screenToWorld = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    return {
+      screen: { x, y },
+      world: {
+        x: (x - canvas.width / 2) / camera.zoom + camera.x,
+        y: (y - canvas.height / 2) / camera.zoom + camera.y,
+      },
+    };
+  };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // Don't interfere with gizmo - let it handle clicks on selected entities
@@ -449,15 +515,13 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-
-      // Convert screen to world coordinates
-      const worldX =
-        (x - canvas.width / 2) / camera.zoom + camera.x;
-      const worldY =
-        (y - canvas.height / 2) / camera.zoom + camera.y;
+      const converted = screenToWorld(e.clientX, e.clientY);
+      if (!converted) return;
+      const { screen, world } = converted;
+      const x = screen.x;
+      const y = screen.y;
+      const worldX = world.x;
+      const worldY = world.y;
 
       // Find closest entity using cached transforms
       let closestEntity: { id: number; dist: number } | null = null;
@@ -611,16 +675,31 @@ const Viewport = forwardRef<ViewportHandle, ViewportProps>(({
         onContextMenu={(e) => {
           if (!onContextMenuOpen) return;
           e.preventDefault();
-          const rect = canvasRef.current?.getBoundingClientRect();
-          if (!rect) return;
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          const worldX = (x - canvas.width / 2) / camera.zoom + camera.x;
-          const worldY = (y - canvas.height / 2) / camera.zoom + camera.y;
+          const converted = screenToWorld(e.clientX, e.clientY);
+          if (!converted) return;
           onContextMenuOpen(
             { x: e.clientX, y: e.clientY },
-            { x: worldX, y: worldY }
+            converted.world
           );
+        }}
+        onDragOver={(e) => {
+          if (!onAssetDrop) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          if (!onAssetDrop) return;
+          e.preventDefault();
+          const raw = e.dataTransfer.getData("application/x-forge2d-asset");
+          if (!raw) return;
+          const converted = screenToWorld(e.clientX, e.clientY);
+          if (!converted) return;
+          try {
+            const asset = JSON.parse(raw) as { path: string; kind: string };
+            onAssetDrop(asset, converted.world);
+          } catch (error) {
+            console.error("Invalid asset drop payload", error);
+          }
         }}
         onWheel={handleWheel}
         style={{ display: "block" }}

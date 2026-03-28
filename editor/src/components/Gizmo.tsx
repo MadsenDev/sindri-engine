@@ -56,6 +56,7 @@ export default function Gizmo({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartTransform, setDragStartTransform] = useState<TransformHierarchyData | null>(null);
   const [dragAxisGrabOffset, setDragAxisGrabOffset] = useState(0);
+  const pendingCommitRef = useRef<TransformHierarchyData | null>(null);
 
   // Load transform when entity changes or when transform updates
   useEffect(() => {
@@ -101,7 +102,6 @@ export default function Gizmo({
     return [worldX, worldY];
   };
 
-  // Continuous gizmo rendering loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !transform) {
@@ -127,111 +127,86 @@ export default function Gizmo({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let animationFrameId: number;
+    // Ensure canvas is still sized correctly
+    if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+    }
 
-    const draw = () => {
-      // Ensure canvas is still sized correctly
-      if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
-      }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const [screenX, screenY] = worldToScreen(
+      transform.world_position[0],
+      transform.world_position[1]
+    );
 
-      const [screenX, screenY] = worldToScreen(
-        transform.world_position[0],
-        transform.world_position[1]
-      );
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    if (tool === "rotate") {
+      ctx.rotate(transform.world_rotation);
+    }
 
-      ctx.save();
-      ctx.translate(screenX, screenY);
-      // Only rotate for rotate tool - move gizmo stays world-aligned
-      if (tool === "rotate") {
-        ctx.rotate(transform.world_rotation);
-      }
+    const arrowLength = 40;
+    const hoverColor = "#60a5fa";
 
-      const arrowLength = 40;
-      const hoverColor = "#60a5fa";
+    if (tool === "move") {
+      ctx.strokeStyle = dragHandle === "x" ? hoverColor : "#ef4444";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(arrowLength, 0);
+      ctx.stroke();
+      ctx.fillStyle = dragHandle === "x" ? hoverColor : "#ef4444";
+      ctx.beginPath();
+      ctx.moveTo(arrowLength, 0);
+      ctx.lineTo(arrowLength - 10, -5);
+      ctx.lineTo(arrowLength - 10, 5);
+      ctx.closePath();
+      ctx.fill();
 
-      // Only draw gizmo based on current tool
-      if (tool === "move") {
-        // Draw translate handles (X and Y arrows)
-        // X arrow (red)
-        ctx.strokeStyle = dragHandle === "x" ? hoverColor : "#ef4444";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(arrowLength, 0);
-        ctx.stroke();
-        // Arrowhead
-        ctx.fillStyle = dragHandle === "x" ? hoverColor : "#ef4444";
-        ctx.beginPath();
-        ctx.moveTo(arrowLength, 0);
-        ctx.lineTo(arrowLength - 10, -5);
-        ctx.lineTo(arrowLength - 10, 5);
-        ctx.closePath();
-        ctx.fill();
+      ctx.strokeStyle = dragHandle === "y" ? hoverColor : "#22c55e";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -arrowLength);
+      ctx.stroke();
+      ctx.fillStyle = dragHandle === "y" ? hoverColor : "#22c55e";
+      ctx.beginPath();
+      ctx.moveTo(0, -arrowLength);
+      ctx.lineTo(-5, -arrowLength + 10);
+      ctx.lineTo(5, -arrowLength + 10);
+      ctx.closePath();
+      ctx.fill();
+    } else if (tool === "rotate") {
+      const rotateRadius = 30;
+      ctx.strokeStyle = dragHandle === "rotate" ? hoverColor : "#a855f7";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, rotateRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -rotateRadius);
+      ctx.lineTo(0, -rotateRadius - 10);
+      ctx.stroke();
+    } else if (tool === "scale") {
+      const boxSize = 20;
+      ctx.fillStyle = dragHandle === "scale" ? hoverColor : "#f59e0b";
+      ctx.fillRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize);
+      ctx.strokeStyle = dragHandle === "scale" ? hoverColor : "#f59e0b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-boxSize / 2, -boxSize / 2);
+      ctx.lineTo(-boxSize / 2 - 10, -boxSize / 2 - 10);
+      ctx.moveTo(boxSize / 2, -boxSize / 2);
+      ctx.lineTo(boxSize / 2 + 10, -boxSize / 2 - 10);
+      ctx.moveTo(-boxSize / 2, boxSize / 2);
+      ctx.lineTo(-boxSize / 2 - 10, boxSize / 2 + 10);
+      ctx.moveTo(boxSize / 2, boxSize / 2);
+      ctx.lineTo(boxSize / 2 + 10, boxSize / 2 + 10);
+      ctx.stroke();
+    }
 
-        // Y arrow (green)
-        ctx.strokeStyle = dragHandle === "y" ? hoverColor : "#22c55e";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(0, -arrowLength);
-        ctx.stroke();
-        // Arrowhead
-        ctx.fillStyle = dragHandle === "y" ? hoverColor : "#22c55e";
-        ctx.beginPath();
-        ctx.moveTo(0, -arrowLength);
-        ctx.lineTo(-5, -arrowLength + 10);
-        ctx.lineTo(5, -arrowLength + 10);
-        ctx.closePath();
-        ctx.fill();
-      } else if (tool === "rotate") {
-        // Draw rotate handle (circle)
-        const rotateRadius = 30;
-        ctx.strokeStyle = dragHandle === "rotate" ? hoverColor : "#a855f7";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, rotateRadius, 0, Math.PI * 2);
-        ctx.stroke();
-        // Draw rotation indicator
-        ctx.strokeStyle = dragHandle === "rotate" ? hoverColor : "#a855f7";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -rotateRadius);
-        ctx.lineTo(0, -rotateRadius - 10);
-        ctx.stroke();
-      } else if (tool === "scale") {
-        // Draw scale handles (corners)
-        const boxSize = 20;
-        ctx.fillStyle = dragHandle === "scale" ? hoverColor : "#f59e0b";
-        ctx.fillRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize);
-        // Draw scale lines
-        ctx.strokeStyle = dragHandle === "scale" ? hoverColor : "#f59e0b";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(-boxSize / 2, -boxSize / 2);
-        ctx.lineTo(-boxSize / 2 - 10, -boxSize / 2 - 10);
-        ctx.moveTo(boxSize / 2, -boxSize / 2);
-        ctx.lineTo(boxSize / 2 + 10, -boxSize / 2 - 10);
-        ctx.moveTo(-boxSize / 2, boxSize / 2);
-        ctx.lineTo(-boxSize / 2 - 10, boxSize / 2 + 10);
-        ctx.moveTo(boxSize / 2, boxSize / 2);
-        ctx.lineTo(boxSize / 2 + 10, boxSize / 2 + 10);
-        ctx.stroke();
-      }
-
-      ctx.restore();
-
-      animationFrameId = requestAnimationFrame(draw);
-    };
-
-    animationFrameId = requestAnimationFrame(draw);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
+    ctx.restore();
   }, [transform, camera, canvasWidth, canvasHeight, dragHandle, tool]);
 
   const getHandleAt = (x: number, y: number): GizmoHandle | null => {
@@ -291,11 +266,11 @@ export default function Gizmo({
 
     const handle = getHandleAt(x, y);
     if (handle) {
-      console.log("Gizmo drag started:", handle, { x, y });
       setIsDragging(true);
       setDragHandle(handle);
       setDragStart({ x, y });
       setDragStartTransform({ ...transform });
+      pendingCommitRef.current = { ...transform };
       
       // Calculate grab offset to prevent jumping
       const [wx, wy] = screenToWorld(x, y);
@@ -389,8 +364,6 @@ export default function Gizmo({
           Math.pow(startWorldY - entityWorldY, 2)
         );
         
-        console.log("Scale drag:", { currentDist, startDist, scaleFactor: startDist > 0 ? currentDist / startDist : 1 });
-        
         // Scale factor based on distance change
         if (startDist > 0.001) { // Use small epsilon instead of 0
           const scaleFactor = currentDist / startDist;
@@ -417,35 +390,37 @@ export default function Gizmo({
         }
       }
 
-      // Update transform via IPC
-      try {
-        console.log("Sending transform_set", { entityId, position: newTransform.position, rotation: newTransform.rotation, scale: newTransform.scale });
-        await invoke("transform_set", {
-          entityId,
-          position: newTransform.local_position,
-          rotation: newTransform.local_rotation,
-          scale: newTransform.local_scale,
+      pendingCommitRef.current = newTransform;
+      setTransform(newTransform);
+      if (onTransformUpdate) {
+        onTransformUpdate({
+          position: newTransform.world_position,
+          rotation: newTransform.world_rotation,
+          scale: newTransform.world_scale,
         });
-        setTransform(newTransform);
-        // Update viewport cache immediately for smooth rendering
-        if (onTransformUpdate) {
-          onTransformUpdate({
-            position: newTransform.world_position,
-            rotation: newTransform.world_rotation,
-            scale: newTransform.world_scale,
-          });
-        }
-      } catch (error) {
-        console.error("Failed to update transform:", error);
       }
     }
     // Note: Hover detection could be added here in the future for cursor changes
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
+    const pendingTransform = pendingCommitRef.current;
     setIsDragging(false);
     setDragHandle(null);
     setDragAxisGrabOffset(0);
+    pendingCommitRef.current = null;
+    if (pendingTransform && entityId !== null) {
+      try {
+        await invoke("transform_set", {
+          entityId,
+          position: pendingTransform.local_position,
+          rotation: pendingTransform.local_rotation,
+          scale: pendingTransform.local_scale,
+        });
+      } catch (error) {
+        console.error("Failed to update transform:", error);
+      }
+    }
     // Call transform change callback when drag ends (refresh entities once)
     if (onTransformChange) {
       onTransformChange();

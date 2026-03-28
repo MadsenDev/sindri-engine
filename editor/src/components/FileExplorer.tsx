@@ -15,15 +15,61 @@ interface ProjectFileTree {
 
 interface FileExplorerProps {
   refreshToken: number;
+  onOpenScene: (path: string) => void;
+  onInstantiatePrefab: (path: string) => void;
 }
 
-function FileNodeView({ node, level = 0 }: { node: FileNode; level?: number }) {
+const imageExtensions = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+function fileExtension(path: string) {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function FileNodeView({
+  node,
+  level = 0,
+  onOpenScene,
+  onInstantiatePrefab,
+}: {
+  node: FileNode;
+  level?: number;
+  onOpenScene: (path: string) => void;
+  onInstantiatePrefab: (path: string) => void;
+}) {
   const [expanded, setExpanded] = useState(true);
   const isDirectory = node.is_dir;
+  const extension = fileExtension(node.path);
+  const isImage = imageExtensions.has(extension);
+  const isScene = extension === "json" && /[\\/]scenes[\\/]/.test(node.path);
+  const isPrefab = extension === "prefab" || node.path.endsWith(".prefab.json");
+
+  const handleOpen = () => {
+    if (isScene) {
+      onOpenScene(node.path);
+    } else if (isPrefab) {
+      onInstantiatePrefab(node.path);
+    }
+  };
 
   return (
     <div className="file-node" style={{ paddingLeft: `${level * 14}px` }}>
-      <div className="file-node-row" onClick={() => isDirectory && setExpanded(!expanded)}>
+      <div
+        className="file-node-row"
+        onClick={() => isDirectory && setExpanded(!expanded)}
+        onDoubleClick={() => !isDirectory && handleOpen()}
+        draggable={!isDirectory}
+        onDragStart={(event) => {
+          if (isDirectory) return;
+          event.dataTransfer.setData(
+            "application/x-forge2d-asset",
+            JSON.stringify({
+              path: node.path,
+              kind: isPrefab ? "prefab" : isImage ? "texture" : "file",
+            })
+          );
+          event.dataTransfer.effectAllowed = "copy";
+        }}
+      >
         {isDirectory ? (
           <button
             className="file-toggle"
@@ -39,7 +85,14 @@ function FileNodeView({ node, level = 0 }: { node: FileNode; level?: number }) {
           <span className="file-toggle placeholder" />
         )}
         <div className="file-label">
-          <span className="file-icon">{isDirectory ? "📁" : "📄"}</span>
+          <span className="file-icon">{isDirectory ? "📁" : isImage ? "🖼️" : isPrefab ? "🧩" : isScene ? "🎬" : "📄"}</span>
+          {!isDirectory && isImage && (
+            <img
+              src={node.path}
+              alt=""
+              className="h-8 w-8 rounded border border-gray-700 object-cover bg-black/30"
+            />
+          )}
           <span className="file-name">{node.name}</span>
         </div>
       </div>
@@ -47,7 +100,13 @@ function FileNodeView({ node, level = 0 }: { node: FileNode; level?: number }) {
       {isDirectory && expanded && node.children && node.children.length > 0 && (
         <div className="file-children">
           {node.children.map((child) => (
-            <FileNodeView key={child.path} node={child} level={level + 1} />
+            <FileNodeView
+              key={child.path}
+              node={child}
+              level={level + 1}
+              onOpenScene={onOpenScene}
+              onInstantiatePrefab={onInstantiatePrefab}
+            />
           ))}
         </div>
       )}
@@ -55,7 +114,11 @@ function FileNodeView({ node, level = 0 }: { node: FileNode; level?: number }) {
   );
 }
 
-export default function FileExplorer({ refreshToken }: FileExplorerProps) {
+export default function FileExplorer({
+  refreshToken,
+  onOpenScene,
+  onInstantiatePrefab,
+}: FileExplorerProps) {
   const [tree, setTree] = useState<ProjectFileTree | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -100,7 +163,11 @@ export default function FileExplorer({ refreshToken }: FileExplorerProps) {
             <span className="text-gray-400 text-xs">{root.children?.length ?? 0} items</span>
           </div>
           <div className="file-section-body">
-            <FileNodeView node={root} />
+            <FileNodeView
+              node={root}
+              onOpenScene={onOpenScene}
+              onInstantiatePrefab={onInstantiatePrefab}
+            />
             {(!root.children || root.children.length === 0) && (
               <p className="text-gray-500 text-sm px-2 py-1">Empty folder</p>
             )}
@@ -110,4 +177,3 @@ export default function FileExplorer({ refreshToken }: FileExplorerProps) {
     </div>
   );
 }
-

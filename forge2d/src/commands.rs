@@ -9,6 +9,7 @@
 use anyhow::{anyhow, Result};
 use crate::world::{EntityId, World};
 use crate::entities::Transform;
+use crate::hierarchy;
 use crate::math::Vec2;
 
 /// A command that can be executed and undone.
@@ -138,6 +139,43 @@ pub struct SetTransform {
     new_position: Vec2,
     new_rotation: f32,
     new_scale: Vec2,
+}
+
+/// Command to reparent an entity in the hierarchy.
+#[derive(Clone, Debug)]
+pub struct ReparentEntity {
+    entity: EntityId,
+    old_parent: Option<EntityId>,
+    new_parent: Option<EntityId>,
+}
+
+impl ReparentEntity {
+    pub fn new(entity: EntityId, new_parent: Option<EntityId>) -> Self {
+        Self {
+            entity,
+            old_parent: None,
+            new_parent,
+        }
+    }
+}
+
+impl Command for ReparentEntity {
+    fn execute(&mut self, world: &mut World) -> Result<()> {
+        if self.old_parent.is_none() {
+            self.old_parent = hierarchy::get_parent(world, self.entity);
+        }
+        hierarchy::reparent(world, self.entity, self.new_parent);
+        Ok(())
+    }
+
+    fn undo(&mut self, world: &mut World) -> Result<()> {
+        hierarchy::reparent(world, self.entity, self.old_parent);
+        Ok(())
+    }
+
+    fn description(&self) -> &str {
+        "Reparent Entity"
+    }
 }
 
 impl SetTransform {
@@ -379,4 +417,3 @@ impl Default for CommandHistory {
         Self::new(100) // Default to 100 commands
     }
 }
-

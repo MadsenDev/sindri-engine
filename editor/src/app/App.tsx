@@ -26,8 +26,11 @@ import useSceneTabs from "./hooks/useSceneTabs";
 import { defaultLayout, loadLayout, layoutStorageKey } from "./layout";
 import { panelDefinitions, presetOptions } from "./config";
 import type {
+  CameraInfo,
+  ConsoleEntry,
   EntityInfo,
   PendingSceneAction,
+  PlayState,
   ProjectInfo,
 } from "./types";
 import "./App.css";
@@ -40,13 +43,17 @@ export default function App() {
   );
   const layoutModelRef = useRef(layoutModel);
   const viewportRef = useRef<ViewportHandle>(null);
+  const worldRevisionRef = useRef<number | null>(null);
+  const playCameraRef = useRef<CameraInfo | null>(null);
 
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [entities, setEntities] = useState<EntityInfo[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<number[]>([]);
   const [tool, setTool] = useState<Tool>("move");
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [playState, setPlayState] = useState<PlayState>("stopped");
+  const [playRenderTick, setPlayRenderTick] = useState(0);
+  const [playCamera, setPlayCamera] = useState<CameraInfo | null>(null);
   const [sceneDirty, setSceneDirty] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -56,6 +63,7 @@ export default function App() {
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [pendingSceneAction, setPendingSceneAction] =
     useState<PendingSceneAction | null>(null);
   const [pendingSceneTargetId, setPendingSceneTargetId] = useState<string | null>(null);
@@ -117,9 +125,36 @@ export default function App() {
     layoutModelRef.current = layoutModel;
   }, [layoutModel]);
 
+  useEffect(() => {
+    playCameraRef.current = playCamera;
+  }, [playCamera]);
+
   const pushStatus = useCallback((message: string) => {
     setStatusMessage(message);
+    setConsoleEntries((prev): ConsoleEntry[] => [
+      {
+        id: Date.now() + prev.length,
+        level: "info" as const,
+        message,
+        timestamp: new Date().toLocaleTimeString(),
+      },
+      ...prev,
+    ].slice(0, 200));
     window.setTimeout(() => setStatusMessage(null), 3000);
+  }, []);
+
+  const pushError = useCallback((message: string) => {
+    setStatusMessage(message);
+    setConsoleEntries((prev): ConsoleEntry[] => [
+      {
+        id: Date.now() + prev.length,
+        level: "error" as const,
+        message,
+        timestamp: new Date().toLocaleTimeString(),
+      },
+      ...prev,
+    ].slice(0, 200));
+    window.setTimeout(() => setStatusMessage(null), 5000);
   }, []);
 
   const refreshEditorState = useCallback(async () => {
@@ -133,7 +168,12 @@ export default function App() {
     setSceneDirty(dirty);
   }, []);
 
-  const refreshEntities = useCallback(async () => {
+  const refreshEntities = useCallback(async (force = false) => {
+    const revision = await invoke<number>("world_revision_get");
+    if (!force && worldRevisionRef.current === revision) {
+      return;
+    }
+    worldRevisionRef.current = revision;
     const data = await invoke<EntityInfo[]>("entities_list");
     setEntities(data);
     setSelectedEntityIds((prev) => {
@@ -158,11 +198,11 @@ export default function App() {
   useEffect(() => {
     const bootstrap = async () => {
       const current = await loadProjectInfo();
-      const playing = await invoke<boolean>("play_is_playing");
-      setIsPlaying(playing);
+      const state = await invoke<PlayState>("play_state_get");
+      setPlayState(state);
       await refreshEditorState();
       if (current) {
-        await refreshEntities();
+        await refreshEntities(true);
       }
     };
     bootstrap();
@@ -173,34 +213,69 @@ export default function App() {
   }, [gridSize]);
 
   useEffect(() => {
-    if (!isPlaying) {
+    if (playState === "stopped") {
+      setPlayCamera(null);
       return;
     }
+
+    let frameId = 0;
+    let active = true;
+    let lastTime = 0;
+    let accumulator = 0;
+    let entityRefreshAccumulator = 0;
+    let cameraRefreshAccumulator = 0;
     let inFlight = false;
-    const interval = window.setInterval(async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        await invoke("play_step_physics", { dt: 1 / 60 });
-      } catch (e) {
-        console.error("Physics step failed:", e);
-      } finally {
-        inFlight = false;
+    const targetFps = playState === "playing" ? 24 : 12;
+    const frameInterval = 1000 / targetFps;
+
+    const tick = async (now: number) => {
+      if (!active) return;
+      if (lastTime === 0) {
+        lastTime = now;
       }
-    }, 1000 / 60);
+      const delta = now - lastTime;
+      lastTime = now;
+      accumulator += delta;
+      entityRefreshAccumulator += delta;
+      cameraRefreshAccumulator += delta;
 
-    return () => window.clearInterval(interval);
-  }, [isPlaying]);
+      if (!inFlight && accumulator >= frameInterval) {
+        inFlight = true;
+        accumulator = 0;
+        try {
+          if (playState === "playing") {
+            await invoke("play_step_physics", { dt: 1 / 60 });
+          }
+          if (cameraRefreshAccumulator >= 250 || playCameraRef.current === null) {
+            const nextCamera = await invoke<CameraInfo | null>("active_camera_info");
+            if (active) {
+              setPlayCamera(nextCamera);
+            }
+            cameraRefreshAccumulator = 0;
+          }
+          if (entityRefreshAccumulator >= 1500) {
+            await refreshEntities();
+            entityRefreshAccumulator = 0;
+          }
+          if (active) {
+            setPlayRenderTick((prev) => prev + 1);
+          }
+        } catch (e) {
+          console.error("Shared play scheduler failed:", e);
+        } finally {
+          inFlight = false;
+        }
+      }
 
-  useEffect(() => {
-    if (!isPlaying) {
-      return;
-    }
-    const interval = window.setInterval(() => {
-      refreshEntities().catch(() => undefined);
-    }, 500);
-    return () => window.clearInterval(interval);
-  }, [isPlaying, refreshEntities]);
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => {
+      active = false;
+      cancelAnimationFrame(frameId);
+    };
+  }, [playState, refreshEntities]);
 
   useEffect(() => {
     if (!createMenuOpen && !contextMenu && !panelMenuOpen) {
@@ -570,26 +645,71 @@ export default function App() {
     await requestSceneAction("loadScene");
   };
 
+  const handleOpenScenePath = async (path: string) => {
+    try {
+      await invoke("scene_load", { path });
+      upsertSceneTabForPath(path);
+      updateSelection([]);
+      await refreshEntities();
+      await refreshEditorState();
+      setRefreshToken((prev) => prev + 1);
+      pushStatus(`Opened ${path.split(/[/\\\\]/).pop()}`);
+    } catch (e) {
+      console.error("Open scene failed:", e);
+      pushError("Open scene failed");
+    }
+  };
+
   const handlePlay = async () => {
     try {
       await invoke("play_start");
-      setIsPlaying(true);
+      setPlayState("playing");
       await refreshEditorState();
     } catch (e) {
       console.error("Play failed:", e);
-      pushStatus("Play failed");
+      pushError("Play failed");
+    }
+  };
+
+  const handlePause = async () => {
+    try {
+      await invoke("play_pause");
+      setPlayState("paused");
+    } catch (e) {
+      console.error("Pause failed:", e);
+      pushError("Pause failed");
+    }
+  };
+
+  const handleResume = async () => {
+    try {
+      await invoke("play_resume");
+      setPlayState("playing");
+    } catch (e) {
+      console.error("Resume failed:", e);
+      pushError("Resume failed");
+    }
+  };
+
+  const handleStepFrame = async () => {
+    try {
+      await invoke("play_step_frame", { dt: 1 / 60 });
+      await refreshEntities();
+    } catch (e) {
+      console.error("Step frame failed:", e);
+      pushError("Step failed");
     }
   };
 
   const handleStop = async () => {
     try {
       await invoke("play_stop");
-      setIsPlaying(false);
+      setPlayState("stopped");
       await refreshEntities();
       await refreshEditorState();
     } catch (e) {
       console.error("Stop failed:", e);
-      pushStatus("Stop failed");
+      pushError("Stop failed");
     }
   };
 
@@ -681,6 +801,87 @@ export default function App() {
     } catch (e) {
       console.error("Instantiate prefab failed:", e);
       pushStatus("Prefab instantiate failed");
+    }
+  };
+
+  const handleInstantiatePrefabPath = async (
+    path: string,
+    world?: { x: number; y: number }
+  ) => {
+    try {
+      const command = world ? "prefab_instantiate_at" : "prefab_instantiate";
+      const payload = world
+        ? { path, position: [world.x, world.y] }
+        : { path };
+      const newRoots = await invoke<number[]>(command, payload);
+      if (newRoots.length > 0) {
+        updateSelection(newRoots);
+      }
+      await refreshEntities();
+      await refreshEditorState();
+      setRefreshToken((prev) => prev + 1);
+      pushStatus(`Prefab added: ${path.split(/[/\\\\]/).pop()}`);
+    } catch (e) {
+      console.error("Instantiate prefab failed:", e);
+      pushError("Prefab instantiate failed");
+    }
+  };
+
+  const handleReparent = async (entityId: number, parentId: number | null) => {
+    try {
+      await invoke("entity_reparent", { entityId, parentId });
+      await refreshEntities();
+      await refreshEditorState();
+    } catch (e) {
+      console.error("Reparent failed:", e);
+      pushError("Reparent failed");
+    }
+  };
+
+  const handleViewportAssetDrop = async (
+    asset: { path: string; kind: string },
+    world: { x: number; y: number }
+  ) => {
+    try {
+      if (asset.kind === "prefab") {
+        await handleInstantiatePrefabPath(asset.path, world);
+        return;
+      }
+
+      if (asset.kind === "texture") {
+        const targetEntity =
+          selectedEntityId !== null &&
+          entities.find((entity) => entity.id === selectedEntityId)?.has_sprite
+            ? selectedEntityId
+            : null;
+
+        if (targetEntity !== null) {
+          await invoke("sprite_set_texture_path", {
+            entityId: targetEntity,
+            path: asset.path,
+          });
+          setInspectorRefresh((prev) => prev + 1);
+          await refreshEditorState();
+          pushStatus("Texture assigned");
+          return;
+        }
+
+        const entityId = await invoke<number>("entity_create_preset", {
+          preset: "sprite",
+          position: [world.x, world.y],
+        });
+        await invoke("sprite_set_texture_path", {
+          entityId,
+          path: asset.path,
+        });
+        await refreshEntities();
+        updateSelection([entityId]);
+        await refreshEditorState();
+        pushStatus(`Sprite created from ${asset.path.split(/[/\\\\]/).pop()}`);
+      }
+    } catch (e) {
+      console.error("Asset drop failed:", e);
+      pushError("Asset drop failed");
     }
   };
 
@@ -802,12 +1003,19 @@ export default function App() {
             onSelectionChange={updateSelection}
             onTransformChange={refreshEntities}
             onContextMenuOpen={handleContextMenuOpen}
-            isPlaying={isPlaying}
+            onAssetDrop={handleViewportAssetDrop}
+            isPlaying={playState !== "stopped"}
             tool={tool}
           />
         );
       case "play":
-        return <PlayPanel isPlaying={isPlaying} />;
+        return (
+          <PlayPanel
+            playState={playState}
+            renderTick={playRenderTick}
+            camera={playCamera}
+          />
+        );
       case "hierarchy":
         return (
           <HierarchyPanel
@@ -819,6 +1027,7 @@ export default function App() {
             onInstantiatePrefab={handleInstantiatePrefab}
             onEntityClick={handleEntityClick}
             onContextMenuOpen={(screen) => handleContextMenuOpen(screen)}
+            onReparent={handleReparent}
           />
         );
       case "project":
@@ -827,6 +1036,8 @@ export default function App() {
             refreshToken={refreshToken}
             onImportTexture={handleImportTexture}
             onRefresh={() => setRefreshToken((prev) => prev + 1)}
+            onOpenScene={handleOpenScenePath}
+            onInstantiatePrefab={(path) => void handleInstantiatePrefabPath(path)}
           />
         );
       case "inspector":
@@ -837,7 +1048,7 @@ export default function App() {
           />
         );
       case "console":
-        return <ConsolePanel statusMessage={statusMessage} />;
+        return <ConsolePanel statusMessage={statusMessage} entries={consoleEntries} />;
       default:
         return <div className="panel-body">Unknown panel</div>;
     }
@@ -884,7 +1095,7 @@ export default function App() {
             <Toolbar
               currentTool={tool}
               onToolChange={setTool}
-              isPlaying={isPlaying}
+              playState={playState}
               onUndo={handleUndo}
               onRedo={handleRedo}
               canUndo={canUndo}
@@ -893,6 +1104,9 @@ export default function App() {
               onSave={handleSave}
               onLoad={handleLoad}
               onPlay={handlePlay}
+              onPause={handlePause}
+              onResume={handleResume}
+              onStep={handleStepFrame}
               onStop={handleStop}
             />
           </div>
