@@ -27,7 +27,7 @@ impl EntityId {
 pub struct World {
     next_id: u32,
     alive: HashSet<EntityId>,
-    storages: HashMap<TypeId, Box<dyn Any>>,
+    storages: HashMap<TypeId, Box<dyn Any + Send>>,
 }
 
 impl World {
@@ -56,7 +56,7 @@ impl World {
 
         // Remove from all storages.
         for storage in self.storages.values_mut() {
-            if let Some(map) = storage.downcast_mut::<HashMap<EntityId, Box<dyn Any>>>() {
+            if let Some(map) = storage.downcast_mut::<HashMap<EntityId, Box<dyn Any + Send>>>() {
                 map.remove(&entity);
             }
         }
@@ -74,33 +74,38 @@ impl World {
         self.alive.len()
     }
 
+    /// Return all currently alive entities.
+    pub fn entities(&self) -> Vec<EntityId> {
+        self.alive.iter().copied().collect()
+    }
+
     /// Returns true if there are no entities in the world.
     pub fn is_empty(&self) -> bool {
         self.alive.is_empty()
     }
 
     /// Insert a component of type `T` for an entity, overwriting any existing component of that type.
-    pub fn insert<T: Any>(&mut self, entity: EntityId, component: T) {
+    pub fn insert<T: Any + Send>(&mut self, entity: EntityId, component: T) {
         let type_id = TypeId::of::<T>();
 
         let storage = self
             .storages
             .entry(type_id)
-            .or_insert_with(|| Box::new(HashMap::<EntityId, Box<dyn Any>>::new()));
+            .or_insert_with(|| Box::new(HashMap::<EntityId, Box<dyn Any + Send>>::new()));
 
         let map = storage
-            .downcast_mut::<HashMap<EntityId, Box<dyn Any>>>()
+            .downcast_mut::<HashMap<EntityId, Box<dyn Any + Send>>>()
             .expect("World storage type mismatch");
 
         map.insert(entity, Box::new(component));
     }
 
     /// Remove and return a component of type `T` for an entity, if it exists.
-    pub fn remove<T: Any>(&mut self, entity: EntityId) -> Option<T> {
+    pub fn remove<T: Any + Send>(&mut self, entity: EntityId) -> Option<T> {
         let type_id = TypeId::of::<T>();
         let storage = self.storages.get_mut(&type_id)?;
         let map = storage
-            .downcast_mut::<HashMap<EntityId, Box<dyn Any>>>()
+            .downcast_mut::<HashMap<EntityId, Box<dyn Any + Send>>>()
             .expect("World storage type mismatch");
 
         map.remove(&entity)
@@ -109,11 +114,11 @@ impl World {
     }
 
     /// Get an immutable reference to a component of type `T` for an entity.
-    pub fn get<T: Any>(&self, entity: EntityId) -> Option<&T> {
+    pub fn get<T: Any + Send>(&self, entity: EntityId) -> Option<&T> {
         let type_id = TypeId::of::<T>();
         let storage = self.storages.get(&type_id)?;
         let map = storage
-            .downcast_ref::<HashMap<EntityId, Box<dyn Any>>>()
+            .downcast_ref::<HashMap<EntityId, Box<dyn Any + Send>>>()
             .expect("World storage type mismatch");
 
         map.get(&entity)
@@ -121,11 +126,11 @@ impl World {
     }
 
     /// Get a mutable reference to a component of type `T` for an entity.
-    pub fn get_mut<T: Any>(&mut self, entity: EntityId) -> Option<&mut T> {
+    pub fn get_mut<T: Any + Send>(&mut self, entity: EntityId) -> Option<&mut T> {
         let type_id = TypeId::of::<T>();
         let storage = self.storages.get_mut(&type_id)?;
         let map = storage
-            .downcast_mut::<HashMap<EntityId, Box<dyn Any>>>()
+            .downcast_mut::<HashMap<EntityId, Box<dyn Any + Send>>>()
             .expect("World storage type mismatch");
 
         map.get_mut(&entity)
@@ -137,7 +142,7 @@ impl World {
     /// Returns a vector of `(EntityId, &T)` pairs.
     /// For simplicity (and to avoid lifetime gymnastics) this collects
     /// results into an owned `Vec`. For most games this is sufficient.
-    pub fn query<T: Any>(&self) -> Vec<(EntityId, &T)> {
+    pub fn query<T: Any + Send>(&self) -> Vec<(EntityId, &T)> {
         let type_id = TypeId::of::<T>();
         let storage = match self.storages.get(&type_id) {
             Some(s) => s,
@@ -145,7 +150,7 @@ impl World {
         };
 
         let map = storage
-            .downcast_ref::<HashMap<EntityId, Box<dyn Any>>>()
+            .downcast_ref::<HashMap<EntityId, Box<dyn Any + Send>>>()
             .expect("World storage type mismatch");
 
         map.iter()
@@ -179,5 +184,3 @@ impl World {
         }
     }
 }
-
-

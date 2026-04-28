@@ -4,6 +4,7 @@ import type { PanelDefinition } from "../types";
 interface MenuBarProps {
   hasProject: boolean;
   projectName: string | null;
+  sceneName: string;
   sceneDirty: boolean;
   statusMessage: string | null;
   panelMenuOpen: boolean;
@@ -25,6 +26,7 @@ interface MenuBarProps {
 export default function MenuBar({
   hasProject,
   projectName,
+  sceneName,
   sceneDirty,
   statusMessage,
   panelMenuOpen,
@@ -112,8 +114,7 @@ export default function MenuBar({
               onMouseDown={onStartDragging}
               onDoubleClick={onToggleMaximize}
             >
-              {projectName}
-              {sceneDirty ? " *" : ""}
+              {projectName} / {sceneName}{sceneDirty ? " *" : ""}
             </div>
             <button className="menu-item" onClick={onCloseProject}>
               Close Project

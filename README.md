@@ -28,7 +28,7 @@ anyhow = "1"
 
 ```rust
 use anyhow::Result;
-use forge2d::{Engine, EngineContext, Game, Vec2, VirtualKeyCode};
+use forge2d::{Engine, EngineContext, Game, KeyCode, Vec2};
 
 struct MyGame {
     // Your game state here
@@ -46,7 +46,7 @@ impl Game for MyGame {
         let dt = ctx.delta_time().as_secs_f32();
         
         // Check input
-        if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+        if ctx.input().is_key_pressed(KeyCode::Space) {
             println!("Space pressed!");
         }
         
@@ -54,7 +54,7 @@ impl Game for MyGame {
         let (mx, my) = ctx.input().mouse_position();
         
         // Request exit
-        if ctx.input().is_key_pressed(VirtualKeyCode::Escape) {
+        if ctx.input().is_key_pressed(KeyCode::Escape) {
             ctx.request_exit();
         }
         
@@ -110,20 +110,20 @@ Provides access to engine systems:
 ### Input System
 
 ```rust
-use forge2d::{VirtualKeyCode, MouseButton};
+use forge2d::{KeyCode, MouseButton};
 
 // Check if key is currently held down
-if ctx.input().is_key_down(VirtualKeyCode::W) {
+if ctx.input().is_key_down(KeyCode::KeyW) {
     // Move forward
 }
 
 // Check if key was just pressed this frame
-if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+if ctx.input().is_key_pressed(KeyCode::Space) {
     // Jump
 }
 
 // Check if key was just released this frame
-if ctx.input().is_key_released(VirtualKeyCode::Escape) {
+if ctx.input().is_key_released(KeyCode::Escape) {
     // Pause menu
 }
 

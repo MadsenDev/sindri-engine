@@ -68,14 +68,14 @@ impl<'a> StateMachineLike for StateTransitionHelper<'a> {
 /// # Example
 /// 
 /// ```rust,no_run
-/// use forge2d::{StateMachine, State, StateMachineLike, EngineContext, Renderer, Frame, VirtualKeyCode};
+/// use forge2d::{StateMachine, State, StateMachineLike, EngineContext, Renderer, Frame, KeyCode};
 /// use anyhow::Result;
 /// 
 /// struct MenuState;
 /// 
 /// impl State for MenuState {
 ///     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-///         if ctx.input().is_key_pressed(VirtualKeyCode::Return) {
+///         if ctx.input().is_key_pressed(KeyCode::Enter) {
 ///             sm.push(Box::new(GameplayState::new()));
 ///         }
 ///         Ok(())

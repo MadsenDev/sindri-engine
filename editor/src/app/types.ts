@@ -1,5 +1,6 @@
 export interface EntityInfo {
   id: number;
+  name: string;
   has_transform: boolean;
   has_sprite: boolean;
   has_physics: boolean;
@@ -20,19 +21,7 @@ export interface PanelDefinition {
   component: string;
 }
 
-export type PendingSceneAction =
-  | "closeProject"
-  | "loadScene"
-  | "newScene"
-  | "switchScene"
-  | "closeScene";
-
-export interface SceneTab {
-  id: string;
-  name: string;
-  path: string | null;
-  isDirty: boolean;
-}
+export type PendingSceneAction = "closeProject" | "loadScene" | "newScene";
 
 export type PlayState = "stopped" | "playing" | "paused";
 

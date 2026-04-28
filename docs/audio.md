@@ -44,7 +44,7 @@ impl Game for MyGame {
     }
 
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+        if ctx.input().is_key_pressed(KeyCode::Space) {
             if let Some(handle) = self.jump_sound {
                 ctx.audio().play_sound_handle(handle)?;
             }
@@ -119,7 +119,7 @@ impl Game for MyGame {
     
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Play sound on jump
-        if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+        if ctx.input().is_key_pressed(KeyCode::Space) {
             if ctx.audio().is_available() {
                 let jump_sound = include_bytes!("assets/jump.wav");
                 ctx.audio().play_sound_from_bytes(jump_sound)?;

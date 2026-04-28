@@ -1,7 +1,7 @@
 use anyhow::Result;
 use forge2d::{
     camera::CameraFollow,
-    hud::{HudLayer, HudText},
+    hud::{HudLayer, HudText, TextAlign},
     math::{Camera2D, Vec2},
     pathfinding::{AStarPathfinder, GridNode, PathfindingGrid},
     render::{Renderer, Sprite, TextureHandle},
@@ -416,6 +416,7 @@ impl Game for PathfindingDemo {
                 size: 20.0,
                 position: Vec2::new(10.0, 10.0),
                 color: [1.0, 1.0, 1.0, 1.0],
+                align: TextAlign::Left,
             });
             self.hud.add_text(HudText {
                 text: "Right Click: Set goal for path visualization".to_string(),
@@ -423,6 +424,7 @@ impl Game for PathfindingDemo {
                 size: 20.0,
                 position: Vec2::new(10.0, 35.0),
                 color: [1.0, 1.0, 1.0, 1.0],
+                align: TextAlign::Left,
             });
             self.hud.add_text(HudText {
                 text: "Space: Command agent to move to goal".to_string(),
@@ -430,6 +432,7 @@ impl Game for PathfindingDemo {
                 size: 20.0,
                 position: Vec2::new(10.0, 60.0),
                 color: [1.0, 1.0, 1.0, 1.0],
+                align: TextAlign::Left,
             });
         }
         self.hud.draw(renderer, &mut frame)?;
@@ -446,4 +449,3 @@ fn main() -> Result<()> {
         .with_vsync(true)
         .run(PathfindingDemo::new())
 }
-

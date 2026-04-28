@@ -1,19 +1,11 @@
-import { useState } from "react";
-
-interface EntityInfo {
-  id: number;
-  has_transform: boolean;
-  has_sprite: boolean;
-  has_physics: boolean;
-  has_camera: boolean;
-  parent_id: number | null;
-  children: number[];
-}
+import { useEffect, useRef, useState } from "react";
+import type { EntityInfo } from "../app/types";
 
 interface HierarchyProps {
   entities: EntityInfo[];
   selectedEntityId: number | null;
   onEntityClick: (entityId: number) => void;
+  onRename: (entityId: number, name: string) => void;
   onContextMenuOpen?: (screen: { x: number; y: number }) => void;
   onReparent?: (entityId: number, parentId: number | null) => void;
 }
@@ -23,6 +15,7 @@ function HierarchyNode({
   entities,
   selectedEntityId,
   onEntityClick,
+  onRename,
   onReparent,
   level = 0,
 }: {
@@ -30,24 +23,54 @@ function HierarchyNode({
   entities: EntityInfo[];
   selectedEntityId: number | null;
   onEntityClick: (entityId: number) => void;
+  onRename: (entityId: number, name: string) => void;
   onReparent?: (entityId: number, parentId: number | null) => void;
   level?: number;
 }) {
   const [expanded, setExpanded] = useState(true);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(entity.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const hasChildren = entity.children.length > 0;
   const isSelected = selectedEntityId === entity.id;
+
+  useEffect(() => {
+    if (isRenaming && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isRenaming]);
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== entity.name) {
+      onRename(entity.id, trimmed);
+    } else {
+      setRenameValue(entity.name);
+    }
+    setIsRenaming(false);
+  };
 
   const childEntities = entity.children
     .map((childId) => entities.find((e) => e.id === childId))
     .filter((e): e is EntityInfo => e !== undefined);
+
+  const componentTags: string[] = [];
+  if (entity.has_transform) componentTags.push("T");
+  if (entity.has_sprite) componentTags.push("S");
+  if (entity.has_physics) componentTags.push("P");
+  if (entity.has_camera) componentTags.push("C");
 
   return (
     <div>
       <div
         className={`hierarchy-item ${isSelected ? "selected" : ""}`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
-        onClick={() => onEntityClick(entity.id)}
-        draggable
+        onClick={() => {
+          if (!isRenaming) onEntityClick(entity.id);
+        }}
+        draggable={!isRenaming}
         onDragStart={(event) => {
           event.dataTransfer.setData("application/x-forge2d-entity", String(entity.id));
           event.dataTransfer.effectAllowed = "move";
@@ -78,17 +101,40 @@ function HierarchyNode({
           </button>
         )}
         {!hasChildren && <span className="collapse-placeholder" />}
-        <div className="flex flex-col gap-1">
-          <span className="font-mono text-sm">Entity {entity.id}</span>
-          <div className="flex items-center gap-1 text-[11px] text-gray-400">
-            {entity.has_transform && <span className="component-tag">Transform</span>}
-            {entity.has_sprite && <span className="component-tag">Sprite</span>}
-            {entity.has_physics && <span className="component-tag">Physics</span>}
-            {entity.has_camera && <span className="component-tag">Camera</span>}
-            {!entity.has_transform && !entity.has_sprite && !entity.has_physics && !entity.has_camera && (
-              <span className="text-gray-500">Empty</span>
-            )}
-          </div>
+
+        <div className="hierarchy-item-body">
+          {isRenaming ? (
+            <input
+              ref={inputRef}
+              className="hierarchy-rename-input"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") {
+                  setRenameValue(entity.name);
+                  setIsRenaming(false);
+                }
+                e.stopPropagation();
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              className="hierarchy-item-name"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setRenameValue(entity.name);
+                setIsRenaming(true);
+              }}
+            >
+              {entity.name}
+            </span>
+          )}
+          {componentTags.length > 0 && (
+            <span className="hierarchy-item-tags">{componentTags.join(" · ")}</span>
+          )}
         </div>
       </div>
       {hasChildren && expanded && (
@@ -100,6 +146,7 @@ function HierarchyNode({
               entities={entities}
               selectedEntityId={selectedEntityId}
               onEntityClick={onEntityClick}
+              onRename={onRename}
               onReparent={onReparent}
               level={level + 1}
             />
@@ -114,15 +161,15 @@ export default function Hierarchy({
   entities,
   selectedEntityId,
   onEntityClick,
+  onRename,
   onContextMenuOpen,
   onReparent,
 }: HierarchyProps) {
-  // Find root entities (those with no parent)
   const rootEntities = entities.filter((e) => e.parent_id === null);
 
   return (
     <div
-      className="h-full overflow-y-auto"
+      className="hierarchy-scroll"
       onContextMenu={(e) => {
         if (!onContextMenuOpen) return;
         e.preventDefault();
@@ -142,7 +189,7 @@ export default function Hierarchy({
       }}
     >
       {rootEntities.length === 0 ? (
-        <p className="text-gray-400 text-sm p-2">No entities</p>
+        <p className="hierarchy-empty">No entities in scene</p>
       ) : (
         <div>
           {rootEntities.map((entity) => (
@@ -152,6 +199,7 @@ export default function Hierarchy({
               entities={entities}
               selectedEntityId={selectedEntityId}
               onEntityClick={onEntityClick}
+              onRename={onRename}
               onReparent={onReparent}
             />
           ))}

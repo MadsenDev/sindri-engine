@@ -19,12 +19,10 @@ import InspectorPanel from "../panels/InspectorPanel";
 import ConsolePanel from "../panels/ConsolePanel";
 import type { ViewportHandle } from "../components/Viewport";
 import MenuBar from "./ui/MenuBar";
-import SceneTabs from "./ui/SceneTabs";
 import ConfirmDialog from "./ui/ConfirmDialog";
 import SceneContextMenu from "./ui/SceneContextMenu";
-import useSceneTabs from "./hooks/useSceneTabs";
 import { defaultLayout, loadLayout, layoutStorageKey } from "./layout";
-import { panelDefinitions, presetOptions } from "./config";
+import { panelDefinitions, presetOptions, getSceneName } from "./config";
 import type {
   CameraInfo,
   ConsoleEntry,
@@ -35,6 +33,11 @@ import type {
 } from "./types";
 import "./App.css";
 import "flexlayout-react/style/dark.css";
+
+interface CurrentScene {
+  path: string | null;
+  name: string;
+}
 
 export default function App() {
   const appWindow = getCurrentWindow();
@@ -47,6 +50,7 @@ export default function App() {
   const playCameraRef = useRef<CameraInfo | null>(null);
 
   const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [currentScene, setCurrentScene] = useState<CurrentScene>({ path: null, name: "Untitled" });
   const [entities, setEntities] = useState<EntityInfo[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<number[]>([]);
@@ -66,17 +70,6 @@ export default function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [pendingSceneAction, setPendingSceneAction] =
     useState<PendingSceneAction | null>(null);
-  const [pendingSceneTargetId, setPendingSceneTargetId] = useState<string | null>(null);
-  const {
-    sceneTabs,
-    setSceneTabs,
-    activeSceneId,
-    setActiveSceneId,
-    createUntitledTab,
-    applySceneSavePath,
-    upsertSceneTabForPath,
-    setActiveTabDirty,
-  } = useSceneTabs({ project, sceneDirty });
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -345,21 +338,15 @@ export default function App() {
   };
 
   const runPendingAction = useCallback(
-    async (
-      action: PendingSceneAction,
-      forceCloseProject: boolean,
-      targetIdOverride?: string | null
-    ) => {
-      const targetId = targetIdOverride ?? pendingSceneTargetId;
+    async (action: PendingSceneAction, forceCloseProject: boolean) => {
       if (action === "closeProject") {
         try {
           await invoke("project_close", { force: forceCloseProject });
           setProject(null);
+          setCurrentScene({ path: null, name: "Untitled" });
           updateSelection([]);
           setEntities([]);
           pushStatus("Project closed");
-          setSceneTabs([]);
-          setActiveSceneId(null);
         } catch (e) {
           console.error("Close project failed:", e);
           pushStatus("Close project failed");
@@ -370,9 +357,7 @@ export default function App() {
       if (action === "newScene") {
         try {
           await invoke("scene_new");
-          const tab = createUntitledTab();
-          setSceneTabs((prev) => [...prev, tab]);
-          setActiveSceneId(tab.id);
+          setCurrentScene({ path: null, name: "Untitled" });
           updateSelection([]);
           await refreshEntities();
           await refreshEditorState();
@@ -397,7 +382,7 @@ export default function App() {
             return;
           }
           await invoke("scene_load", { path });
-          upsertSceneTabForPath(path);
+          setCurrentScene({ path, name: getSceneName(path, "Scene") });
           updateSelection([]);
           await refreshEntities();
           await refreshEditorState();
@@ -409,76 +394,18 @@ export default function App() {
         }
         return;
       }
-
-      if (action === "switchScene") {
-        if (!targetId) {
-          return;
-        }
-        const target = sceneTabs.find((tab) => tab.id === targetId);
-        if (!target || target.id === activeSceneId) {
-          return;
-        }
-        try {
-          if (target.path) {
-            await invoke("scene_load", { path: target.path });
-          } else {
-            await invoke("scene_new");
-          }
-          setActiveSceneId(target.id);
-          updateSelection([]);
-          await refreshEntities();
-          await refreshEditorState();
-          setRefreshToken((prev) => prev + 1);
-        } catch (e) {
-          console.error("Switch scene failed:", e);
-          pushStatus("Switch scene failed");
-        }
-        return;
-      }
-
-      if (action === "closeScene") {
-        if (!targetId) {
-          return;
-        }
-        setSceneTabs((prev) => prev.filter((tab) => tab.id !== targetId));
-        if (activeSceneId === targetId) {
-          const remaining = sceneTabs.filter((tab) => tab.id !== targetId);
-          if (remaining.length > 0) {
-            await runPendingAction("switchScene", forceCloseProject, remaining[0].id);
-          } else {
-            await invoke("scene_new");
-            const tab = createUntitledTab();
-            setSceneTabs([tab]);
-            setActiveSceneId(tab.id);
-            updateSelection([]);
-            await refreshEntities();
-            await refreshEditorState();
-          }
-        }
-      }
     },
     [
       pushStatus,
       refreshEditorState,
       refreshEntities,
-      updateSelection,
-      setProject,
-      setEntities,
-      open,
-      createUntitledTab,
-      upsertSceneTabForPath,
-      pendingSceneTargetId,
-      sceneTabs,
-      activeSceneId,
     ]
   );
 
   const requestSceneAction = useCallback(
-    async (action: PendingSceneAction, targetId?: string | null) => {
-      setPendingSceneTargetId(targetId ?? null);
+    async (action: PendingSceneAction) => {
       if (!sceneDirty) {
-        await runPendingAction(action, false, targetId ?? null);
-        setPendingSceneTargetId(null);
+        await runPendingAction(action, false);
         return;
       }
       setPendingSceneAction(action);
@@ -488,18 +415,13 @@ export default function App() {
 
   const handleConfirmCancel = () => {
     setPendingSceneAction(null);
-    setPendingSceneTargetId(null);
   };
 
   const handleConfirmDiscard = async () => {
     const action = pendingSceneAction;
     setPendingSceneAction(null);
     if (!action) return;
-    if (action === "switchScene" || action === "closeScene") {
-      setActiveTabDirty(false);
-    }
     await runPendingAction(action, true);
-    setPendingSceneTargetId(null);
   };
 
   const handleConfirmSave = async () => {
@@ -509,13 +431,12 @@ export default function App() {
     }
     try {
       const savedPath = await invoke<string>("scene_save", { path: null });
-      applySceneSavePath(savedPath);
+      setCurrentScene({ path: savedPath, name: getSceneName(savedPath, currentScene.name) });
       await refreshEditorState();
       setRefreshToken((prev) => prev + 1);
       pushStatus("Scene saved");
       setPendingSceneAction(null);
       await runPendingAction(action, false);
-      setPendingSceneTargetId(null);
     } catch (e) {
       console.error("Save failed:", e);
       pushStatus("Save failed");
@@ -607,7 +528,7 @@ export default function App() {
   const handleSave = async () => {
     try {
       const savedPath = await invoke<string>("scene_save", { path: null });
-      applySceneSavePath(savedPath);
+      setCurrentScene({ path: savedPath, name: getSceneName(savedPath, currentScene.name) });
       await refreshEditorState();
       setRefreshToken((prev) => prev + 1);
       pushStatus("Scene saved");
@@ -631,7 +552,7 @@ export default function App() {
         return;
       }
       const savedPath = await invoke<string>("scene_save", { path });
-      applySceneSavePath(savedPath);
+      setCurrentScene({ path: savedPath, name: getSceneName(savedPath, currentScene.name) });
       await refreshEditorState();
       setRefreshToken((prev) => prev + 1);
       pushStatus("Scene saved");
@@ -648,12 +569,12 @@ export default function App() {
   const handleOpenScenePath = async (path: string) => {
     try {
       await invoke("scene_load", { path });
-      upsertSceneTabForPath(path);
+      setCurrentScene({ path, name: getSceneName(path, "Scene") });
       updateSelection([]);
       await refreshEntities();
       await refreshEditorState();
       setRefreshToken((prev) => prev + 1);
-      pushStatus(`Opened ${path.split(/[/\\\\]/).pop()}`);
+      pushStatus(`Opened ${path.split(/[/\\]/).pop()}`);
     } catch (e) {
       console.error("Open scene failed:", e);
       pushError("Open scene failed");
@@ -720,6 +641,7 @@ export default function App() {
   const handleProjectOpen = async () => {
     const current = await loadProjectInfo();
     if (current) {
+      setCurrentScene({ path: null, name: "Untitled" });
       await refreshEntities();
       await refreshEditorState();
       setRefreshToken((prev) => prev + 1);
@@ -770,7 +692,7 @@ export default function App() {
         path,
       });
       setRefreshToken((prev) => prev + 1);
-      pushStatus(`Prefab saved: ${savedPath.split(/[/\\\\]/).pop()}`);
+      pushStatus(`Prefab saved: ${savedPath.split(/[/\\]/).pop()}`);
     } catch (e) {
       console.error("Save prefab failed:", e);
       pushStatus("Prefab save failed");
@@ -820,10 +742,19 @@ export default function App() {
       await refreshEntities();
       await refreshEditorState();
       setRefreshToken((prev) => prev + 1);
-      pushStatus(`Prefab added: ${path.split(/[/\\\\]/).pop()}`);
+      pushStatus(`Prefab added: ${path.split(/[/\\]/).pop()}`);
     } catch (e) {
       console.error("Instantiate prefab failed:", e);
       pushError("Prefab instantiate failed");
+    }
+  };
+
+  const handleRename = async (entityId: number, name: string) => {
+    try {
+      await invoke("entity_rename", { entityId, name });
+      await refreshEntities();
+    } catch (e) {
+      console.error("Rename failed:", e);
     }
   };
 
@@ -877,27 +808,12 @@ export default function App() {
         await refreshEntities();
         updateSelection([entityId]);
         await refreshEditorState();
-        pushStatus(`Sprite created from ${asset.path.split(/[/\\\\]/).pop()}`);
+        pushStatus(`Sprite created from ${asset.path.split(/[/\\]/).pop()}`);
       }
     } catch (e) {
       console.error("Asset drop failed:", e);
       pushError("Asset drop failed");
     }
-  };
-
-  const handleSceneTabSelect = async (tabId: string) => {
-    if (tabId === activeSceneId) {
-      return;
-    }
-    await requestSceneAction("switchScene", tabId);
-  };
-
-  const handleSceneTabClose = async (tabId: string) => {
-    if (tabId === activeSceneId) {
-      await requestSceneAction("closeScene", tabId);
-      return;
-    }
-    setSceneTabs((prev) => prev.filter((tab) => tab.id !== tabId));
   };
 
   const handleContextMenuOpen = (
@@ -1026,6 +942,7 @@ export default function App() {
             onSavePrefab={handleSavePrefab}
             onInstantiatePrefab={handleInstantiatePrefab}
             onEntityClick={handleEntityClick}
+            onRename={handleRename}
             onContextMenuOpen={(screen) => handleContextMenuOpen(screen)}
             onReparent={handleReparent}
           />
@@ -1044,6 +961,11 @@ export default function App() {
         return (
           <InspectorPanel
             selectedEntityId={selectedEntityId}
+            selectedEntityName={
+              selectedEntityId !== null
+                ? (entities.find((e) => e.id === selectedEntityId)?.name ?? null)
+                : null
+            }
             inspectorRefresh={inspectorRefresh}
           />
         );
@@ -1061,6 +983,7 @@ export default function App() {
       <MenuBar
         hasProject={hasProject}
         projectName={project?.name ?? null}
+        sceneName={currentScene.name}
         sceneDirty={sceneDirty}
         statusMessage={statusMessage}
         panelMenuOpen={panelMenuOpen}
@@ -1078,16 +1001,6 @@ export default function App() {
         onCloseWindow={handleCloseWindow}
         onStartDragging={handleStartDragging}
       />
-
-      {hasProject && (
-        <SceneTabs
-          tabs={sceneTabs}
-          activeTabId={activeSceneId}
-          onSelect={handleSceneTabSelect}
-          onClose={handleSceneTabClose}
-          onAdd={handleNewScene}
-        />
-      )}
 
       {hasProject ? (
         <>

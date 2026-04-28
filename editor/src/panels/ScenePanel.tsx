@@ -99,7 +99,6 @@ export default function ScenePanel({
           <span className="viewport-pill">
             Selection: {selectedEntityIds.length || (selectedEntityId ? 1 : 0)}
           </span>
-          <span className="viewport-pill muted">Grid: {Math.round(gridSize)}px</span>
           <label className="viewport-pill muted">
             Grid
             <input

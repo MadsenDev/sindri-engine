@@ -35,7 +35,7 @@ impl State for MenuState {
 
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
         // Called every frame (only for the top state)
-        if ctx.input().is_key_pressed(VirtualKeyCode::Return) {
+        if ctx.input().is_key_pressed(KeyCode::Enter) {
             sm.push(Box::new(GameplayState::new()));
         }
         Ok(())
@@ -72,7 +72,7 @@ States can transition during `update()`:
 ```rust
 impl State for MenuState {
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::Return) {
+        if ctx.input().is_key_pressed(KeyCode::Enter) {
             // Push a new state (menu stays in stack, but paused)
             sm.push(Box::new(GameplayState::new()));
         }
@@ -82,12 +82,12 @@ impl State for MenuState {
 
 impl State for GameplayState {
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::P) {
+        if ctx.input().is_key_pressed(KeyCode::KeyP) {
             // Push pause overlay
             sm.push(Box::new(PauseState));
         }
         
-        if ctx.input().is_key_pressed(VirtualKeyCode::Escape) {
+        if ctx.input().is_key_pressed(KeyCode::Escape) {
             // Pop this state (return to previous state)
             sm.pop();
         }
@@ -97,12 +97,12 @@ impl State for GameplayState {
 
 impl State for PauseState {
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::P) {
+        if ctx.input().is_key_pressed(KeyCode::KeyP) {
             // Pop pause (return to gameplay)
             sm.pop();
         }
         
-        if ctx.input().is_key_pressed(VirtualKeyCode::Escape) {
+        if ctx.input().is_key_pressed(KeyCode::Escape) {
             // Pop pause and gameplay (return to menu)
             sm.pop(); // Pop pause
             sm.pop(); // Pop gameplay
@@ -169,7 +169,7 @@ This allows:
 ```rust
 impl State for MenuState {
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::Return) {
+        if ctx.input().is_key_pressed(KeyCode::Enter) {
             sm.replace(Box::new(GameplayState::new())); // Replace menu with gameplay
         }
         Ok(())
@@ -182,7 +182,7 @@ impl State for MenuState {
 ```rust
 impl State for GameplayState {
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::P) {
+        if ctx.input().is_key_pressed(KeyCode::KeyP) {
             sm.push(Box::new(PauseState)); // Push pause on top
         }
         Ok(())
@@ -206,7 +206,7 @@ impl State for PauseState {
 ```rust
 impl State for PauseState {
     fn update(&mut self, ctx: &mut EngineContext, sm: &mut dyn StateMachineLike) -> Result<()> {
-        if ctx.input().is_key_pressed(VirtualKeyCode::P) {
+        if ctx.input().is_key_pressed(KeyCode::KeyP) {
             sm.pop(); // Return to gameplay
         }
         Ok(())
@@ -258,4 +258,3 @@ Run it with:
 ```bash
 cargo run -p state_demo
 ```
-

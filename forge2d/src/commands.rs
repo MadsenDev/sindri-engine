@@ -7,10 +7,11 @@
 //! - Collaboration (future)
 
 use anyhow::{anyhow, Result};
-use crate::world::{EntityId, World};
-use crate::entities::Transform;
+use crate::entities::{CameraComponent, PhysicsBody, SpriteComponent, Transform};
 use crate::hierarchy;
 use crate::math::Vec2;
+use crate::script::ScriptTag;
+use crate::world::{EntityId, World};
 
 /// A command that can be executed and undone.
 pub trait Command: Send + Sync {
@@ -41,10 +42,9 @@ impl Command for CreateEntity {
         if self.entity.is_none() {
             self.entity = Some(world.spawn());
         } else {
-            // Entity already created, just ensure it exists
             if let Some(entity) = self.entity {
                 if !world.is_alive(entity) {
-                    return Err(anyhow!("Entity was despawned"));
+                    world.restore_entity(entity);
                 }
             }
         }
@@ -76,54 +76,65 @@ impl CreateEntity {
 #[derive(Clone, Debug)]
 pub struct DeleteEntity {
     entity: EntityId,
-    had_transform: bool,
     transform: Option<Transform>,
-    // Store other components as serialized data if needed
-    // For now, we'll just track Transform since it's the most common
+    sprite: Option<SpriteComponent>,
+    physics: Option<PhysicsBody>,
+    camera: Option<CameraComponent>,
+    script_tag: Option<ScriptTag>,
+    captured: bool,
 }
 
 impl DeleteEntity {
     pub fn new(entity: EntityId) -> Self {
         Self {
             entity,
-            had_transform: false,
             transform: None,
+            sprite: None,
+            physics: None,
+            camera: None,
+            script_tag: None,
+            captured: false,
         }
     }
 }
 
 impl Command for DeleteEntity {
     fn execute(&mut self, world: &mut World) -> Result<()> {
-        // Store components before deletion
-        if let Some(transform) = world.get::<Transform>(self.entity) {
-            self.had_transform = true;
-            self.transform = Some(transform.clone());
+        if !self.captured {
+            self.transform = world.get::<Transform>(self.entity).cloned();
+            self.sprite = world.get::<SpriteComponent>(self.entity).cloned();
+            self.physics = world.get::<PhysicsBody>(self.entity).copied();
+            self.camera = world.get::<CameraComponent>(self.entity).cloned();
+            self.script_tag = world.get::<ScriptTag>(self.entity).cloned();
+            self.captured = true;
         }
-        
+
         world.despawn(self.entity);
         Ok(())
     }
-    
+
     fn undo(&mut self, world: &mut World) -> Result<()> {
-        // Recreate entity
-        // Note: We can't guarantee the same EntityId, so we'll need to handle this differently
-        // For now, we'll create a new entity and restore components
-        let new_entity = world.spawn();
-        
-        if self.had_transform {
-            if let Some(transform) = self.transform.take() {
-                world.insert(new_entity, transform);
-            }
+        world.restore_entity(self.entity);
+
+        if let Some(transform) = &self.transform {
+            world.insert(self.entity, transform.clone());
         }
-        
-        // Update entity ID for future operations
-        // This is a limitation - we can't restore the exact same EntityId
-        // In a real editor, you'd want to track entity ID mappings
-        self.entity = new_entity;
-        
+        if let Some(sprite) = &self.sprite {
+            world.insert(self.entity, sprite.clone());
+        }
+        if let Some(physics) = self.physics {
+            world.insert(self.entity, physics);
+        }
+        if let Some(camera) = &self.camera {
+            world.insert(self.entity, camera.clone());
+        }
+        if let Some(script_tag) = &self.script_tag {
+            world.insert(self.entity, script_tag.clone());
+        }
+
         Ok(())
     }
-    
+
     fn description(&self) -> &str {
         "Delete Entity"
     }
@@ -133,6 +144,7 @@ impl Command for DeleteEntity {
 #[derive(Clone, Debug)]
 pub struct SetTransform {
     entity: EntityId,
+    had_transform: bool,
     old_position: Option<Vec2>,
     old_rotation: Option<f32>,
     old_scale: Option<Vec2>,
@@ -182,6 +194,7 @@ impl SetTransform {
     pub fn new(entity: EntityId, position: Vec2, rotation: f32, scale: Vec2) -> Self {
         Self {
             entity,
+            had_transform: false,
             old_position: None,
             old_rotation: None,
             old_scale: None,
@@ -194,39 +207,48 @@ impl SetTransform {
 
 impl Command for SetTransform {
     fn execute(&mut self, world: &mut World) -> Result<()> {
+        if self.old_position.is_none() {
+            self.had_transform = world.get::<Transform>(self.entity).is_some();
+        }
+
         if let Some(transform) = world.get_mut::<Transform>(self.entity) {
-            // Store old values
             if self.old_position.is_none() {
                 self.old_position = Some(transform.position);
                 self.old_rotation = Some(transform.rotation);
                 self.old_scale = Some(transform.scale);
             }
-            
-            // Apply new values
+
             transform.position = self.new_position;
             transform.rotation = self.new_rotation;
             transform.scale = self.new_scale;
         } else {
-            // Create transform if it doesn't exist
-            world.insert(self.entity, Transform::new(self.new_position)
-                .with_rotation(self.new_rotation)
-                .with_scale(self.new_scale));
+            world.insert(
+                self.entity,
+                Transform::new(self.new_position)
+                    .with_rotation(self.new_rotation)
+                    .with_scale(self.new_scale),
+            );
         }
         Ok(())
     }
-    
+
     fn undo(&mut self, world: &mut World) -> Result<()> {
-        if let Some(transform) = world.get_mut::<Transform>(self.entity) {
-            if let (Some(old_pos), Some(old_rot), Some(old_scale)) = 
-                (self.old_position, self.old_rotation, self.old_scale) {
-                transform.position = old_pos;
-                transform.rotation = old_rot;
-                transform.scale = old_scale;
+        if self.had_transform {
+            if let Some(transform) = world.get_mut::<Transform>(self.entity) {
+                if let (Some(old_pos), Some(old_rot), Some(old_scale)) =
+                    (self.old_position, self.old_rotation, self.old_scale)
+                {
+                    transform.position = old_pos;
+                    transform.rotation = old_rot;
+                    transform.scale = old_scale;
+                }
             }
+        } else {
+            world.remove::<Transform>(self.entity);
         }
         Ok(())
     }
-    
+
     fn description(&self) -> &str {
         "Set Transform"
     }
@@ -257,30 +279,26 @@ impl<T: Clone + Send + Sync + 'static> AddComponent<T> {
 
 impl<T: Clone + Send + Sync + 'static> Command for AddComponent<T> {
     fn execute(&mut self, world: &mut World) -> Result<()> {
-        // Store old component if it exists
-        if let Some(_old) = world.get::<T>(self.entity) {
-            self.had_component = true;
-            // We can't clone from a reference, so we'll just mark it
-            // In practice, you'd serialize/deserialize for undo
+        if self.old_component.is_none() {
+            self.old_component = world.get::<T>(self.entity).cloned();
+            self.had_component = self.old_component.is_some();
         }
-        
+
         world.insert(self.entity, self.component.clone());
         Ok(())
     }
-    
+
     fn undo(&mut self, world: &mut World) -> Result<()> {
         if self.had_component {
-            // Restore old component if we had one
-            // This is a limitation - we'd need to store the old component
-            // For now, we'll just remove it
-            world.remove::<T>(self.entity);
+            if let Some(old_component) = &self.old_component {
+                world.insert(self.entity, old_component.clone());
+            }
         } else {
-            // Remove the component we added
             world.remove::<T>(self.entity);
         }
         Ok(())
     }
-    
+
     fn description(&self) -> &str {
         "Add Component"
     }
@@ -304,19 +322,20 @@ impl<T: Clone + Send + Sync + 'static> RemoveComponent<T> {
 
 impl<T: Clone + Send + Sync + 'static> Command for RemoveComponent<T> {
     fn execute(&mut self, world: &mut World) -> Result<()> {
+        let removed = world.remove::<T>(self.entity);
         if self.component.is_none() {
-            self.component = world.remove::<T>(self.entity);
+            self.component = removed.clone();
         }
         Ok(())
     }
-    
+
     fn undo(&mut self, world: &mut World) -> Result<()> {
-        if let Some(component) = self.component.take() {
-            world.insert(self.entity, component);
+        if let Some(component) = &self.component {
+            world.insert(self.entity, component.clone());
         }
         Ok(())
     }
-    
+
     fn description(&self) -> &str {
         "Remove Component"
     }
@@ -341,24 +360,18 @@ impl CommandHistory {
     
     /// Execute a command and add it to history.
     pub fn execute(&mut self, mut command: Box<dyn Command>, world: &mut World) -> Result<()> {
-        // Remove any commands after current_index (when we're in the middle of history)
         if self.current_index < self.history.len() {
             self.history.truncate(self.current_index);
         }
-        
-        // Execute command
+
         command.execute(world)?;
-        
-        // Add to history
         self.history.push(command);
-        
-        // Limit history size
+
         if self.history.len() > self.max_history {
             self.history.remove(0);
-        } else {
-            self.current_index = self.history.len();
         }
-        
+        self.current_index = self.history.len();
+
         Ok(())
     }
     

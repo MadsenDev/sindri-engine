@@ -6,7 +6,7 @@ Code examples and common patterns for Forge2D.
 
 ```rust
 use anyhow::Result;
-use forge2d::{Engine, EngineContext, Game, Vec2, VirtualKeyCode};
+use forge2d::{Engine, EngineContext, Game, KeyCode, Vec2};
 
 struct MyGame {
     // Your game state
@@ -48,16 +48,16 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
     
     let mut move_dir = Vec2::ZERO;
     
-    if input.is_key_down(VirtualKeyCode::W) {
+    if input.is_key_down(KeyCode::KeyW) {
         move_dir.y -= 1.0;
     }
-    if input.is_key_down(VirtualKeyCode::S) {
+    if input.is_key_down(KeyCode::KeyS) {
         move_dir.y += 1.0;
     }
-    if input.is_key_down(VirtualKeyCode::A) {
+    if input.is_key_down(KeyCode::KeyA) {
         move_dir.x -= 1.0;
     }
-    if input.is_key_down(VirtualKeyCode::D) {
+    if input.is_key_down(KeyCode::KeyD) {
         move_dir.x += 1.0;
     }
     
@@ -255,7 +255,7 @@ impl Game for MyGame {
 
 ```rust
 fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
-    if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+    if ctx.input().is_key_pressed(KeyCode::Space) {
         // Play jump sound
         if ctx.audio().is_available() {
             let jump_sound = include_bytes!("assets/jump.wav");

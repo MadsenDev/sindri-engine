@@ -69,9 +69,9 @@ impl EngineContext {
 pub struct InputState { /* ... */ }
 
 impl InputState {
-    pub fn is_key_down(&self, key: VirtualKeyCode) -> bool;
-    pub fn is_key_pressed(&self, key: VirtualKeyCode) -> bool;
-    pub fn is_key_released(&self, key: VirtualKeyCode) -> bool;
+    pub fn is_key_down(&self, key: KeyCode) -> bool;
+    pub fn is_key_pressed(&self, key: KeyCode) -> bool;
+    pub fn is_key_released(&self, key: KeyCode) -> bool;
     pub fn is_mouse_down(&self, button: MouseButton) -> bool;
     pub fn is_mouse_pressed(&self, button: MouseButton) -> bool;
     pub fn is_mouse_released(&self, button: MouseButton) -> bool;
@@ -823,5 +823,5 @@ impl EntityId {
 
 Forge2D re-exports the following from `winit`:
 
-- `VirtualKeyCode` - Keyboard key codes
+- `KeyCode` - Keyboard key codes
 - `MouseButton` - Mouse button types

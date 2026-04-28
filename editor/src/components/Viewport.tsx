@@ -4,16 +4,7 @@ import { decodeRawFrame } from "../app/frameDecoder";
 import { presentImageData } from "../app/framePresenter";
 import Gizmo from "./Gizmo";
 import { Tool } from "./Toolbar";
-
-interface EntityInfo {
-  id: number;
-  has_transform: boolean;
-  has_sprite: boolean;
-  has_physics: boolean;
-  has_camera: boolean;
-  parent_id: number | null;
-  children: number[];
-}
+import type { EntityInfo, CameraInfo } from "../app/types";
 
 interface TransformData {
   position: [number, number];
@@ -36,15 +27,6 @@ interface TransformHierarchyData {
 interface TransformHierarchyEntry {
   entity_id: number;
   transform: TransformHierarchyData;
-}
-
-interface CameraInfo {
-  entity_id: number;
-  world_position: [number, number];
-  rotation: number;
-  zoom: number;
-  offset: [number, number];
-  active: boolean;
 }
 
 interface ViewportProps {

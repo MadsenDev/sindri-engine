@@ -18,7 +18,7 @@ Here's a minimal game that opens a window and clears the screen:
 
 ```rust
 use anyhow::Result;
-use forge2d::{Engine, EngineContext, Game, VirtualKeyCode};
+use forge2d::{Engine, EngineContext, Game, KeyCode};
 
 struct MyGame;
 
@@ -30,7 +30,7 @@ impl Game for MyGame {
 
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         // Exit on ESC
-        if ctx.input().is_key_pressed(VirtualKeyCode::Escape) {
+        if ctx.input().is_key_pressed(KeyCode::Escape) {
             ctx.request_exit();
         }
         Ok(())
@@ -90,7 +90,7 @@ let elapsed = ctx.elapsed_time();
 
 // Input
 let input = ctx.input();
-if input.is_key_pressed(VirtualKeyCode::Space) { /* ... */ }
+if input.is_key_pressed(KeyCode::Space) { /* ... */ }
 
 // Rendering
 let renderer = ctx.renderer();
@@ -126,4 +126,3 @@ if ctx.audio().is_available() {
 See the [README](../README.md) for a complete list of constraints and guarantees.
 
 **Recommended approach:** Pick a reference game type (platformer, top-down, etc.) and build it. Add only what that game forces you to add. This keeps development focused and prevents feature bloat.
-

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use forge2d::{
-    hud::{HudLayer, HudText},
+    hud::{HudLayer, HudText, TextAlign},
     math::{Camera2D, Vec2},
     physics::{ColliderShape, PhysicsWorld, RigidBodyType},
     render::{Renderer, Sprite, TextureHandle},
@@ -346,6 +346,7 @@ impl Game for PerformanceDemo {
                 size: 22.0,
                 position: Vec2::new(5.0, 2.0),
                 color: [1.0, 1.0, 1.0, 1.0],
+                align: TextAlign::Left,
             });
             
             self.hud.add_text(HudText {
@@ -354,6 +355,7 @@ impl Game for PerformanceDemo {
                 size: 18.0,
                 position: Vec2::new(5.0, 26.0),
                 color: [0.0, 1.0, 0.0, 1.0],
+                align: TextAlign::Left,
             });
             
             self.hud.add_text(HudText {
@@ -362,6 +364,7 @@ impl Game for PerformanceDemo {
                 size: 16.0,
                 position: Vec2::new(5.0, 46.0),
                 color: [0.9, 0.9, 0.9, 1.0],
+                align: TextAlign::Left,
             });
             
             self.hud.add_text(HudText {
@@ -370,6 +373,7 @@ impl Game for PerformanceDemo {
                 size: 16.0,
                 position: Vec2::new(5.0, 64.0),
                 color: [0.9, 0.9, 0.9, 1.0],
+                align: TextAlign::Left,
             });
             
             self.hud.add_text(HudText {
@@ -378,6 +382,7 @@ impl Game for PerformanceDemo {
                 size: 16.0,
                 position: Vec2::new(5.0, 82.0),
                 color: [0.9, 0.9, 0.9, 1.0],
+                align: TextAlign::Left,
             });
             
             self.hud.add_text(HudText {
@@ -386,6 +391,7 @@ impl Game for PerformanceDemo {
                 size: 14.0,
                 position: Vec2::new(5.0, 105.0),
                 color: [0.7, 0.7, 0.7, 1.0],
+                align: TextAlign::Left,
             });
             
             self.hud.add_text(HudText {
@@ -394,6 +400,7 @@ impl Game for PerformanceDemo {
                 size: 12.0,
                 position: Vec2::new(5.0, 121.0),
                 color: [0.6, 0.6, 0.6, 1.0],
+                align: TextAlign::Left,
             });
         }
         self.hud.draw(renderer, &mut frame)?;
@@ -412,4 +419,3 @@ fn main() -> Result<()> {
         .with_vsync(true) // VSync enabled (some systems don't support immediate mode)
         .run(PerformanceDemo::new())
 }
-

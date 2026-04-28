@@ -1,7 +1,7 @@
 use anyhow::Result;
 use forge2d::{
     grid::{Grid, GridCoord},
-    hud::{HudLayer, HudText},
+    hud::{HudLayer, HudText, TextAlign},
     math::{Camera2D, Vec2},
     pathfinding::{AStarPathfinder, GridNode, PathfindingGrid},
     render::{Renderer, Sprite, TextureHandle},
@@ -393,6 +393,7 @@ impl Game for GridDemo {
                 size: 24.0,
                 position: Vec2::new(10.0, 10.0),
                 color: [1.0, 1.0, 1.0, 1.0],
+                align: TextAlign::Left,
             });
             self.hud.add_text(HudText {
                 text: "Left Click: Command agent to move (grid-snapped)".to_string(),
@@ -400,6 +401,7 @@ impl Game for GridDemo {
                 size: 18.0,
                 position: Vec2::new(10.0, 40.0),
                 color: [0.9, 0.9, 0.9, 1.0],
+                align: TextAlign::Left,
             });
             self.hud.add_text(HudText {
                 text: format!("Agent Grid: ({}, {})", self.agent_grid_pos.x, self.agent_grid_pos.y),
@@ -407,6 +409,7 @@ impl Game for GridDemo {
                 size: 16.0,
                 position: Vec2::new(10.0, 65.0),
                 color: [0.8, 0.8, 0.8, 1.0],
+                align: TextAlign::Left,
             });
         }
         self.hud.draw(renderer, &mut frame)?;
@@ -423,4 +426,3 @@ fn main() -> Result<()> {
         .with_vsync(true)
         .run(GridDemo::new())
 }
-

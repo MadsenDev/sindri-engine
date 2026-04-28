@@ -155,7 +155,7 @@ fn fixed_update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 ```rust
 fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
     // Input should be checked every frame (variable timestep)
-    if ctx.input().is_key_pressed(VirtualKeyCode::Space) {
+    if ctx.input().is_key_pressed(KeyCode::Space) {
         // Jump
     }
     Ok(())

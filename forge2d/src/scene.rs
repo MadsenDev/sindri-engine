@@ -148,7 +148,9 @@ pub fn restore_scene_physics_preserve(
 /// Helper trait for components that can be serialized.
 ///
 /// Users should implement this for their component types to enable scene serialization.
-pub trait ComponentSerializable: serde::Serialize + serde::de::DeserializeOwned + 'static {
+pub trait ComponentSerializable:
+    serde::Serialize + serde::de::DeserializeOwned + Send + 'static
+{
     /// Get the type name for this component.
     fn type_name() -> &'static str;
 }
@@ -262,14 +264,11 @@ impl PhysicsWorld {
                 continue;
             }
 
-            // CRITICAL FIX: Always use Vec2::ZERO for offset
-            // collider_data.offset was saved as world-space position, not local offset
-            // Since we don't support compound shapes, all colliders should be centered on their bodies
             if collider_data.is_sensor {
                 if let Err(e) = self.add_sensor(
                     collider_data.entity,
                     collider_data.shape,
-                    Vec2::ZERO, // Always zero - colliders are centered on bodies
+                    collider_data.offset,
                 ) {
                     eprintln!("Failed to restore sensor collider for entity {:?}: {}", collider_data.entity, e);
                     return Err(e);
@@ -278,7 +277,7 @@ impl PhysicsWorld {
                 if let Err(e) = self.add_collider_with_material(
                     collider_data.entity,
                     collider_data.shape,
-                    Vec2::ZERO, // Always zero - colliders are centered on bodies
+                    collider_data.offset,
                     collider_data.density,
                     collider_data.friction,
                     collider_data.restitution,
@@ -297,9 +296,8 @@ impl PhysicsWorld {
                 continue;
             }
 
-            // Restore velocities (reset to zero for safety)
-            self.set_linear_velocity(body_data.entity, Vec2::ZERO);
-            self.set_angular_velocity(body_data.entity, 0.0);
+            self.set_linear_velocity(body_data.entity, body_data.linear_velocity);
+            self.set_angular_velocity(body_data.entity, body_data.angular_velocity);
             
             // Set damping to match spawn behavior (spawn sets these for dynamic bodies)
             if matches!(body_data.body_type, RigidBodyType::Dynamic) {
@@ -379,4 +377,3 @@ impl World {
         Ok(())
     }
 }
-

@@ -4,7 +4,7 @@ use anyhow::Result;
 use forge2d::{
     ActionId, AxisBinding, Button, BuiltinFont, Camera2D, Engine, EngineContext, FontHandle,
     HudLayer, HudRect, HudText, InputMap, KeyCode, MouseButton, Sprite, State, StateMachine,
-    StateMachineLike, Vec2,
+    StateMachineLike, TextAlign, Vec2,
 };
 
 // Optional embedded font: if you have a TTF/OTF file, you can include it here.
@@ -123,6 +123,7 @@ impl State for MenuState {
                 size: title_size,
                 position: Vec2::new(title_x + 3.0, title_y + 3.0),
                 color: [0.0, 0.0, 0.0, 0.5],
+                align: TextAlign::Left,
             });
 
             // Title main
@@ -132,6 +133,7 @@ impl State for MenuState {
                 size: title_size,
                 position: Vec2::new(title_x, title_y),
                 color: [0.9, 0.7, 0.2, 1.0], // Gold color
+                align: TextAlign::Left,
             });
         }
 
@@ -159,6 +161,7 @@ impl State for MenuState {
                         size: menu_size * pulse,
                         position: Vec2::new(menu_x - 30.0, y),
                         color: [1.0, 0.8, 0.2, pulse],
+                        align: TextAlign::Left,
                     });
                 }
 
@@ -175,6 +178,7 @@ impl State for MenuState {
                     size: menu_size,
                     position: Vec2::new(menu_x, y),
                     color: text_color,
+                    align: TextAlign::Left,
                 });
             }
 
@@ -191,6 +195,7 @@ impl State for MenuState {
                 size: instructions_size,
                 position: Vec2::new(instructions_x, instructions_y),
                 color: [0.5, 0.5, 0.5, 1.0],
+                align: TextAlign::Left,
             });
         }
 
@@ -591,6 +596,7 @@ impl State for GameplayState {
                 size: 24.0,
                 position: Vec2::new(20.0, 32.0),
                 color: [1.0, 1.0, 1.0, 1.0],
+                align: TextAlign::Left,
             });
 
             // Instructions at the bottom-left.
@@ -600,6 +606,7 @@ impl State for GameplayState {
                 size: 16.0,
                 position: Vec2::new(20.0, 20.0 + 32.0 + 24.0),
                 color: [0.8, 0.8, 0.8, 1.0],
+                align: TextAlign::Left,
             });
 
             // Example: simple health bar (fake value here).
@@ -698,6 +705,7 @@ impl State for PauseState {
                 size: title_size,
                 position: Vec2::new(title_x + 4.0, title_y + 4.0),
                 color: [0.0, 0.0, 0.0, 0.7],
+                align: TextAlign::Left,
             });
 
             // Title main
@@ -707,6 +715,7 @@ impl State for PauseState {
                 size: title_size,
                 position: Vec2::new(title_x, title_y),
                 color: [1.0, 0.9, 0.3, 1.0], // Bright yellow
+                align: TextAlign::Left,
             });
         }
 
@@ -730,6 +739,7 @@ impl State for PauseState {
                     size: instruction_size,
                     position: Vec2::new(instruction_x, y),
                     color: [0.9, 0.9, 0.9, 1.0],
+                    align: TextAlign::Left,
                 });
             }
         }
@@ -750,5 +760,4 @@ fn main() -> Result<()> {
         .with_vsync(true)
         .run(state_machine)
 }
-
 

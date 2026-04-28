@@ -15,20 +15,20 @@ let input = ctx.input();
 ### Key States
 
 ```rust
-use forge2d::VirtualKeyCode;
+use forge2d::KeyCode;
 
 // Check if key is currently held down
-if input.is_key_down(VirtualKeyCode::W) {
+if input.is_key_down(KeyCode::KeyW) {
     // Move forward (fires every frame while held)
 }
 
 // Check if key was just pressed this frame
-if input.is_key_pressed(VirtualKeyCode::Space) {
+if input.is_key_pressed(KeyCode::Space) {
     // Jump (fires only once per press)
 }
 
 // Check if key was just released this frame
-if input.is_key_released(VirtualKeyCode::Escape) {
+if input.is_key_released(KeyCode::Escape) {
     // Pause menu (fires only once per release)
 }
 ```
@@ -37,28 +37,28 @@ if input.is_key_released(VirtualKeyCode::Escape) {
 
 ```rust
 // Movement
-VirtualKeyCode::W
-VirtualKeyCode::A
-VirtualKeyCode::S
-VirtualKeyCode::D
+KeyCode::KeyW
+KeyCode::KeyA
+KeyCode::KeyS
+KeyCode::KeyD
 
 // Arrow keys
-VirtualKeyCode::Up
-VirtualKeyCode::Down
-VirtualKeyCode::Left
-VirtualKeyCode::Right
+KeyCode::ArrowUp
+KeyCode::ArrowDown
+KeyCode::ArrowLeft
+KeyCode::ArrowRight
 
 // Common keys
-VirtualKeyCode::Space
-VirtualKeyCode::Escape
-VirtualKeyCode::Enter
-VirtualKeyCode::Tab
-VirtualKeyCode::Shift
-VirtualKeyCode::Control
-VirtualKeyCode::Alt
+KeyCode::Space
+KeyCode::Escape
+KeyCode::Enter
+KeyCode::Tab
+KeyCode::ShiftLeft
+KeyCode::ControlLeft
+KeyCode::AltLeft
 ```
 
-See the [winit documentation](https://docs.rs/winit/latest/winit/event/enum.VirtualKeyCode.html) for all available keys.
+See the [winit documentation](https://docs.rs/winit/latest/winit/keyboard/enum.KeyCode.html) for all available keys.
 
 ## Mouse Input
 
@@ -105,9 +105,9 @@ if input.is_mouse_released(MouseButton::Right) {
 
 ### Keyboard
 
-- `is_key_down(key: VirtualKeyCode) -> bool` - Key currently held
-- `is_key_pressed(key: VirtualKeyCode) -> bool` - Key just pressed this frame
-- `is_key_released(key: VirtualKeyCode) -> bool` - Key just released this frame
+- `is_key_down(key: KeyCode) -> bool` - Key currently held
+- `is_key_pressed(key: KeyCode) -> bool` - Key just pressed this frame
+- `is_key_released(key: KeyCode) -> bool` - Key just released this frame
 
 ### Mouse
 
@@ -124,16 +124,16 @@ if input.is_mouse_released(MouseButton::Right) {
 ```rust
 let mut move_dir = Vec2::ZERO;
 
-if input.is_key_down(VirtualKeyCode::W) {
+if input.is_key_down(KeyCode::KeyW) {
     move_dir.y -= 1.0;
 }
-if input.is_key_down(VirtualKeyCode::S) {
+if input.is_key_down(KeyCode::KeyS) {
     move_dir.y += 1.0;
 }
-if input.is_key_down(VirtualKeyCode::A) {
+if input.is_key_down(KeyCode::KeyA) {
     move_dir.x -= 1.0;
 }
-if input.is_key_down(VirtualKeyCode::D) {
+if input.is_key_down(KeyCode::KeyD) {
     move_dir.x += 1.0;
 }
 
@@ -155,7 +155,7 @@ if input.is_mouse_pressed(MouseButton::Left) {
 ### Exit on ESC
 
 ```rust
-if input.is_key_pressed(VirtualKeyCode::Escape) {
+if input.is_key_pressed(KeyCode::Escape) {
     ctx.request_exit();
 }
 ```
@@ -174,7 +174,7 @@ This allows you to write game code against *actions* and *axes* instead of hardc
 ### Defining an InputMap
 
 ```rust
-use forge2d::{ActionId, AxisBinding, Button, InputMap, VirtualKeyCode};
+use forge2d::{ActionId, AxisBinding, Button, InputMap, KeyCode};
 
 let mut input_map = InputMap::new();
 
@@ -186,12 +186,12 @@ input_map.set_axis(
     axis_horizontal.clone(),
     AxisBinding::new(
         vec![
-            Button::Key(VirtualKeyCode::A),
-            Button::Key(VirtualKeyCode::Left),
+            Button::Key(KeyCode::KeyA),
+            Button::Key(KeyCode::ArrowLeft),
         ],
         vec![
-            Button::Key(VirtualKeyCode::D),
-            Button::Key(VirtualKeyCode::Right),
+            Button::Key(KeyCode::KeyD),
+            Button::Key(KeyCode::ArrowRight),
         ],
     ),
 );
@@ -201,12 +201,12 @@ input_map.set_axis(
     axis_vertical.clone(),
     AxisBinding::new(
         vec![
-            Button::Key(VirtualKeyCode::W),
-            Button::Key(VirtualKeyCode::Up),
+            Button::Key(KeyCode::KeyW),
+            Button::Key(KeyCode::ArrowUp),
         ],
         vec![
-            Button::Key(VirtualKeyCode::S),
-            Button::Key(VirtualKeyCode::Down),
+            Button::Key(KeyCode::KeyS),
+            Button::Key(KeyCode::ArrowDown),
         ],
     ),
 );
@@ -249,4 +249,3 @@ Forge2D tracks input state per frame, ensuring:
 - **`is_key_down()`** returns `true` for all frames the key is held
 
 This makes it easy to distinguish between "key held" and "key just pressed" without manual state tracking.
-
