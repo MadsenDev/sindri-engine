@@ -76,6 +76,13 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 }
 ```
 
+If your render transforms live in `World`, synchronize them after stepping physics:
+
+```rust
+physics.step(fixed_dt);
+physics.sync_transforms(&mut world);
+```
+
 ## Body Types
 
 ### Dynamic
@@ -243,6 +250,24 @@ Control how quickly objects slow down:
 physics.set_linear_damping(entity, 0.5);  // Higher = more resistance
 ```
 
+## Collision Layers And Masks
+
+Use collision groups to control which entities can collide:
+
+```rust
+// Put entity on layer 2 and allow it to collide with everything.
+physics.set_collision_layer(entity, 2);
+
+// Put entity on layer 1 and allow collision with layers 0 and 2.
+let mask = (1 << 0) | (1 << 2);
+physics.set_collision_mask(entity, 1, mask);
+
+// Full manual control.
+physics.set_collision_groups(entity, memberships, filter);
+```
+
+Layers and masks apply to all colliders attached to the entity's body.
+
 ## Continuous Collision Detection (CCD)
 
 CCD is automatically enabled for dynamic bodies to prevent fast-moving objects from tunneling through thin colliders. This is especially important for:
@@ -294,6 +319,21 @@ fn move_horizontal(physics: &mut PhysicsWorld, entity: EntityId, direction: f32)
 }
 ```
 
+## EntityBuilder Shortcut
+
+For common spawn + physics setup, use `EntityBuilder`:
+
+```rust
+let player = EntityBuilder::new(&mut world, &mut physics)
+    .at(Vec2::new(200.0, 300.0))
+    .dynamic()
+    .box_collider(14.0, 18.0)
+    .friction(0.3)
+    .lock_rotation()
+    .tag("player")
+    .build();
+```
+
 ## Example: Ground Platform
 
 ```rust
@@ -342,4 +382,3 @@ restore_scene_physics(&mut physics, &scene.physics)?;
 ```
 
 See [Scene Serialization](scene.md) for more details.
-

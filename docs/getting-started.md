@@ -8,7 +8,7 @@ Add Sindri to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sindri = { path = "../sindri" }  # or use git/crates.io when published
+sindri = { path = "crates/sindri" }  # or use git/crates.io when published
 anyhow = "1"
 ```
 
@@ -111,16 +111,16 @@ if ctx.audio().is_available() {
 
 - Learn about [Input Handling](input.md)
 - Explore [Rendering](rendering.md)
+- Add [Physics](physics.md)
+- Attach [Lua Scripts](scripting.md)
 - Check out [Examples](examples.md)
-- Read about [What Sindri Does and Doesn't Do](../README.md#what-sindri-intentionally-doesnt-do)
-- Understand the [Development Philosophy](../README.md#philosophy-coherence-over-completeness)
 
 ## Important Notes
 
-**Sindri is not a complete engine**—it's a framework with core systems that you extend. Before starting, understand:
+Sindri includes a broad engine core, but the editor is still catching up with the runtime. Before starting, understand:
 
 - ✅ What Sindri **does** provide (rendering, physics, pathfinding, etc.)
-- ❌ What Sindri **intentionally doesn't** provide (animation, advanced UI, debug tools, etc.)
+- ❌ What Sindri **intentionally doesn't** provide (advanced UI framework, asset pipeline, game packaging, etc.)
 - ⚠️ What you'll need to **implement yourself** or use libraries for
 
 See the [README](../README.md) for a complete list of constraints and guarantees.

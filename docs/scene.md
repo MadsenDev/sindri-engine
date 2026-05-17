@@ -130,11 +130,11 @@ fn save_components(world: &World, entity: EntityId) -> Result<Vec<SerializableCo
     let mut components = Vec::new();
     
     // Serialize each component
-    if let Some(transform) = world.get_component::<Transform>(entity) {
+    if let Some(transform) = world.get::<Transform>(entity) {
         components.push(transform.serialize());
     }
     
-    if let Some(my_comp) = world.get_component::<MyComponent>(entity) {
+    if let Some(my_comp) = world.get::<MyComponent>(entity) {
         components.push(my_comp.serialize());
     }
     
@@ -150,11 +150,11 @@ fn load_components(world: &mut World, entity: EntityId, components: &[Serializab
         match comp.type_name.as_str() {
             "Transform" => {
                 let transform = Transform::deserialize(&comp.data)?;
-                world.add_component(entity, transform);
+                world.insert(entity, transform);
             }
             "MyComponent" => {
                 let my_comp = MyComponent::deserialize(&comp.data)?;
-                world.add_component(entity, my_comp);
+                world.insert(entity, my_comp);
             }
             _ => {
                 eprintln!("Unknown component type: {}", comp.type_name);
@@ -270,4 +270,3 @@ fn load_with_migration(scene: &mut Scene) -> Result<()> {
     Ok(())
 }
 ```
-

@@ -1,66 +1,117 @@
-# Sindri scripting overview
+# Lua Scripting
 
-Sindri now ships with a lightweight, Unity-like scripting layer powered by [Rhai](https://rhai.rs/). Scripts are treated as components that attach behavior to entities without exposing internal engine state.
+Sindri uses Lua 5.4 scripting through `mlua`. Scripts are attached to entities with `ScriptComponent` and are driven by `ScriptRuntime`.
 
-## Key concepts
-- **ScriptComponent**: a component that holds an ordered list of script attachments (file path plus optional `ScriptParams`). Attach it to an entity to run one or more scripts in insertion order.
-- **ScriptRuntime**: the orchestrator that loads/compiles Rhai modules, instantiates scripts per entity, drives lifecycle callbacks, and applies deferred world mutations through a script-only command buffer.
-- **Self**: the only object visible to scripts. It exposes component-scoped facets for reading/writing the owner entity, plus read-only views of input/time and bounded world helpers.
+Scripts are ordinary `.lua` files. The engine keeps world mutation safe by buffering script commands and applying them after script callbacks finish.
 
-## Lifecycle callbacks
-Scripts can implement any subset of these functions; missing callbacks are skipped automatically.
+## Attaching Scripts
 
-```rhai
-fn on_create(self) { /* called once when attached */ }
-fn on_start(self) { /* called once after creation */ }
-fn on_update(self, dt) { /* per-frame */ }
-fn on_fixed_update(self, fixed_dt) { /* fixed timestep */ }
-fn on_draw(self) { /* optional debug-only drawing hook */ }
-fn on_destroy(self) { /* before removal */ }
-
-// Physics events from the engine
-fn on_collision_enter(self, other_entity)
-fn on_collision_exit(self, other_entity)
-fn on_trigger_enter(self, other_entity)
-fn on_trigger_exit(self, other_entity)
-```
-
-## Safe API surface (`Self` + facets)
-- Entity info: `self.entity()`
-- Timing: `self.time().delta()`, `self.time().fixed_delta()`
-- Transform accessors (if the entity has a Transform): `self.transform().position()`, `self.transform().rotation()`, `self.transform().set_position(vec2(x,y))`, `self.transform().set_rotation(radians)`, `self.transform().set_scale(vec2(x,y))` (facet calls return `()` when missing)
-- Physics helpers (if the entity has a physics body): `self.physics().velocity()`, `self.physics().set_velocity(vec2)`, `self.physics().apply_impulse(vec2)` (facet calls return `()` when missing)
-- Sprite helpers (if the entity has a Sprite): `self.sprite().set_visible(bool)`, `self.sprite().set_tint([r,g,b,a])`
-- Input: `self.input.is_key_down/pressed/released("W"|"A"|"S"|"D"|"Space"|arrow names)`; `self.input.mouse_pos_screen()` (always available)
-- World helpers: `self.world().find_by_tag(tag: &str) -> Option<EntityId>`, `self.world().despawn(entity_id)`
-- Spawning: `self.world().spawn_dynamic(position, velocity)`, `self.world().spawn_empty(position?, tag?)`
-- Optional convenience aliases: `self.position()`, `self.set_position(...)`, `self.apply_impulse(...)`
-
-All writes are deferred through the internal command buffer and applied after script execution, which keeps the engine authoritative for rendering and physics.
-
-## Script logging
-Rhai scripts emit output through the runtime's print/debug hooks. Sindri registers default handlers so `print()` and `debug()` show up in the engine console:
-
-```rhai
-print("hello world");            // prints: [RHAI] hello world
-debug("velocity=" + v.x);        // prints: [RHAI DEBUG] velocity=3.0 @ <unnamed script>:1:1
-```
-
-Notes:
-- Messages are prefixed with `[RHAI]`/`[RHAI DEBUG]` to keep script logs distinct from engine output.
-- `print` only accepts strings; format numbers or vectors before logging them.
-
-## Minimal usage example
 ```rust
-// Build an entity with scripts
-let params = ScriptParams::default().insert("speed", 6.0);
-world.insert(entity, ScriptComponent::default().with_script("examples/scripts/player_movement.rhai", params));
+use sindri::{ScriptComponent, ScriptParams};
 
-// Drive the runtime from your game loop
-runtime.update(&mut world, &mut physics, ctx.input(), ctx.delta_time())?;
+let params = ScriptParams::default().insert("speed", 220.0f32);
+world.insert(
+    player,
+    ScriptComponent::default().with_script("scripts/player.lua", params),
+);
+```
+
+## Lifecycle
+
+Scripts may define any of these callbacks:
+
+```lua
+function on_create(self) end
+function on_start(self) end
+function on_update(self, dt) end
+function on_fixed_update(self, fixed_dt) end
+function on_post_physics(self, fixed_dt) end
+function on_destroy(self) end
+
+function on_collision_enter(self, other_entity) end
+function on_collision_exit(self, other_entity) end
+function on_trigger_enter(self, other_entity) end
+function on_trigger_exit(self, other_entity) end
+```
+
+Missing callbacks are skipped.
+
+## Input
+
+Use the input facet from `self:input()`:
+
+```lua
+function on_update(self, dt)
+  local input = self:input()
+  local move = input:axis("A", "D")
+  local jump = input:is_key_pressed("Space")
+
+  if move ~= 0 then
+    local transform = self:transform()
+    if transform ~= nil then
+      local pos = transform:position()
+      transform:set_position(vec2(pos.x + move * 180 * dt, pos.y))
+    end
+  end
+end
+```
+
+Supported key names include letters `A`-`Z`, digits `0`-`9`, arrows, `Space`, `Escape`, `Enter`, `Tab`, `Backspace`, shift/control/alt aliases, and `F1`-`F12`.
+
+## Facets
+
+`self` exposes component-scoped helpers:
+
+- `self:entity()`
+- `self:time():delta()`
+- `self:time():fixed_delta()`
+- `self:input()`
+- `self:world()`
+- `self:transform()` if the entity has `Transform`
+- `self:physics()` if the entity has a physics body
+- `self:sprite()` if the entity has `SpriteComponent`
+- `self:animation()` if the entity has `AnimatedSprite`
+- `self:camera()` if the entity has `CameraComponent`
+
+Physics helpers include:
+
+```lua
+local physics = self:physics()
+if physics ~= nil then
+  physics:set_velocity(vec2(120, 0))
+  physics:apply_impulse(vec2(0, -300))
+  physics:set_layer(1)
+  physics:set_mask(1, 0xffffffff)
+end
+```
+
+## World Helpers
+
+Scripts can query tagged entities and request spawns/despawns through the command buffer. The exact helper surface is intentionally small so scripts do not take ownership of the engine world.
+
+## Driving The Runtime
+
+```rust
+runtime.update(&mut world, &mut physics, ctx.input(), ctx.delta_time().as_secs_f32())?;
+
 while ctx.should_run_fixed_update() {
-    runtime.fixed_update(&mut world, &mut physics, ctx.input(), ctx.fixed_delta_time().as_secs_f32())?;
+    runtime.fixed_update(
+        &mut world,
+        &mut physics,
+        ctx.input(),
+        ctx.fixed_delta_time().as_secs_f32(),
+    )?;
+    physics.step(ctx.fixed_delta_time().as_secs_f32());
+    runtime.post_physics_update(
+        &mut world,
+        &mut physics,
+        ctx.input(),
+        ctx.fixed_delta_time().as_secs_f32(),
+    )?;
 }
+
 let events = physics.drain_events();
 runtime.handle_physics_events(&events, &mut world, &mut physics, ctx.input())?;
 ```
+
+Check the scripting examples for the exact loop shape used by current demos.

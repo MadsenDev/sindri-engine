@@ -1,77 +1,72 @@
 # Sindri
 
-Sindri is a lightweight 2D game framework built with Rust, winit, and wgpu. It provides a clean, simple API for creating 2D games.
+Sindri is a 2D game engine and editor workspace written in Rust. The engine core uses `wgpu`, `winit`, Rapier2D, `mlua`, `rodio`, and glyphon to provide rendering, physics, Lua scripting, audio, tilemaps, particles, lighting, pathfinding, scene serialization, undo/redo commands, and a lightweight entity/component world.
+
+The repository also contains the new Sindri editor stack: an Axum engine server, a local Ollama AI integration, and a Tauri/React editor prototype.
+
+## Workspace
+
+```text
+crates/
+  sindri/          Engine core
+  sindri-server/   Local engine/editor HTTP server
+  sindri-ai/       Ollama client and AI action types
+editor/            Tauri 2 + React editor
+examples/          Engine demos and reference games
+docs/              Engine documentation
+```
 
 ## Quick Start
 
-### Running the Example
+Build everything:
 
-From the repository root:
+```bash
+cargo build --workspace
+```
+
+Run an example:
 
 ```bash
 cargo run -p basic_game
 ```
 
-This launches a window with a bouncing sprite. Press ESC or wait 10 seconds to exit.
+Run the editor:
 
-### Creating Your Own Game
-
-1. **Add Sindri to your `Cargo.toml`:**
-
-```toml
-[dependencies]
-sindri = { path = "../sindri" }  # or use git/crates.io when published
-anyhow = "1"
+```bash
+cargo build -p sindri-server
+cd editor
+pnpm install
+pnpm tauri dev
 ```
 
-2. **Create a game struct and implement the `Game` trait:**
+The editor talks to `sindri-server` on `127.0.0.1:7878` and uses local Ollama models for AI features. No external AI API is required.
+
+## Minimal Game
 
 ```rust
 use anyhow::Result;
-use sindri::{Engine, EngineContext, Game, KeyCode, Vec2};
+use sindri::{Camera2D, Engine, EngineContext, Game, KeyCode};
 
 struct MyGame {
-    // Your game state here
+    camera: Camera2D,
 }
 
 impl Game for MyGame {
-    fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        // Called once at startup - load assets, initialize state, etc.
-        println!("Game initialized!");
+    fn init(&mut self, _ctx: &mut EngineContext) -> Result<()> {
         Ok(())
     }
 
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        // Called every frame - update game logic here
-        let dt = ctx.delta_time().as_secs_f32();
-        
-        // Check input
-        if ctx.input().is_key_pressed(KeyCode::Space) {
-            println!("Space pressed!");
-        }
-        
-        // Access mouse position
-        let (mx, my) = ctx.input().mouse_position();
-        
-        // Request exit
         if ctx.input().is_key_pressed(KeyCode::Escape) {
             ctx.request_exit();
         }
-        
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        // Called every frame - render your game here
         let renderer = ctx.renderer();
         let mut frame = renderer.begin_frame()?;
-        
-        // Clear the screen (RGBA values 0.0-1.0)
-        renderer.clear(&mut frame, [0.1, 0.1, 0.2, 1.0])?;
-        
-        // Draw sprites, shapes, etc.
-        // renderer.draw_sprite(&mut frame, &sprite, &camera)?;
-        
+        renderer.clear(&mut frame, [0.05, 0.05, 0.08, 1.0])?;
         renderer.end_frame(frame)?;
         Ok(())
     }
@@ -79,177 +74,69 @@ impl Game for MyGame {
 
 fn main() -> Result<()> {
     Engine::new()
-        .with_title("My Game")
+        .with_title("My Sindri Game")
         .with_size(1280, 720)
         .with_vsync(true)
-        .run(MyGame {})
+        .run(MyGame {
+            camera: Camera2D::default(),
+        })
 }
 ```
 
-## Core Concepts
+## Core Features
 
-### The `Game` Trait
+- Windowing and game loop via `winit`
+- Hardware-accelerated 2D rendering via `wgpu`
+- Batched sprites, shapes, tilemaps, text, particles, and lighting
+- Offscreen rendering and PNG screenshot support for editor workflows
+- Camera math, follow behavior, zoom, bounds, and screen/world conversion
+- Frame-accurate input and action/axis mapping
+- Lightweight `World` / `EntityId` component storage with immutable and mutable queries
+- Built-in components for transforms, sprites, physics, audio, cameras, tilemaps, gameplay tags, and moving platforms
+- Rapier2D physics with dynamic/kinematic/fixed bodies, sensors, CCD, raycasts, point queries, collision events, layers, and masks
+- Lua scripting through `mlua` with lifecycle hooks, input helpers, physics helpers, command buffering, and hot reload
+- Scene serialization and physics restore support
+- Undo/redo command system
+- A* pathfinding and typed grids
+- HUD primitives for screen-space UI
+- Audio playback through `rodio`
+- Fluent `EntityBuilder` for common spawn + physics + sprite + script setup
 
-Your game must implement three methods:
+## Editor And AI
 
-- **`init()`** - Called once at startup. Load textures, initialize state, etc.
-- **`update()`** - Called every frame before drawing. Handle input, update game logic.
-- **`draw()`** - Called every frame. Render your game.
+The editor is in active development. It currently provides:
 
-### The `EngineContext`
+- Scene hierarchy and component inspection
+- Transform, sprite, collider, script, camera, audio, and physics-body editor components
+- Canvas viewport preview and screenshot polling
+- Lua script editing
+- Local AI chat powered by Ollama
+- AI action execution for entity creation, transforms, scripts, and components
 
-Provides access to engine systems:
-
-- **`ctx.delta_time()`** - Time since last frame (`Duration`)
-- **`ctx.elapsed_time()`** - Total time since engine started (`Duration`)
-- **`ctx.input()`** - Access input state (keys, mouse)
-- **`ctx.renderer()`** - Access the renderer for drawing
-- **`ctx.window()`** - Access the underlying winit window
-- **`ctx.request_exit()`** - Request the engine to exit
-
-### Input System
-
-```rust
-use sindri::{KeyCode, MouseButton};
-
-// Check if key is currently held down
-if ctx.input().is_key_down(KeyCode::KeyW) {
-    // Move forward
-}
-
-// Check if key was just pressed this frame
-if ctx.input().is_key_pressed(KeyCode::Space) {
-    // Jump
-}
-
-// Check if key was just released this frame
-if ctx.input().is_key_released(KeyCode::Escape) {
-    // Pause menu
-}
-
-// Mouse position
-let (x, y) = ctx.input().mouse_position();
-let mouse_pos = ctx.input().mouse_position_vec2();  // As Vec2
-
-// Mouse buttons
-if ctx.input().is_mouse_pressed(MouseButton::Left) {
-    // Clicked!
-}
-```
-
-### Rendering
-
-```rust
-// Begin a frame
-let mut frame = renderer.begin_frame()?;
-
-// Clear the screen (RGBA: 0.0-1.0)
-renderer.clear(&mut frame, [0.1, 0.1, 0.2, 1.0])?;
-
-// Load a texture
-let texture = renderer.load_texture_from_file("assets/sprite.png")?;
-// Or from bytes:
-let texture = renderer.load_texture_from_bytes(png_bytes)?;
-
-// Create a sprite
-let mut sprite = Sprite::new(texture);
-sprite.transform.position = Vec2::new(100.0, 200.0);
-sprite.transform.scale = Vec2::new(64.0, 64.0);
-sprite.tint = [1.0, 1.0, 1.0, 1.0];  // RGBA tint
-
-// Draw the sprite (requires a camera)
-let camera = Camera2D::default();
-renderer.draw_sprite(&mut frame, &sprite, &camera)?;
-
-// End the frame
-renderer.end_frame(frame)?;
-```
-
-### Math Types
-
-```rust
-use sindri::{Vec2, Transform2D, Camera2D};
-
-// Vec2 - 2D vector
-let position = Vec2::new(100.0, 200.0);
-let velocity = Vec2::new(50.0, -30.0);
-let new_pos = position + velocity * dt;
-
-// Useful Vec2 methods:
-let distance = pos1.distance(pos2);
-let direction = (target - position).normalized();
-let interpolated = start.lerp(end, 0.5);  // 50% between start and end
-let angle_vec = Vec2::from_angle(std::f32::consts::PI / 4.0);
-
-// Transform2D - position, scale, rotation
-let transform = Transform2D {
-    position: Vec2::new(100.0, 200.0),
-    scale: Vec2::new(1.0, 1.0),
-    rotation: 0.0,  // radians
-};
-
-// Camera2D - 2D camera
-let mut camera = Camera2D::new(Vec2::new(0.0, 0.0));
-camera.zoom = 1.5;
-camera.position = player_position;
-
-// Convert between screen and world coordinates
-let world_pos = camera.screen_to_world(screen_pos, width, height);
-let screen_pos = camera.world_to_screen(world_pos, width, height);
-```
-
-### Engine Configuration
-
-```rust
-Engine::new()
-    .with_title("My Game")           // Window title
-    .with_size(1280, 720)            // Window size (logical pixels)
-    .with_vsync(true)                 // Enable/disable VSync
-    .run(my_game)
-```
-
-## Project Layout
-
-- `sindri/`: The engine crate containing the public API
-- `examples/basic_game/`: A complete example showing sprite rendering
+The editor scene model is still catching up with the engine core. It now includes explicit `PhysicsBody` support, but full engine parity is not complete yet.
 
 ## Documentation
 
-📚 **Comprehensive documentation is available in the [`docs/`](docs/) directory:**
+Start with:
 
-- [Getting Started](docs/getting-started.md) - Quick start guide
-- [Engine & Game Loop](docs/engine.md) - Engine configuration
-- [Input System](docs/input.md) - Keyboard and mouse input
-- [Rendering](docs/rendering.md) - Sprites, textures, cameras, text
-- [Math Utilities](docs/math.md) - Vec2, Transform2D, Camera2D
-- [Asset Management](docs/assets.md) - Loading and caching assets
-- [Audio System](docs/audio.md) - Sound effects and music
-- [Fixed Timestep](docs/fixed-timestep.md) - Deterministic updates
-- [API Reference](docs/api-reference.md) - Complete API docs
-- [Examples](docs/examples.md) - Code examples and patterns
+- [Getting Started](docs/getting-started.md)
+- [Rendering](docs/rendering.md)
+- [Physics](docs/physics.md)
+- [Scripting](docs/scripting.md)
+- [World & Entities](docs/world.md)
+- [Examples](docs/examples.md)
+- [API Reference](docs/api-reference.md)
 
-## Current Features
+## Repository Status
 
-✅ Window creation and event loop  
-✅ Input system (keyboard & mouse)  
-✅ 2D rendering with wgpu  
-✅ Sprite rendering with textures (batched)  
-✅ Text rendering with TTF/OTF fonts  
-✅ Camera system  
-✅ Math utilities (Vec2, Transform2D)  
-✅ Asset manager for texture caching  
-✅ Audio system  
-✅ Fixed timestep support  
-
-## Coming Soon
-
-- State/scene management
-- Optional ECS support
+`IMPROVEMENTS.md` tasks 1-10 are complete. Current work is focused on editor/server/AI parity with the engine core and keeping docs aligned with the Sindri rename.
 
 ## Requirements
 
-- Rust 2021 edition
-- A GPU with graphics drivers installed (wgpu requirement)
+- Rust 2021 edition or later
+- A GPU and graphics drivers supported by `wgpu`
+- `pnpm` for the editor
+- Ollama for local AI features
 
 ## License
 

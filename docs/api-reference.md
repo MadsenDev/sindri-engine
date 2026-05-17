@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for Sindri.
+High-level API reference for Sindri's public engine surface.
 
 ## Engine
 
@@ -92,13 +92,14 @@ impl Renderer {
     pub fn clear(&mut self, frame: &mut Frame, color: [f32; 4]) -> Result<()>;
     pub fn draw_sprite(&mut self, frame: &mut Frame, sprite: &Sprite, camera: &Camera2D) -> Result<()>;
     pub fn draw_text(&mut self, frame: &mut Frame, text: &str, font: FontHandle, size: f32, position: Vec2, color: [f32; 4], camera: &Camera2D) -> Result<()>;
-    pub fn draw_line(&mut self, frame: &mut Frame, start: Vec2, end: Vec2, width: f32, color: [f32; 4], camera: &Camera2D) -> Result<()>;
+    pub fn measure_text_width(&mut self, text: &str, font: FontHandle, size: f32) -> Result<f32>;
     pub fn draw_circle(&mut self, frame: &mut Frame, center: Vec2, radius: f32, color: [f32; 4], camera: &Camera2D) -> Result<()>;
-    pub draw_circle(&mut self, frame: &mut Frame, center: Vec2, radius: f32, color: [f32; 4], camera: &Camera2D) -> Result<()>;
-    pub draw_polygon(&mut self, frame: &mut Frame, points: &[Vec2], color: [f32; 4], camera: &Camera2D) -> Result<()>;
-    pub draw_polygon_no_occlusion(&mut self, frame: &mut Frame, points: &[Vec2], color: [f32; 4], camera: &Camera2D) -> Result<()>;
-    pub draw_point_light(&mut self, frame: &mut Frame, light: &PointLight, camera: &Camera2D) -> Result<()>;
-    pub load_texture_from_file(&mut self, path: &str) -> Result<TextureHandle>;
+    pub fn draw_polygon(&mut self, frame: &mut Frame, points: &[Vec2], color: [f32; 4], camera: &Camera2D) -> Result<()>;
+    pub fn draw_polygon_no_occlusion(&mut self, frame: &mut Frame, points: &[Vec2], color: [f32; 4], camera: &Camera2D) -> Result<()>;
+    pub fn draw_point_light(&mut self, frame: &mut Frame, light: &PointLight, camera: &Camera2D) -> Result<()>;
+    pub fn draw_world(&mut self, frame: &mut Frame, world: &World, camera: &Camera2D) -> Result<()>;
+    pub fn draw_physics_debug(&mut self, frame: &mut Frame, world: &World, physics: &PhysicsWorld, camera: &Camera2D) -> Result<()>;
+    pub fn load_texture_from_file(&mut self, path: &str) -> Result<TextureHandle>;
     pub fn load_texture_from_bytes(&mut self, bytes: &[u8]) -> Result<TextureHandle>;
     pub fn load_font_from_bytes(&mut self, bytes: &[u8]) -> Result<FontHandle>;
     pub fn rasterize_text_glyphs(&mut self, text: &str, font: FontHandle, size: f32) -> Result<()>;
@@ -474,6 +475,10 @@ impl PhysicsWorld {
     pub fn apply_force(&mut self, entity: EntityId, force: Vec2);
     pub fn lock_rotations(&mut self, entity: EntityId, locked: bool);
     pub fn set_linear_damping(&mut self, entity: EntityId, d: f32);
+    pub fn sync_transforms(&self, world: &mut World);
+    pub fn set_collision_groups(&mut self, entity: EntityId, memberships: u32, filter: u32);
+    pub fn set_collision_layer(&mut self, entity: EntityId, layer: u8);
+    pub fn set_collision_mask(&mut self, entity: EntityId, layer: u8, mask: u32);
     pub fn on_event<F>(&mut self, callback: F) where F: Fn(PhysicsEvent) + Send + Sync + 'static;
 }
 ```
@@ -685,6 +690,12 @@ impl PhysicsBody {
 }
 ```
 
+### Name
+
+```rust
+pub struct Name(pub String);
+```
+
 ### Tag Components
 
 ```rust
@@ -803,8 +814,27 @@ impl World {
     pub fn get_mut<T: 'static>(&mut self, entity: EntityId) -> Option<&mut T>;
     pub fn remove<T: 'static>(&mut self, entity: EntityId) -> Option<T>;
     pub fn query<T: 'static>(&self) -> Vec<(EntityId, &T)>;
+    pub fn query_mut<T: 'static>(&mut self) -> Vec<(EntityId, &mut T)>;
     pub fn serialize_component<T: ComponentSerializable>(&self, entity: EntityId) -> Option<SerializableComponent>;
     pub fn deserialize_component<T: ComponentSerializable>(&mut self, entity: EntityId, data: &SerializableComponent) -> Result<()>;
+}
+```
+
+### EntityBuilder
+
+```rust
+pub struct EntityBuilder<'a> { /* ... */ }
+
+impl<'a> EntityBuilder<'a> {
+    pub fn new(world: &'a mut World, physics: &'a mut PhysicsWorld) -> Self;
+    pub fn at(self, position: Vec2) -> Self;
+    pub fn dynamic(self) -> Self;
+    pub fn kinematic(self) -> Self;
+    pub fn fixed(self) -> Self;
+    pub fn box_collider(self, hx: f32, hy: f32) -> Self;
+    pub fn circle_collider(self, radius: f32) -> Self;
+    pub fn capsule_collider(self, half_height: f32, radius: f32) -> Self;
+    pub fn build(self) -> EntityId;
 }
 ```
 

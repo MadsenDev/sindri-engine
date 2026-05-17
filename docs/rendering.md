@@ -103,6 +103,16 @@ let camera = Camera2D::default();
 renderer.draw_sprite(&mut frame, &sprite, &camera)?;
 ```
 
+### Drawing A World
+
+If your entities use Sindri's built-in render components, `Renderer::draw_world()` provides a stable default pass:
+
+```rust
+ctx.renderer().draw_world(&mut frame, &world, &camera)?;
+```
+
+It draws tilemaps first, then visible `SpriteComponent`s, then `AnimatedSprite`s. Entity IDs are used as a stable ordering default until a dedicated z-order system is added.
+
 ### Sprite Properties
 
 - **`texture: TextureHandle`** - The texture to render
@@ -197,8 +207,19 @@ renderer.draw_text(
 ### Text Rendering Notes
 
 - Glyphs are cached automatically - pre-rasterize only if you want to warm the cache
+- `Renderer::measure_text_width()` uses glyphon layout data for accurate HUD alignment
 - Position is the bottom-left corner of the first character
 - Text is rendered as sprites (one sprite per glyph)
+
+## Development Debug Drawing
+
+`Renderer::draw_physics_debug()` can draw collider overlays for development/editor diagnostics:
+
+```rust
+renderer.draw_physics_debug(&mut frame, &world, &physics, &camera)?;
+```
+
+Dynamic bodies are cyan, kinematic bodies yellow, fixed bodies green, and sensors/triggers magenta. This helper is meant for debug views, not normal release rendering.
 
 ## HUD Layer
 
@@ -318,22 +339,9 @@ sprite.tint = [1.0, 0.0, 0.0, 1.0];
 sprite.tint = [1.0, 1.0, 1.0, 0.5];
 ```
 
-## Vector Shape Rendering
+## Shape Rendering
 
-Sindri provides GPU-accelerated vector shape drawing for lines, circles, and polygons. These are useful for procedural graphics, debug visualization, and games that work well with geometric shapes.
-
-### Drawing Lines
-
-```rust
-renderer.draw_line(
-    &mut frame,
-    Vec2::new(0.0, 0.0),        // Start position
-    Vec2::new(100.0, 100.0),    // End position
-    2.0,                        // Line width in pixels
-    [1.0, 1.0, 1.0, 1.0],      // RGBA color
-    &camera,
-)?;
-```
+Sindri provides GPU-accelerated circles and polygons. These are useful for procedural graphics, debug visualization, and games that work well with geometric shapes.
 
 ### Drawing Circles
 

@@ -176,9 +176,9 @@ impl Game {
         let entity = self.world.spawn();
         
         // Add components
-        self.world.add_component(entity, Transform::new(Vec2::new(100.0, 100.0)));
-        self.world.add_component(entity, SpriteComponent::new(texture));
-        self.world.add_component(entity, Player);
+        self.world.insert(entity, Transform::new(Vec2::new(100.0, 100.0)));
+        self.world.insert(entity, SpriteComponent::new(texture));
+        self.world.insert(entity, Player);
         
         entity
     }
@@ -195,4 +195,3 @@ Components can be serialized for scene saving/loading. See [Scene Serialization]
 2. **Use tag components** - Tag components are lightweight and great for queries
 3. **Combine components** - Entities can have multiple components (e.g., Transform + SpriteComponent + Player)
 4. **Keep components simple** - Components should represent data, not behavior
-

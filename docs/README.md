@@ -20,9 +20,12 @@ Welcome to the Sindri documentation! This guide will help you get started with c
 14. [Camera Follow](camera.md) - Camera follow system with dead-zones
 15. [Built-in Entities](entities.md) - Standard entity components
 16. [Scene Serialization](scene.md) - Save and load game scenes
-17. [API Reference](api-reference.md) - Complete API documentation
-18. [Examples](examples.md) - Code examples and tutorials
-19. [Roadmap](ROADMAP.md) - Development philosophy and future direction
+17. [Lua Scripting](scripting.md) - Script components and runtime lifecycle
+18. [Animation](animation.md) - Spritesheet animation helpers
+19. [Particles](particles.md) - Particle emitters and systems
+20. [API Reference](api-reference.md) - Public API overview
+21. [Examples](examples.md) - Code examples and tutorials
+22. [Roadmap](ROADMAP.md) - Development philosophy and future direction
 
 ## Quick Links
 
@@ -47,27 +50,27 @@ Sindri is a 2D game framework built with Rust, winit, and wgpu. It provides the 
 - ✅ Audio support
 - ✅ Fixed timestep for deterministic physics
 - ✅ 2D physics engine (Rapier2D integration)
+- ✅ Collision layers and masks
 - ✅ General-purpose grid system for tile-based games
 - ✅ A* pathfinding algorithm
 - ✅ Built-in entity components
 - ✅ Scene serialization (save/load)
 - ✅ HUD layer for screen-space UI
+- ✅ Spritesheet animation helpers
+- ✅ Particle systems
+- ✅ Shadow-casting point/directional lighting
+- ✅ Lua scripting with lifecycle hooks and command buffering
+- ✅ Development physics debug drawing
+- ✅ Tauri editor/server/AI prototype
 
 ### What Sindri Intentionally Doesn't Do
 
 These are **design decisions**, not oversights:
 
 - ❌ **No advanced UI framework** - HUD primitives (text, sprites, rects) only. No layout system, widgets, or input routing. For complex UI, use a library like `egui` or build custom.
-- ❌ **No debug tools** - No in-engine debug drawing, gizmos, entity inspector, or console overlay. You'll debug with `println!` and external tools.
 - ❌ **No asset pipeline** - No texture atlasing, compression, or hot-reload. Load assets at runtime from files/bytes.
 - ❌ **No full ECS framework** - Lightweight `World`/`EntityId` system only. No archetypes, parallel iteration, or complex queries. For advanced ECS, integrate `hecs` or `bevy_ecs`.
 - ❌ **No export/packaging tools** - No built-in way to package games for distribution. Use `cargo` and platform-specific tools.
-
-### What Sindri Doesn't Have Yet (But Could Add)
-
-These are **not yet implemented**, but would be added if a reference game forces them:
-
-- ⚠️ **Animation system** - No sprite sheets, tweens, or animation graphs yet. You can implement basic animation using delta time and sprite swapping, or use a library. A minimal animation system would be added if a platformer or action game requires it.
 
 ### What Sindri Guarantees
 
@@ -83,9 +86,8 @@ These are promises you can rely on:
 
 These are areas that may need attention depending on your game:
 
-- ⚠️ **Animation** - No built-in animation system yet. You can implement basic animation using delta time and sprite swapping. A minimal animation system (sprite sheets, simple tweens) would be added if a reference game requires it.
 - ⚠️ **Advanced UI** - Complex menus/interfaces require custom code or external UI library
-- ⚠️ **Debug tooling** - No visual debugging tools; rely on logging and external profilers
+- ⚠️ **Editor parity** - The Tauri editor is catching up with the engine core and does not expose every engine feature yet
 - ⚠️ **ECS ergonomics** - Component queries are simple; complex systems may need better iteration patterns
 - ⚠️ **Asset management** - No texture atlasing or compression; large asset counts may need optimization
 
@@ -112,4 +114,3 @@ This keeps Sindri focused and prevents it from becoming a "forever project" that
 - Check the [Examples](examples.md) for code samples
 - Review the [API Reference](api-reference.md) for detailed method documentation
 - See the `examples/` directory for working demos (physics, platformer, pathfinding, grid, performance)
-

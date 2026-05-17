@@ -119,9 +119,16 @@ for (entity, pos) in world.query::<Position>() {
 This returns a `Vec<(EntityId, &T)>` for simplicity. For many games and tools, this is
 perfectly adequate and keeps the API straightforward.
 
+For mutable single-component iteration, use `query_mut::<T>()`:
+
+```rust
+for (_entity, velocity) in world.query_mut::<Velocity>() {
+    velocity.vx *= 0.95;
+}
+```
+
 ## Integration Pattern
 
-Right now, the `World` type is **not yet integrated into the core engine loop**.
 The recommended usage pattern is:
 
 - Store a `World` inside your game/state struct:
@@ -204,13 +211,27 @@ let component = MyComponent::deserialize(&data)?;
 world.insert(entity, component);
 ```
 
+## EntityBuilder
+
+`EntityBuilder` reduces common spawn + component + physics setup:
+
+```rust
+let player = EntityBuilder::new(&mut world, &mut physics)
+    .at(Vec2::new(200.0, 300.0))
+    .dynamic()
+    .box_collider(14.0, 18.0)
+    .sprite(player_texture)
+    .tag("player")
+    .build();
+```
+
 ## Limitations (by design)
 
 This is intentionally **not** a full ECS:
 
 - No archetypes or advanced layout optimizations
 - No parallel iteration
-- Queries are single-type only (`query::<T>()`)
+- Queries are single-type only (`query::<T>()`, `query_mut::<T>()`)
 - No system scheduling or execution order guarantees
 - Component add/remove during iteration is not explicitly handled (be careful)
 
@@ -237,7 +258,7 @@ let entities: Vec<(EntityId, Position, Velocity)> = world
 
 **Borrow checker notes:**
 - Queries return owned `Vec` to avoid lifetime issues
-- Mutable access requires `get_mut()` per entity
+- Mutable single-component iteration uses `query_mut()`
 - No borrow checker magic—you handle iteration safety
 
 ### When to Move to a Full ECS
@@ -255,19 +276,3 @@ Until then, this `World` + `EntityId` layer gives you:
 - Clean separation between data (world) and behavior (systems/game code)
 - A solid foundation for future tools and editors (entity inspectors, hierarchies, etc.)
 - Simple, predictable API without magic
-
-## When to Move to a Full ECS
-
-Consider switching to an ECS crate (like `hecs`, `bevy_ecs`, etc.) if:
-
-- You have thousands of entities and performance becomes an issue
-- You need complex queries (multiple component types, filters)
-- You want parallel system execution
-
-Until then, this `World` + `EntityId` layer gives you:
-
-- Centralized entity management
-- Clean separation between data (world) and behavior (systems/game code)
-- A solid foundation for future tools and editors (entity inspectors, hierarchies, etc.)
-
-

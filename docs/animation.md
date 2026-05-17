@@ -88,7 +88,7 @@ fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
 
 -   **Looping**: `Animation` has a `looping` field.
 -   **Speed**: `AnimatedSprite.speed` controls playback speed (1.0 = normal).
--   **Flipping**: `AnimatedSprite.flip_x` / `flip_y` (TODO: renderer support for flipping is in `transform.scale`).
+-   **Flipping**: Use negative transform scale on the animated sprite.
 
 Note: To flip a sprite, you can simply use negative scale:
 ```rust
