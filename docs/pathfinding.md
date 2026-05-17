@@ -1,6 +1,6 @@
 # Pathfinding
 
-Forge2D includes an A* pathfinding implementation for finding optimal paths on 2D grids.
+Sindri includes an A* pathfinding implementation for finding optimal paths on 2D grids.
 
 ## Overview
 
@@ -15,7 +15,7 @@ The pathfinding system provides:
 ### Creating a Pathfinding Grid
 
 ```rust
-use forge2d::{PathfindingGrid, GridNode};
+use sindri::{PathfindingGrid, GridNode};
 
 // Create a 40x30 grid with 32px cells
 let mut grid = PathfindingGrid::new(40, 30, 32.0);
@@ -34,7 +34,7 @@ grid.set_area_walkable(10, 5, 8, 1, false); // x, y, width, height, walkable
 ### Finding a Path
 
 ```rust
-use forge2d::{AStarPathfinder, Vec2};
+use sindri::{AStarPathfinder, Vec2};
 
 let start = Vec2::new(100.0, 100.0);
 let goal = Vec2::new(500.0, 400.0);
@@ -136,7 +136,7 @@ This creates natural diagonal movement while slightly favoring cardinal directio
 ## Example: Agent Following a Path
 
 ```rust
-use forge2d::{AStarPathfinder, PathfindingGrid, Vec2};
+use sindri::{AStarPathfinder, PathfindingGrid, Vec2};
 
 struct Agent {
     position: Vec2,
@@ -185,7 +185,7 @@ impl Agent {
 The pathfinding system works well with the general-purpose `Grid<T>`:
 
 ```rust
-use forge2d::{Grid, PathfindingGrid, AStarPathfinder};
+use sindri::{Grid, PathfindingGrid, AStarPathfinder};
 
 // Create both grids
 let mut game_grid = Grid::new(40, 30, 32.0, true);

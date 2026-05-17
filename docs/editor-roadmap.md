@@ -1,8 +1,8 @@
-# Forge2D Editor Functional Roadmap
+# Sindri Editor Functional Roadmap
 
 ## Goal
 
-This document captures what it will take to turn the current Forge2D editor from a functional scene manipulation tool into a fully functional day-to-day editor for building games with the engine.
+This document captures what it will take to turn the current Sindri editor from a functional scene manipulation tool into a fully functional day-to-day editor for building games with the engine.
 
 Assumption: "fully functional editor" means a credible authoring tool for scenes, assets, prefabs, and play/test iteration, not just a UI shell that can inspect and mutate a runtime `World`.
 

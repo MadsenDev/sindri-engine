@@ -5,7 +5,7 @@
 The `Engine` is the entry point for your game. Configure it using builder methods:
 
 ```rust
-use forge2d::Engine;
+use sindri::Engine;
 
 Engine::new()
     .with_title("My Game")           // Window title
@@ -27,7 +27,7 @@ Engine::new()
 Your game must implement the `Game` trait:
 
 ```rust
-use forge2d::{Game, EngineContext};
+use sindri::{Game, EngineContext};
 use anyhow::Result;
 
 impl Game for MyGame {
@@ -159,4 +159,4 @@ The loop continues until:
 
 ## Fixed Timestep
 
-Forge2D supports fixed timestep updates for deterministic game logic. See [Fixed Timestep](fixed-timestep.md) for details.
+Sindri supports fixed timestep updates for deterministic game logic. See [Fixed Timestep](fixed-timestep.md) for details.

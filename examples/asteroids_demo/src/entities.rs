@@ -1,4 +1,4 @@
-use forge2d::{Sprite, Vec2};
+use sindri::{Sprite, Vec2};
 
 pub struct Player {
     pub sprite: Sprite,
@@ -66,11 +66,11 @@ impl Asteroid {
             AsteroidSize::Medium => (80.0, 1.0),
             AsteroidSize::Small => (120.0, 2.0),
         };
-        
+
         // Random direction
         let angle = fastrand::f32() * std::f32::consts::TAU;
         let velocity = Vec2::from_angle(angle) * speed;
-        
+
         // Generate shape offsets deterministically based on position
         let radius = match size {
             AsteroidSize::Large => 40.0,
@@ -78,7 +78,7 @@ impl Asteroid {
             AsteroidSize::Small => 10.0,
         };
         let shape_offsets = Self::generate_shape_offsets(position, radius);
-        
+
         Self {
             sprite,
             velocity,
@@ -88,11 +88,11 @@ impl Asteroid {
             shape_offsets,
         }
     }
-    
+
     fn generate_shape_offsets(position: Vec2, radius: f32) -> Vec<Vec2> {
         const POINTS: usize = 10; // Good balance between detail and simplicity
         let mut offsets = Vec::with_capacity(POINTS);
-        
+
         // Simple hash function for deterministic "randomness" based on position
         fn hash(x: u64) -> u64 {
             let mut x = x;
@@ -103,26 +103,26 @@ impl Asteroid {
             x ^= x >> 33;
             x
         }
-        
+
         let base_seed = ((position.x * 1000.0) as u64) ^ ((position.y * 1000.0) as u64);
-        
+
         // Generate points in counter-clockwise order around a circle
         // with controlled variation to create interesting but valid shapes
         for i in 0..POINTS {
             let angle = (i as f32 / POINTS as f32) * std::f32::consts::TAU;
-            
+
             // Generate deterministic "random" value for radius variation
             let seed = hash(base_seed.wrapping_add(i as u64));
             let rand_val = seed as f32 / u64::MAX as f32; // 0.0 to 1.0
-            
+
             // Create variation: 80% to 100% of radius
             // Keeping it closer to full radius ensures convexity
             // Too much variation creates concave shapes that break fan triangulation
             let r = radius * (0.80 + rand_val * 0.20);
-            
+
             offsets.push(Vec2::new(r * angle.cos(), r * angle.sin()));
         }
-        
+
         // Verify and fix convexity: ensure no point is too close to center
         // This prevents the "line to center" issue with fan triangulation
         for i in 0..POINTS {
@@ -133,10 +133,10 @@ impl Asteroid {
                 offsets[i] = Vec2::new(angle.cos(), angle.sin()) * (radius * 0.8);
             }
         }
-        
+
         offsets
     }
-    
+
     pub fn radius(&self) -> f32 {
         match self.size {
             AsteroidSize::Large => 40.0,
@@ -145,4 +145,3 @@ impl Asteroid {
         }
     }
 }
-

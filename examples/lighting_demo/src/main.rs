@@ -1,7 +1,5 @@
 use anyhow::Result;
-use forge2d::{
-    Engine, Game, EngineContext, Camera2D, Vec2, PointLight,
-};
+use sindri::{Camera2D, Engine, EngineContext, Game, PointLight, Vec2};
 
 struct LightingDemo {
     camera: Camera2D,
@@ -16,14 +14,12 @@ impl LightingDemo {
         camera.zoom = 1.0;
 
         // Create a simple point light first to test
-        let lights = vec![
-            PointLight::new(
-                Vec2::new(0.0, 0.0), // Center of screen
-                [1.0, 1.0, 0.8], // Warm white/yellow
-                2.0, // High intensity
-                300.0, // Large radius
-            ),
-        ];
+        let lights = vec![PointLight::new(
+            Vec2::new(0.0, 0.0), // Center of screen
+            [1.0, 1.0, 0.8],     // Warm white/yellow
+            2.0,                 // High intensity
+            300.0,               // Large radius
+        )];
 
         Self {
             camera,
@@ -67,7 +63,12 @@ impl Game for LightingDemo {
             Vec2::new(400.0, 250.0),
             Vec2::new(-400.0, 250.0),
         ];
-        renderer.draw_polygon_no_occlusion(&mut frame, &ground_points, [0.8, 0.8, 0.9, 1.0], &self.camera)?;
+        renderer.draw_polygon_no_occlusion(
+            &mut frame,
+            &ground_points,
+            [0.8, 0.8, 0.9, 1.0],
+            &self.camera,
+        )?;
 
         // Draw some circles
         for i in 0..5 {
@@ -90,7 +91,12 @@ impl Game for LightingDemo {
                 Vec2::new(x + 30.0, -100.0),
                 Vec2::new(x - 30.0, -100.0),
             ];
-            renderer.draw_polygon(&mut frame, &rect_points, [0.95, 0.9, 0.9, 1.0], &self.camera)?;
+            renderer.draw_polygon(
+                &mut frame,
+                &rect_points,
+                [0.95, 0.9, 0.9, 1.0],
+                &self.camera,
+            )?;
         }
 
         // Draw all lights (additive blending)
@@ -105,9 +111,8 @@ impl Game for LightingDemo {
 
 fn main() -> Result<()> {
     Engine::new()
-        .with_title("Lighting Demo - Forge2D")
+        .with_title("Lighting Demo - Sindri")
         .with_size(1280, 720)
         .with_vsync(true)
         .run(LightingDemo::new())
 }
-

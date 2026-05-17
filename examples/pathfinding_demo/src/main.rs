@@ -1,5 +1,5 @@
 use anyhow::Result;
-use forge2d::{
+use sindri::{
     camera::CameraFollow,
     hud::{HudLayer, HudText, TextAlign},
     math::{Camera2D, Vec2},
@@ -11,30 +11,30 @@ use std::collections::HashSet;
 
 struct PathfindingDemo {
     camera: Camera2D,
-    world: forge2d::World,
-    
+    world: sindri::World,
+
     textures: TextureHandles,
     grid: PathfindingGrid,
-    
+
     // Pathfinding state
     start_pos: Option<Vec2>,
     goal_pos: Option<Vec2>,
     current_path: Vec<Vec2>,
     path_nodes: Vec<GridNode>,
-    
+
     // Obstacles (for visualization)
     obstacles: HashSet<GridNode>,
-    
+
     // Agent position
     agent_pos: Vec2,
     agent_target: Option<Vec2>,
     agent_path: Vec<Vec2>,
     agent_path_index: usize,
-    
+
     camera_follow: CameraFollow,
     initialized: bool,
     hud: HudLayer,
-    font: Option<forge2d::FontHandle>,
+    font: Option<sindri::FontHandle>,
 }
 
 struct TextureHandles {
@@ -50,10 +50,10 @@ impl PathfindingDemo {
     fn new() -> Self {
         // Create a 40x30 grid with 32px cells
         let grid = PathfindingGrid::new(40, 30, 32.0);
-        
+
         Self {
             camera: Camera2D::new(Vec2::new(640.0, 480.0)),
-            world: forge2d::World::new(),
+            world: sindri::World::new(),
             textures: TextureHandles {
                 grid_cell: None,
                 obstacle: None,
@@ -81,38 +81,38 @@ impl PathfindingDemo {
             font: None,
         }
     }
-    
+
     fn create_textures(&mut self, renderer: &mut Renderer) -> Result<()> {
         // Grid cell (light gray, semi-transparent)
         let cell_data: Vec<u8> = (0..(4 * 32 * 32))
             .flat_map(|_| [200u8, 200, 200, 100])
             .collect();
         self.textures.grid_cell = Some(renderer.load_texture_from_rgba(&cell_data, 32, 32)?);
-        
+
         // Obstacle (dark red)
         let obstacle_data: Vec<u8> = (0..(4 * 32 * 32))
             .flat_map(|_| [150u8, 50, 50, 255])
             .collect();
         self.textures.obstacle = Some(renderer.load_texture_from_rgba(&obstacle_data, 32, 32)?);
-        
+
         // Start marker (green)
         let start_data: Vec<u8> = (0..(4 * 32 * 32))
             .flat_map(|_| [50u8, 200, 50, 255])
             .collect();
         self.textures.start = Some(renderer.load_texture_from_rgba(&start_data, 32, 32)?);
-        
+
         // Goal marker (blue)
         let goal_data: Vec<u8> = (0..(4 * 32 * 32))
             .flat_map(|_| [50u8, 50, 200, 255])
             .collect();
         self.textures.goal = Some(renderer.load_texture_from_rgba(&goal_data, 32, 32)?);
-        
+
         // Path node (yellow)
         let path_data: Vec<u8> = (0..(4 * 24 * 24))
             .flat_map(|_| [255u8, 255, 100, 200])
             .collect();
         self.textures.path = Some(renderer.load_texture_from_rgba(&path_data, 24, 24)?);
-        
+
         // Agent (cyan circle-like)
         let agent_size = 28;
         let mut agent_data = vec![0u8; 4 * agent_size * agent_size];
@@ -131,11 +131,15 @@ impl PathfindingDemo {
                 }
             }
         }
-        self.textures.agent = Some(renderer.load_texture_from_rgba(&agent_data, agent_size as u32, agent_size as u32)?);
-        
+        self.textures.agent = Some(renderer.load_texture_from_rgba(
+            &agent_data,
+            agent_size as u32,
+            agent_size as u32,
+        )?);
+
         Ok(())
     }
-    
+
     fn setup_obstacles(&mut self) {
         // Create some obstacles
         // Walls
@@ -145,7 +149,7 @@ impl PathfindingDemo {
         self.grid.set_area_walkable(25, 15, 1, 8, false);
         self.grid.set_area_walkable(5, 20, 6, 1, false);
         self.grid.set_area_walkable(30, 5, 1, 10, false);
-        
+
         // Store obstacle nodes for rendering
         for y in 0..self.grid.height() as i32 {
             for x in 0..self.grid.width() as i32 {
@@ -159,70 +163,69 @@ impl PathfindingDemo {
 }
 
 impl Game for PathfindingDemo {
-    fn init(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+    fn init(&mut self, ctx: &mut sindri::EngineContext) -> Result<()> {
         self.create_textures(&mut *ctx.renderer())?;
         self.setup_obstacles();
-        
+
         // Load font for instructions
-        self.font = Some(ctx.builtin_font(forge2d::BuiltinFont::Ui)?);
-        
+        self.font = Some(ctx.builtin_font(sindri::BuiltinFont::Ui)?);
+
         // Set initial agent position
         self.agent_pos = Vec2::new(100.0, 100.0);
         // Camera should start at agent position (camera.position is the center of the view)
         self.camera.position = self.agent_pos;
-        
+
         self.initialized = true;
         Ok(())
     }
-    
-    fn update(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+
+    fn update(&mut self, ctx: &mut sindri::EngineContext) -> Result<()> {
         let input = ctx.input();
         let dt = ctx.delta_time().as_secs_f32();
-        
+
         // Convert mouse position to world coordinates
         let mouse_world = ctx.mouse_world(&self.camera);
-        
+
         // Left click: command agent to move here (primary interaction)
-        if input.is_mouse_pressed(forge2d::MouseButton::Left) {
+        if input.is_mouse_pressed(sindri::MouseButton::Left) {
             let grid_pos = self.grid.world_to_grid(mouse_world);
             if self.grid.is_walkable(&grid_pos) {
                 // Command agent to move to clicked position
-                if let Some(path) = AStarPathfinder::find_path(&self.grid, self.agent_pos, mouse_world) {
+                if let Some(path) =
+                    AStarPathfinder::find_path(&self.grid, self.agent_pos, mouse_world)
+                {
                     self.agent_target = Some(mouse_world);
                     self.agent_path = path.clone();
                     self.agent_path_index = 0;
-                    
+
                     // Also update visualization path
                     self.start_pos = Some(self.agent_pos);
                     self.goal_pos = Some(mouse_world);
                     self.current_path = path.clone();
-                    self.path_nodes = path.iter()
-                        .map(|p| self.grid.world_to_grid(*p))
-                        .collect();
+                    self.path_nodes = path.iter().map(|p| self.grid.world_to_grid(*p)).collect();
                 }
             }
         }
-        
+
         // Right click: set goal position for visualization only
-        if input.is_mouse_pressed(forge2d::MouseButton::Right) {
+        if input.is_mouse_pressed(sindri::MouseButton::Right) {
             let grid_pos = self.grid.world_to_grid(mouse_world);
             if self.grid.is_walkable(&grid_pos) {
                 self.goal_pos = Some(mouse_world);
                 self.current_path.clear();
                 self.path_nodes.clear();
-                
+
                 // If we have both start and goal, find path for visualization
                 if let Some(start) = self.start_pos {
                     if let Some(path) = AStarPathfinder::find_path(&self.grid, start, mouse_world) {
                         self.current_path = path.clone();
-                        self.path_nodes = path.iter()
-                            .map(|p| self.grid.world_to_grid(*p))
-                            .collect();
+                        self.path_nodes =
+                            path.iter().map(|p| self.grid.world_to_grid(*p)).collect();
                     }
                 }
             }
         }
-        
+
         // Space: command agent to move to current goal (if set)
         if input.is_key_pressed(KeyCode::Space) {
             if let Some(goal) = self.goal_pos {
@@ -233,7 +236,7 @@ impl Game for PathfindingDemo {
                 }
             }
         }
-        
+
         // Move agent along path
         if self.agent_target.is_some() {
             if !self.agent_path.is_empty() && self.agent_path_index < self.agent_path.len() {
@@ -241,12 +244,12 @@ impl Game for PathfindingDemo {
                 let direction = (next_pos - self.agent_pos).normalized();
                 let speed = 150.0;
                 let move_distance = speed * dt;
-                
+
                 let distance_to_next = self.agent_pos.distance(next_pos);
                 if distance_to_next < move_distance {
                     self.agent_pos = next_pos;
                     self.agent_path_index += 1;
-                    
+
                     if self.agent_path_index >= self.agent_path.len() {
                         self.agent_target = None;
                         self.agent_path.clear();
@@ -257,18 +260,18 @@ impl Game for PathfindingDemo {
                 }
             }
         }
-        
+
         // Update camera to follow agent
         self.camera_follow = CameraFollow::new()
             .follow_position(self.agent_pos)
             .with_dead_zone(200.0, 150.0)
             .with_smoothing(0.15);
-        
+
         // Create a dummy physics world for camera follow (we don't actually use physics here)
         // Actually, we can't use update_camera_follow without physics, so let's just update directly
         let offset = self.agent_pos - self.camera.position;
         let half_dead_zone = Vec2::new(200.0 / 2.0, 150.0 / 2.0);
-        
+
         if offset.x.abs() > half_dead_zone.x || offset.y.abs() > half_dead_zone.y {
             let mut desired_pos = self.camera.position;
             if offset.x.abs() > half_dead_zone.x {
@@ -279,21 +282,21 @@ impl Game for PathfindingDemo {
             }
             self.camera.position = self.camera.position.lerp(desired_pos, 0.15);
         }
-        
+
         Ok(())
     }
-    
-    fn draw(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+
+    fn draw(&mut self, ctx: &mut sindri::EngineContext) -> Result<()> {
         if !self.initialized {
             return Ok(());
         }
-        
+
         let renderer = ctx.renderer();
         let mut frame = renderer.begin_frame()?;
-        
+
         // Clear with dark background
         renderer.clear(&mut frame, [0.1, 0.1, 0.15, 1.0])?;
-        
+
         // Calculate camera view bounds for culling
         let screen_width = 1280.0;
         let screen_height = 720.0;
@@ -307,17 +310,17 @@ impl Game for PathfindingDemo {
             self.camera.position.x + half_width,
             self.camera.position.y + half_height,
         );
-        
+
         // Convert view bounds to grid coordinates
         let grid_min = self.grid.world_to_grid(view_min);
         let grid_max = self.grid.world_to_grid(view_max);
-        
+
         // Clamp to grid bounds
         let min_x = (grid_min.x - 1).max(0);
         let max_x = (grid_max.x + 1).min(self.grid.width() as i32 - 1);
         let min_y = (grid_min.y - 1).max(0);
         let max_y = (grid_max.y + 1).min(self.grid.height() as i32 - 1);
-        
+
         // Skip drawing grid cells to save sprites - just draw obstacles, path, and markers
         // Draw obstacles (only visible ones)
         if let Some(obstacle_tex) = self.textures.obstacle {
@@ -326,7 +329,7 @@ impl Game for PathfindingDemo {
                 if node.x < min_x || node.x > max_x || node.y < min_y || node.y > max_y {
                     continue;
                 }
-                
+
                 let world_pos = self.grid.grid_to_world(*node);
                 let cell_size = self.grid.cell_size();
                 if world_pos.x + cell_size / 2.0 < view_min.x
@@ -336,7 +339,7 @@ impl Game for PathfindingDemo {
                 {
                     continue;
                 }
-                
+
                 let mut sprite = Sprite::new(obstacle_tex);
                 sprite.transform.position = world_pos;
                 sprite.set_size_px(Vec2::new(32.0, 32.0), Vec2::new(32.0, 32.0));
@@ -345,7 +348,7 @@ impl Game for PathfindingDemo {
                 }
             }
         }
-        
+
         // Draw path nodes (only visible ones)
         if let Some(path_tex) = self.textures.path {
             for node in &self.path_nodes {
@@ -353,7 +356,7 @@ impl Game for PathfindingDemo {
                 if node.x < min_x || node.x > max_x || node.y < min_y || node.y > max_y {
                     continue;
                 }
-                
+
                 let world_pos = self.grid.grid_to_world(*node);
                 let cell_size = self.grid.cell_size();
                 if world_pos.x + cell_size / 2.0 < view_min.x
@@ -363,7 +366,7 @@ impl Game for PathfindingDemo {
                 {
                     continue;
                 }
-                
+
                 let mut sprite = Sprite::new(path_tex);
                 sprite.transform.position = world_pos;
                 sprite.set_size_px(Vec2::new(24.0, 24.0), Vec2::new(24.0, 24.0));
@@ -372,7 +375,7 @@ impl Game for PathfindingDemo {
                 }
             }
         }
-        
+
         // Draw start marker
         if let Some(start_tex) = self.textures.start {
             if let Some(start) = self.start_pos {
@@ -384,7 +387,7 @@ impl Game for PathfindingDemo {
                 }
             }
         }
-        
+
         // Draw goal marker
         if let Some(goal_tex) = self.textures.goal {
             if let Some(goal) = self.goal_pos {
@@ -396,7 +399,7 @@ impl Game for PathfindingDemo {
                 }
             }
         }
-        
+
         // Draw agent
         if let Some(agent_tex) = self.textures.agent {
             let mut sprite = Sprite::new(agent_tex);
@@ -406,7 +409,7 @@ impl Game for PathfindingDemo {
                 eprintln!("Error drawing agent: {}", e);
             }
         }
-        
+
         // Draw HUD instructions
         self.hud.clear();
         if let Some(font) = self.font {
@@ -436,7 +439,7 @@ impl Game for PathfindingDemo {
             });
         }
         self.hud.draw(renderer, &mut frame)?;
-        
+
         renderer.end_frame(frame)?;
         Ok(())
     }
@@ -444,7 +447,7 @@ impl Game for PathfindingDemo {
 
 fn main() -> Result<()> {
     Engine::new()
-        .with_title("Forge2D A* Pathfinding Demo")
+        .with_title("Sindri A* Pathfinding Demo")
         .with_size(1280, 720)
         .with_vsync(true)
         .run(PathfindingDemo::new())

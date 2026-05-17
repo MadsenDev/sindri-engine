@@ -1,6 +1,6 @@
-# Forge2D Documentation
+# Sindri Documentation
 
-Welcome to the Forge2D documentation! This guide will help you get started with creating 2D games using Forge2D.
+Welcome to the Sindri documentation! This guide will help you get started with creating 2D games using Sindri.
 
 ## Table of Contents
 
@@ -31,9 +31,9 @@ Welcome to the Forge2D documentation! This guide will help you get started with 
 - [Common Patterns](examples.md#common-patterns)
 - [Performance Tips](rendering.md#performance-notes)
 
-## What is Forge2D?
+## What is Sindri?
 
-Forge2D is a 2D game framework built with Rust, winit, and wgpu. It provides the core systems needed to build 2D games: rendering, physics, pathfinding, and content pipelines. The focus is on **coherence over completeness**—making the existing systems work well together rather than adding every possible feature.
+Sindri is a 2D game framework built with Rust, winit, and wgpu. It provides the core systems needed to build 2D games: rendering, physics, pathfinding, and content pipelines. The focus is on **coherence over completeness**—making the existing systems work well together rather than adding every possible feature.
 
 ### Key Features
 
@@ -53,7 +53,7 @@ Forge2D is a 2D game framework built with Rust, winit, and wgpu. It provides the
 - ✅ Scene serialization (save/load)
 - ✅ HUD layer for screen-space UI
 
-### What Forge2D Intentionally Doesn't Do
+### What Sindri Intentionally Doesn't Do
 
 These are **design decisions**, not oversights:
 
@@ -63,13 +63,13 @@ These are **design decisions**, not oversights:
 - ❌ **No full ECS framework** - Lightweight `World`/`EntityId` system only. No archetypes, parallel iteration, or complex queries. For advanced ECS, integrate `hecs` or `bevy_ecs`.
 - ❌ **No export/packaging tools** - No built-in way to package games for distribution. Use `cargo` and platform-specific tools.
 
-### What Forge2D Doesn't Have Yet (But Could Add)
+### What Sindri Doesn't Have Yet (But Could Add)
 
 These are **not yet implemented**, but would be added if a reference game forces them:
 
 - ⚠️ **Animation system** - No sprite sheets, tweens, or animation graphs yet. You can implement basic animation using delta time and sprite swapping, or use a library. A minimal animation system would be added if a platformer or action game requires it.
 
-### What Forge2D Guarantees
+### What Sindri Guarantees
 
 These are promises you can rely on:
 
@@ -97,15 +97,15 @@ These are areas that may need attention depending on your game:
 
 ## Philosophy: Coherence Over Completeness
 
-Forge2D prioritizes making existing systems work well together over adding every possible feature. The engine is designed to be **extended** rather than **complete**.
+Sindri prioritizes making existing systems work well together over adding every possible feature. The engine is designed to be **extended** rather than **complete**.
 
 **Recommended approach:**
 1. Pick a **reference game** (platformer, top-down, tile-based, etc.)
-2. Build it using Forge2D's existing systems
+2. Build it using Sindri's existing systems
 3. Add only what that game **forces** you to add
 4. If you can build the same game twice faster the second time, the engine is winning
 
-This keeps Forge2D focused and prevents it from becoming a "forever project" that supports everything but feels awkward to use.
+This keeps Sindri focused and prevents it from becoming a "forever project" that supports everything but feels awkward to use.
 
 ## Getting Help
 

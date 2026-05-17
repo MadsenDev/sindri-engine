@@ -8,7 +8,7 @@ name = "scripted_grid_demo"
 path = "src/main.rs"
 
 [dependencies]
-forge2d = { path = "../../forge2d" }
+sindri = { path = "../../crates/sindri" }
 anyhow = { workspace = true }
 mlua = { workspace = true }
 

@@ -2,11 +2,11 @@
 
 I’d aim for this first:
 
-> A 2D game framework crate (forge2d?) that lets you write:
+> A 2D game framework crate (sindri?) that lets you write:
 
 fn main() {
     let game = MyGame::new();
-    forge2d::Engine::new()
+    sindri::Engine::new()
         .with_title("My Cool Game")
         .run(game)
         .unwrap();
@@ -42,7 +42,7 @@ Monorepo style:
 
 my_engine_project/
   Cargo.toml                # workspace
-  forge2d/                  # the engine/framework crate
+  sindri/                  # the engine/framework crate
     Cargo.toml
     src/
       lib.rs
@@ -62,7 +62,7 @@ my_engine_project/
       Cargo.toml
       src/main.rs
 
-forge2d is your public library.
+sindri is your public library.
 
 examples/basic_game is a tiny game that proves the engine works.
 
@@ -89,11 +89,11 @@ Key types & functions
 
 Engine configuration & entrypoint
 
-// forge2d/src/lib.rs
+// sindri/src/lib.rs
 pub mod engine;
 pub use engine::{Engine, EngineConfig, Game, EngineContext};
 
-// forge2d/src/engine.rs
+// sindri/src/engine.rs
 pub struct EngineConfig {
     pub title: String,
     pub width: u32,
@@ -105,7 +105,7 @@ pub struct EngineConfig {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            title: "Forge2D Game".into(),
+            title: "Sindri Game".into(),
             width: 1280,
             height: 720,
             vsync: true,
@@ -162,7 +162,7 @@ pub struct EngineContext<'a> {
 
 Time module skeleton
 
-// forge2d/src/time.rs
+// sindri/src/time.rs
 use std::time::Instant;
 
 pub struct Time {
@@ -194,17 +194,17 @@ What a game looks like now
 
 struct MyGame;
 
-impl forge2d::Game for MyGame {
-    fn init(&mut self, _ctx: &mut forge2d::EngineContext) -> anyhow::Result<()> {
+impl sindri::Game for MyGame {
+    fn init(&mut self, _ctx: &mut sindri::EngineContext) -> anyhow::Result<()> {
         println!("Game init!");
         Ok(())
     }
 
-    fn update(&mut self, ctx: &mut forge2d::EngineContext) {
+    fn update(&mut self, ctx: &mut sindri::EngineContext) {
         println!("dt = {}", ctx.time.delta_seconds);
     }
 
-    fn draw(&mut self, _ctx: &mut forge2d::EngineContext) {
+    fn draw(&mut self, _ctx: &mut sindri::EngineContext) {
         // nothing yet
     }
 }
@@ -241,7 +241,7 @@ Integrate it with winit event handling in the engine loop.
 
 Key types & functions
 
-// forge2d/src/input.rs
+// sindri/src/input.rs
 use winit::event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode};
 
 pub struct InputState {
@@ -354,7 +354,7 @@ end_frame()
 
 Key types & functions
 
-// forge2d/src/render/mod.rs
+// sindri/src/render/mod.rs
 pub struct Renderer {
     backend: backend_wgpu::WgpuBackend,
     // later: sprite batches, pipelines, etc.
@@ -430,7 +430,7 @@ Key types & functions
 
 Math
 
-// forge2d/src/math.rs
+// sindri/src/math.rs
 #[derive(Clone, Copy, Debug)]
 pub struct Vec2 {
     pub x: f32,
@@ -446,7 +446,7 @@ pub struct Transform2D {
 
 Sprite
 
-// forge2d/src/render/sprite.rs
+// sindri/src/render/sprite.rs
 use crate::math::{Transform2D};
 use crate::render::TextureHandle;
 
@@ -459,7 +459,7 @@ pub struct Sprite {
 
 Camera
 
-// forge2d/src/render/camera.rs
+// sindri/src/render/camera.rs
 use crate::math::Vec2;
 
 pub struct Camera2D {
@@ -543,7 +543,7 @@ Maybe supports async or lazy load later.
 
 
 
-// forge2d/src/assets.rs
+// sindri/src/assets.rs
 use std::collections::HashMap;
 use crate::render::{Renderer, TextureHandle};
 

@@ -1,6 +1,6 @@
 # Fixed Timestep
 
-Forge2D supports fixed timestep updates for deterministic game logic, especially useful for physics and collision detection.
+Sindri supports fixed timestep updates for deterministic game logic, especially useful for physics and collision detection.
 
 ## Why Fixed Timestep?
 

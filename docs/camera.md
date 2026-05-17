@@ -1,6 +1,6 @@
 # Camera Follow System
 
-Forge2D provides a camera follow system for smoothly tracking entities or positions with dead-zone support.
+Sindri provides a camera follow system for smoothly tracking entities or positions with dead-zone support.
 
 ## Overview
 
@@ -15,7 +15,7 @@ The `CameraFollow` system allows you to:
 ### Following a Position
 
 ```rust
-use forge2d::{CameraFollow, update_camera_follow, Vec2};
+use sindri::{CameraFollow, update_camera_follow, Vec2};
 
 struct MyGame {
     camera: Camera2D,
@@ -57,7 +57,7 @@ impl Game for MyGame {
 ### Following an Entity
 
 ```rust
-use forge2d::{CameraFollow, update_camera_follow, PhysicsWorld};
+use sindri::{CameraFollow, update_camera_follow, PhysicsWorld};
 
 struct MyGame {
     camera: Camera2D,
@@ -177,7 +177,7 @@ pub fn update_camera_follow(
 ## Example: Platformer Camera
 
 ```rust
-use forge2d::{CameraFollow, update_camera_follow};
+use sindri::{CameraFollow, update_camera_follow};
 
 struct PlatformerGame {
     camera: Camera2D,

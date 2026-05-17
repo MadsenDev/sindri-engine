@@ -1,12 +1,12 @@
 # Examples
 
-Code examples and common patterns for Forge2D.
+Code examples and common patterns for Sindri.
 
 ## Basic Game Structure
 
 ```rust
 use anyhow::Result;
-use forge2d::{Engine, EngineContext, Game, KeyCode, Vec2};
+use sindri::{Engine, EngineContext, Game, KeyCode, Vec2};
 
 struct MyGame {
     // Your game state
@@ -94,7 +94,7 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 ### Camera Following (CameraFollow System)
 
 ```rust
-use forge2d::{CameraFollow, update_camera_follow};
+use sindri::{CameraFollow, update_camera_follow};
 
 fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
     let dt = ctx.delta_time().as_secs_f32();
@@ -269,7 +269,7 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 ### Grid-Based Movement
 
 ```rust
-use forge2d::{Grid, GridCoord, Vec2};
+use sindri::{Grid, GridCoord, Vec2};
 
 struct GridGame {
     grid: Grid<bool>,  // true = walkable
@@ -295,7 +295,7 @@ impl GridGame {
 ### A* Pathfinding
 
 ```rust
-use forge2d::{AStarPathfinder, PathfindingGrid, Vec2};
+use sindri::{AStarPathfinder, PathfindingGrid, Vec2};
 
 fn find_path_to_target(
     grid: &PathfindingGrid,
@@ -309,7 +309,7 @@ fn find_path_to_target(
 ### Physics Bodies
 
 ```rust
-use forge2d::{PhysicsWorld, RigidBodyType, ColliderShape, Vec2};
+use sindri::{PhysicsWorld, RigidBodyType, ColliderShape, Vec2};
 
 fn spawn_physics_object(
     physics: &mut PhysicsWorld,
@@ -336,7 +336,7 @@ fn spawn_physics_object(
 ### Scene Save/Load
 
 ```rust
-use forge2d::{create_scene, restore_scene_physics, Scene};
+use sindri::{create_scene, restore_scene_physics, Scene};
 
 fn save_game(world: &World, physics: &PhysicsWorld) -> Result<()> {
     let scene = create_scene(world, physics)?;
@@ -356,7 +356,7 @@ fn load_game(physics: &mut PhysicsWorld) -> Result<()> {
 ### HUD Display
 
 ```rust
-use forge2d::{HudLayer, HudText};
+use sindri::{HudLayer, HudText};
 
 fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
     // ... draw game sprites ...
@@ -380,7 +380,7 @@ fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
 
 ## Available Demos
 
-Forge2D includes several complete example demos:
+Sindri includes several complete example demos:
 
 ### Basic Game (`examples/basic_game/`)
 

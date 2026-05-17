@@ -1,14 +1,13 @@
 use anyhow::Result;
-use forge2d::{
-    Engine, Game, EngineContext, Camera2D, Vec2,
-    ParticleSystem, ParticleEmitter, EmissionConfig,
+use sindri::{
+    Camera2D, EmissionConfig, Engine, EngineContext, Game, ParticleEmitter, ParticleSystem, Vec2,
 };
 
 struct ParticlesDemo {
     camera: Camera2D,
     particle_system: ParticleSystem,
     time: f32,
-    white_texture: Option<forge2d::TextureHandle>,
+    white_texture: Option<sindri::TextureHandle>,
 }
 
 impl ParticlesDemo {
@@ -29,9 +28,8 @@ impl ParticlesDemo {
             .with_lifetime(0.5, 1.5)
             .with_acceleration(Vec2::new(0.0, -50.0))
             .with_size_end_multiplier(0.5);
-        
-        let mut fire_emitter = ParticleEmitter::new(fire_config)
-            .with_max_particles(200);
+
+        let mut fire_emitter = ParticleEmitter::new(fire_config).with_max_particles(200);
         particle_system.add_emitter(fire_emitter);
 
         // Sparkle effect
@@ -42,9 +40,8 @@ impl ParticlesDemo {
             .with_color([1.0, 1.0, 0.5, 1.0], Some([0.5, 0.8, 1.0, 0.0]))
             .with_lifetime(1.0, 2.0)
             .with_acceleration(Vec2::new(0.0, -30.0));
-        
-        let mut sparkle_emitter = ParticleEmitter::new(sparkle_config)
-            .with_max_particles(150);
+
+        let mut sparkle_emitter = ParticleEmitter::new(sparkle_config).with_max_particles(150);
         particle_system.add_emitter(sparkle_emitter);
 
         // Smoke effect
@@ -56,9 +53,8 @@ impl ParticlesDemo {
             .with_lifetime(2.0, 4.0)
             .with_acceleration(Vec2::new(0.0, -10.0))
             .with_size_end_multiplier(1.5);
-        
-        let mut smoke_emitter = ParticleEmitter::new(smoke_config)
-            .with_max_particles(100);
+
+        let mut smoke_emitter = ParticleEmitter::new(smoke_config).with_max_particles(100);
         particle_system.add_emitter(smoke_emitter);
 
         Self {
@@ -120,7 +116,12 @@ impl Game for ParticlesDemo {
         renderer.draw_polygon(&mut frame, &bg_points, [0.05, 0.05, 0.1, 1.0], &self.camera)?;
 
         // Draw particles using the white texture
-        renderer.draw_particles(&mut frame, &self.particle_system, &self.camera, self.white_texture)?;
+        renderer.draw_particles(
+            &mut frame,
+            &self.particle_system,
+            &self.camera,
+            self.white_texture,
+        )?;
 
         renderer.end_frame(frame)?;
         Ok(())
@@ -129,9 +130,8 @@ impl Game for ParticlesDemo {
 
 fn main() -> Result<()> {
     Engine::new()
-        .with_title("Particles Demo - Forge2D")
+        .with_title("Particles Demo - Sindri")
         .with_size(1280, 720)
         .with_vsync(true)
         .run(ParticlesDemo::new())
 }
-

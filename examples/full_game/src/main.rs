@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use forge2d::{
-    ActionId, AxisBinding, Button, BuiltinFont, Camera2D, Engine, EngineContext, FontHandle,
+use sindri::{
+    ActionId, AxisBinding, BuiltinFont, Button, Camera2D, Engine, EngineContext, FontHandle,
     HudLayer, HudRect, HudText, InputMap, KeyCode, MouseButton, Sprite, State, StateMachine,
     StateMachineLike, TextAlign, Vec2,
 };
@@ -55,9 +55,12 @@ impl State for MenuState {
         self.time += dt;
 
         // Check input without holding a borrow
-        let up_pressed = ctx.input().is_key_pressed(KeyCode::ArrowUp) || ctx.input().is_key_pressed(KeyCode::KeyW);
-        let down_pressed = ctx.input().is_key_pressed(KeyCode::ArrowDown) || ctx.input().is_key_pressed(KeyCode::KeyS);
-        let select_pressed = ctx.input().is_key_pressed(KeyCode::Enter) || ctx.input().is_key_pressed(KeyCode::Space);
+        let up_pressed = ctx.input().is_key_pressed(KeyCode::ArrowUp)
+            || ctx.input().is_key_pressed(KeyCode::KeyW);
+        let down_pressed = ctx.input().is_key_pressed(KeyCode::ArrowDown)
+            || ctx.input().is_key_pressed(KeyCode::KeyS);
+        let select_pressed = ctx.input().is_key_pressed(KeyCode::Enter)
+            || ctx.input().is_key_pressed(KeyCode::Space);
         let escape_pressed = ctx.input().is_key_pressed(KeyCode::Escape);
 
         // Navigate menu with arrow keys or WASD
@@ -97,7 +100,7 @@ impl State for MenuState {
         Ok(())
     }
 
-    fn draw(&mut self, renderer: &mut forge2d::Renderer, frame: &mut forge2d::Frame) -> Result<()> {
+    fn draw(&mut self, renderer: &mut sindri::Renderer, frame: &mut sindri::Frame) -> Result<()> {
         // Gradient background (darker blue)
         renderer.clear(frame, [0.05, 0.05, 0.15, 1.0])?;
 
@@ -109,10 +112,10 @@ impl State for MenuState {
 
         // Draw title
         if let Some(font_title) = self.font_title {
-            let title_text = "FORGE2D";
+            let title_text = "SINDRI";
             let title_size = 64.0;
             let title_y = center_y - 150.0;
-            // Approximate text width for centering: "FORGE2D" at 64px is roughly 350px wide
+            // Approximate text width for centering: "SINDRI" at 64px is roughly 350px wide
             let title_width_approx = 350.0;
             let title_x = center_x - (title_width_approx * 0.5);
 
@@ -153,7 +156,7 @@ impl State for MenuState {
                 // Selection indicator (pulsing effect)
                 if is_selected {
                     let pulse = (self.time * 3.0).sin() * 0.3 + 0.7;
-                    
+
                     // Arrow indicator
                     self.hud.add_text(HudText {
                         text: ">".to_string(),
@@ -256,28 +259,16 @@ impl GameplayState {
         input_map.set_axis(
             axis_horizontal.clone(),
             AxisBinding::new(
-                vec![
-                    Button::Key(KeyCode::KeyA),
-                    Button::Key(KeyCode::ArrowLeft),
-                ],
-                vec![
-                    Button::Key(KeyCode::KeyD),
-                    Button::Key(KeyCode::ArrowRight),
-                ],
+                vec![Button::Key(KeyCode::KeyA), Button::Key(KeyCode::ArrowLeft)],
+                vec![Button::Key(KeyCode::KeyD), Button::Key(KeyCode::ArrowRight)],
             ),
         );
 
         input_map.set_axis(
             axis_vertical.clone(),
             AxisBinding::new(
-                vec![
-                    Button::Key(KeyCode::KeyW),
-                    Button::Key(KeyCode::ArrowUp),
-                ],
-                vec![
-                    Button::Key(KeyCode::KeyS),
-                    Button::Key(KeyCode::ArrowDown),
-                ],
+                vec![Button::Key(KeyCode::KeyW), Button::Key(KeyCode::ArrowUp)],
+                vec![Button::Key(KeyCode::KeyS), Button::Key(KeyCode::ArrowDown)],
             ),
         );
 
@@ -398,10 +389,8 @@ impl State for GameplayState {
         for i in 0..5 {
             let mut sprite = Sprite::new(collectible_texture);
             sprite.set_size_px(Vec2::new(48.0, 48.0), tex_vec);
-            sprite.transform.position = Vec2::new(
-                300.0 + i as f32 * 150.0,
-                250.0 + i as f32 * 100.0,
-            );
+            sprite.transform.position =
+                Vec2::new(300.0 + i as f32 * 150.0, 250.0 + i as f32 * 100.0);
             sprite.tint = [0.3, 1.0, 0.3, 1.0];
 
             self.collectibles.push(Collectible {
@@ -418,17 +407,13 @@ impl State for GameplayState {
         for i in 0..3 {
             let mut sprite = Sprite::new(enemy_texture);
             sprite.set_size_px(Vec2::new(56.0, 56.0), tex_vec);
-            sprite.transform.position = Vec2::new(
-                800.0 + i as f32 * 200.0,
-                400.0 + i as f32 * 150.0,
-            );
+            sprite.transform.position =
+                Vec2::new(800.0 + i as f32 * 200.0, 400.0 + i as f32 * 150.0);
             sprite.tint = [1.0, 0.5, 0.5, 1.0];
 
             self.enemies.push(sprite);
-            self.enemy_velocities.push(Vec2::new(
-                50.0 + i as f32 * 20.0,
-                40.0 + i as f32 * 15.0,
-            ));
+            self.enemy_velocities
+                .push(Vec2::new(50.0 + i as f32 * 20.0, 40.0 + i as f32 * 15.0));
         }
 
         self.score = 0;
@@ -469,14 +454,16 @@ impl State for GameplayState {
 
             const PLAYER_SIZE_PX: f32 = 32.0;
             let half_size = PLAYER_SIZE_PX * 0.5;
-            player.transform.position.x = player.transform.position.x.clamp(
-                half_size,
-                self.world_bounds.x - half_size,
-            );
-            player.transform.position.y = player.transform.position.y.clamp(
-                half_size,
-                self.world_bounds.y - half_size,
-            );
+            player.transform.position.x = player
+                .transform
+                .position
+                .x
+                .clamp(half_size, self.world_bounds.x - half_size);
+            player.transform.position.y = player
+                .transform
+                .position
+                .y
+                .clamp(half_size, self.world_bounds.y - half_size);
         }
 
         // Mouse click to spawn collectibles at world position.
@@ -528,7 +515,11 @@ impl State for GameplayState {
         }
 
         // Update enemies (bounce within world bounds).
-        for (enemy, vel) in self.enemies.iter_mut().zip(self.enemy_velocities.iter_mut()) {
+        for (enemy, vel) in self
+            .enemies
+            .iter_mut()
+            .zip(self.enemy_velocities.iter_mut())
+        {
             enemy.transform.position += *vel * dt;
 
             let half_size = 28.0;
@@ -556,7 +547,7 @@ impl State for GameplayState {
         Ok(())
     }
 
-    fn draw(&mut self, renderer: &mut forge2d::Renderer, frame: &mut forge2d::Frame) -> Result<()> {
+    fn draw(&mut self, renderer: &mut sindri::Renderer, frame: &mut sindri::Frame) -> Result<()> {
         renderer.clear(frame, [0.1, 0.1, 0.15, 1.0])?;
 
         // Background.
@@ -680,7 +671,7 @@ impl State for PauseState {
         Ok(())
     }
 
-    fn draw(&mut self, renderer: &mut forge2d::Renderer, frame: &mut forge2d::Frame) -> Result<()> {
+    fn draw(&mut self, renderer: &mut sindri::Renderer, frame: &mut sindri::Frame) -> Result<()> {
         // Semi-transparent dark overlay (gameplay is still visible underneath)
         renderer.clear(frame, [0.0, 0.0, 0.0, 0.6])?;
 
@@ -721,10 +712,7 @@ impl State for PauseState {
 
         // Draw instructions
         if let Some(font_ui) = self.font_ui {
-            let instructions = vec![
-                "P: Resume",
-                "ESC: Back to Menu",
-            ];
+            let instructions = vec!["P: Resume", "ESC: Back to Menu"];
             let instruction_size = 24.0;
             let instruction_spacing = 40.0;
             let instruction_start_y = center_y + 50.0;
@@ -755,9 +743,8 @@ fn main() -> Result<()> {
     let state_machine = StateMachine::with_initial_state(Box::new(MenuState::new()));
 
     Engine::new()
-        .with_title("Forge2D Full Game Demo")
+        .with_title("Sindri Full Game Demo")
         .with_size(1024, 768)
         .with_vsync(true)
         .run(state_machine)
 }
-

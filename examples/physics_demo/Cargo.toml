@@ -5,6 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-forge2d = { path = "../../forge2d" }
+sindri = { path = "../../crates/sindri" }
 rand = "0.8"
 

@@ -1,6 +1,6 @@
 # World & Entities
 
-Forge2D includes a lightweight **World** and **EntityId** system that gives you a central place
+Sindri includes a lightweight **World** and **EntityId** system that gives you a central place
 to manage game entities and their components, without committing to a full ECS.
 
 This is ideal for:
@@ -12,7 +12,7 @@ This is ideal for:
 ## Core Types
 
 ```rust
-use forge2d::{World, EntityId};
+use sindri::{World, EntityId};
 ```
 
 ### EntityId
@@ -44,7 +44,7 @@ The `World`:
 ## Spawning & Despawning
 
 ```rust
-use forge2d::{World, EntityId};
+use sindri::{World, EntityId};
 
 let mut world = World::new();
 
@@ -127,7 +127,7 @@ The recommended usage pattern is:
 - Store a `World` inside your game/state struct:
 
 ```rust
-use forge2d::World;
+use sindri::World;
 
 struct GameState {
     world: World,
@@ -187,7 +187,7 @@ See [Scene Serialization](scene.md) for details on saving and loading game state
 ### Serializing Components
 
 ```rust
-use forge2d::{World, ComponentSerializable, SerializableComponent};
+use sindri::{World, ComponentSerializable, SerializableComponent};
 
 // Components that implement ComponentSerializable can be serialized
 if let Some(component) = world.get::<MyComponent>(entity) {

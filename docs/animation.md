@@ -1,6 +1,6 @@
 # Sprite Animation System
 
-Forge2D provides a system for playing frame-based animations using spritesheets.
+Sindri provides a system for playing frame-based animations using spritesheets.
 
 ## Overview
 

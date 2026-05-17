@@ -1,5 +1,5 @@
 use crate::entities::{CarriedResource, EntityType, GameEntity, UnitAction};
-use forge2d::{AStarPathfinder, GridNode, PathfindingGrid, Vec2};
+use sindri::{AStarPathfinder, GridNode, PathfindingGrid, Vec2};
 
 pub struct PathfindingSystem {
     pub grid: PathfindingGrid,
@@ -10,23 +10,23 @@ impl PathfindingSystem {
     pub fn new(world_size: Vec2, cell_size: f32) -> Self {
         let grid_width = (world_size.x / cell_size) as usize;
         let grid_height = (world_size.y / cell_size) as usize;
-        
+
         Self {
             grid: PathfindingGrid::new(grid_width, grid_height, cell_size),
             cell_size,
         }
     }
-    
+
     pub fn mark_obstacle(&mut self, position: Vec2, size: Vec2) {
         // Add padding to ensure units stay outside buildings
         let padding = 10.0; // Extra space around buildings
         let half_size = size * 0.5 + Vec2::new(padding, padding);
         let min_pos = position - half_size;
         let max_pos = position + half_size;
-        
+
         let min_node = self.grid.world_to_grid(min_pos);
         let max_node = self.grid.world_to_grid(max_pos);
-        
+
         for x in min_node.x..=max_node.x {
             for y in min_node.y..=max_node.y {
                 let node = GridNode::new(x, y);
@@ -36,7 +36,7 @@ impl PathfindingSystem {
             }
         }
     }
-    
+
     pub fn is_position_blocked(&self, position: Vec2) -> bool {
         let node = self.grid.world_to_grid(position);
         if self.grid.is_valid(&node) {
@@ -45,7 +45,7 @@ impl PathfindingSystem {
             true // Out of bounds is considered blocked
         }
     }
-    
+
     pub fn find_path(&self, start: Vec2, goal: Vec2) -> Option<Vec<Vec2>> {
         AStarPathfinder::find_path(&self.grid, start, goal)
     }
@@ -60,7 +60,7 @@ impl MovementSystem {
             let next_waypoint = entity.path[entity.path_index];
             let dir = next_waypoint - entity.sprite.transform.position;
             let distance = dir.length();
-            
+
             if distance > 5.0 {
                 let move_dist = entity.speed * dt;
                 let new_pos = if move_dist < distance {
@@ -68,7 +68,7 @@ impl MovementSystem {
                 } else {
                     next_waypoint
                 };
-                
+
                 // Check if new position is blocked
                 if !pathfinding.is_position_blocked(new_pos) {
                     entity.sprite.transform.position = new_pos;
@@ -83,7 +83,7 @@ impl MovementSystem {
             } else {
                 entity.path_index += 1;
             }
-            
+
             // Check if reached end of path
             if entity.path_index >= entity.path.len() {
                 entity.path.clear();
@@ -91,7 +91,9 @@ impl MovementSystem {
                 entity.target_position = None;
                 // Only set to Idle if not in a persistent action state
                 match entity.action {
-                    UnitAction::Gathering(_) | UnitAction::Delivering(_) | UnitAction::Building(_) => {
+                    UnitAction::Gathering(_)
+                    | UnitAction::Delivering(_)
+                    | UnitAction::Building(_) => {
                         // Keep the action - these states manage themselves
                     }
                     _ => {
@@ -103,7 +105,7 @@ impl MovementSystem {
             // Direct movement (fallback) - but check for obstacles
             let dir = target - entity.sprite.transform.position;
             let distance = dir.length();
-            
+
             if distance > 5.0 {
                 let move_dist = entity.speed * dt;
                 let new_pos = if move_dist < distance {
@@ -111,7 +113,7 @@ impl MovementSystem {
                 } else {
                     target
                 };
-                
+
                 // Check if new position is blocked
                 if !pathfinding.is_position_blocked(new_pos) {
                     entity.sprite.transform.position = new_pos;
@@ -119,7 +121,9 @@ impl MovementSystem {
                         entity.target_position = None;
                         // Only set to Idle if not in a persistent action state
                         match entity.action {
-                            UnitAction::Gathering(_) | UnitAction::Delivering(_) | UnitAction::Building(_) => {
+                            UnitAction::Gathering(_)
+                            | UnitAction::Delivering(_)
+                            | UnitAction::Building(_) => {
                                 // Keep the action - these states manage themselves
                             }
                             _ => {
@@ -135,7 +139,9 @@ impl MovementSystem {
                 entity.target_position = None;
                 // Only set to Idle if not in a persistent action state
                 match entity.action {
-                    UnitAction::Gathering(_) | UnitAction::Delivering(_) | UnitAction::Building(_) => {
+                    UnitAction::Gathering(_)
+                    | UnitAction::Delivering(_)
+                    | UnitAction::Building(_) => {
                         // Keep the action - these states manage themselves
                     }
                     _ => {
@@ -159,7 +165,7 @@ impl GatheringSystem {
     ) -> Option<usize> {
         // Returns Some(town_center_idx) if inventory is full and needs to deliver
         let unit_pos = entities[unit_idx].sprite.transform.position;
-        
+
         if resource_idx < entities.len() {
             if entities[resource_idx].resource_amount == 0 {
                 // Resource depleted
@@ -167,10 +173,10 @@ impl GatheringSystem {
                 entities[unit_idx].resource_target = None;
                 return None;
             }
-            
+
             let dist = (unit_pos - entities[resource_idx].sprite.transform.position).length();
             let gather_range = 30.0;
-            
+
             if dist > gather_range {
                 // Move closer to resource
                 let start = unit_pos;
@@ -194,37 +200,42 @@ impl GatheringSystem {
                     _ => return None,
                 };
                 let resource_amount = entities[resource_idx].resource_amount;
-                
+
                 // Update gather timer
                 entities[unit_idx].gather_timer += dt;
-                
+
                 if entities[unit_idx].gather_timer >= 1.0 / entities[unit_idx].gather_rate {
                     entities[unit_idx].gather_timer = 0.0;
-                    
+
                     // Set carried resource type if not set
                     if entities[unit_idx].carried_resource.is_none() {
                         entities[unit_idx].carried_resource = Some(resource_type);
                     }
-                    
+
                     // Only gather if carrying the same resource type
                     if entities[unit_idx].carried_resource == Some(resource_type) {
                         let gather_amount = 10u32;
                         let available = resource_amount.min(gather_amount);
-                        let space_left = entities[unit_idx].max_carry_capacity.saturating_sub(entities[unit_idx].carried_amount);
+                        let space_left = entities[unit_idx]
+                            .max_carry_capacity
+                            .saturating_sub(entities[unit_idx].carried_amount);
                         let amount = available.min(space_left);
-                        
+
                         if amount > 0 {
                             // Update resource and unit inventory
                             entities[resource_idx].resource_amount -= amount;
                             entities[unit_idx].carried_amount += amount;
-                            
+
                             // Check if inventory is full
-                            if entities[unit_idx].carried_amount >= entities[unit_idx].max_carry_capacity {
+                            if entities[unit_idx].carried_amount
+                                >= entities[unit_idx].max_carry_capacity
+                            {
                                 // Find nearest appropriate drop-off building for this resource type
                                 let mut nearest_dropoff: Option<(usize, f32)> = None;
                                 for (idx, entity) in entities.iter().enumerate() {
                                     if entity.accepts_resource(resource_type) {
-                                        let dist = (unit_pos - entity.sprite.transform.position).length();
+                                        let dist =
+                                            (unit_pos - entity.sprite.transform.position).length();
                                         if let Some((_, min_dist)) = nearest_dropoff {
                                             if dist < min_dist {
                                                 nearest_dropoff = Some((idx, dist));
@@ -234,7 +245,7 @@ impl GatheringSystem {
                                         }
                                     }
                                 }
-                                
+
                                 if let Some((dropoff_idx, _)) = nearest_dropoff {
                                     return Some(dropoff_idx);
                                 }
@@ -248,7 +259,7 @@ impl GatheringSystem {
             entities[unit_idx].action = UnitAction::Idle;
             entities[unit_idx].resource_target = None;
         }
-        
+
         None
     }
 }
@@ -266,12 +277,12 @@ impl DeliverySystem {
     ) -> Option<usize> {
         // Returns Some(resource_idx) if delivery complete and should return to gathering
         let unit_pos = entities[unit_idx].sprite.transform.position;
-        
+
         if dropoff_building_idx < entities.len() {
             let building_pos = entities[dropoff_building_idx].sprite.transform.position;
             let dist = (unit_pos - building_pos).length();
             let delivery_range = 50.0;
-            
+
             if dist > delivery_range {
                 // Move to drop-off building
                 let start = unit_pos;
@@ -290,23 +301,23 @@ impl DeliverySystem {
                 let resource_target = entities[unit_idx].resource_target;
                 let carried_amount = entities[unit_idx].carried_amount;
                 let carried_resource = entities[unit_idx].carried_resource;
-                
+
                 // If resource_target is not set, try to extract it from the action
                 // (This shouldn't happen, but let's be defensive)
                 if resource_target.is_none() {
                     // Can't extract from Delivering action, so we'll go idle after delivery
                 }
-                
+
                 // Check if resource still exists and has resources (before mutable borrow)
                 let should_return_to_gathering = if let Some(resource_idx) = resource_target {
                     resource_idx < entities.len() && entities[resource_idx].resource_amount > 0
                 } else {
                     false
                 };
-                
+
                 // Now do mutable operations
                 let unit = &mut entities[unit_idx];
-                
+
                 if carried_amount > 0 {
                     // Deliver resources
                     if let Some(resource_type) = carried_resource {
@@ -320,7 +331,7 @@ impl DeliverySystem {
                     // Keep carried_resource type so we can search for more of the same type
                     // It will be cleared when we find a new resource or go idle
                 }
-                
+
                 // After delivery (or if already delivered), return to gathering if we have a valid resource target
                 if should_return_to_gathering {
                     if let Some(resource_idx) = resource_target {
@@ -337,7 +348,7 @@ impl DeliverySystem {
                 }
             }
         }
-        
+
         None
     }
 }
@@ -355,9 +366,9 @@ impl BuildingSystem {
         if build_idx < entities.len() {
             let building_pos = entities[build_idx].sprite.transform.position;
             let building_type = entities[build_idx].entity_type;
-            
+
             entities[build_idx].build_progress += dt * 0.5; // 2 seconds to build
-            
+
             if entities[build_idx].build_progress >= 1.0 {
                 entities[build_idx].build_progress = 1.0;
                 // Building complete - mark as obstacle
@@ -369,7 +380,7 @@ impl BuildingSystem {
                     _ => Vec2::new(50.0, 50.0),
                 };
                 pathfinding.mark_obstacle(building_pos, size);
-                
+
                 // Clear build target from unit
                 if unit_idx < entities.len() {
                     entities[unit_idx].action = UnitAction::Idle;
@@ -379,4 +390,3 @@ impl BuildingSystem {
         }
     }
 }
-

@@ -1,6 +1,6 @@
 # Built-in Entity Components
 
-Forge2D provides a set of built-in entity components for common game objects. These components can be attached to entities to create standard game objects.
+Sindri provides a set of built-in entity components for common game objects. These components can be attached to entities to create standard game objects.
 
 ## Overview
 
@@ -17,7 +17,7 @@ Built-in components include:
 The `Transform` component represents position, rotation, and scale.
 
 ```rust
-use forge2d::{Transform, Vec2};
+use sindri::{Transform, Vec2};
 
 let transform = Transform::new(Vec2::new(100.0, 200.0))
     .with_rotation(0.5)  // Radians
@@ -35,7 +35,7 @@ let transform = Transform::new(Vec2::new(100.0, 200.0))
 The `SpriteComponent` provides visual representation for an entity.
 
 ```rust
-use forge2d::{SpriteComponent, TextureHandle};
+use sindri::{SpriteComponent, TextureHandle};
 
 let sprite = SpriteComponent::new(texture_handle)
     .with_tint(1.0, 0.0, 0.0, 1.0);  // Red tint
@@ -52,7 +52,7 @@ let sprite = SpriteComponent::new(texture_handle)
 The `PhysicsBody` component marks an entity as having a physics body.
 
 ```rust
-use forge2d::{PhysicsBody, RigidBodyType, ColliderShape};
+use sindri::{PhysicsBody, RigidBodyType, ColliderShape};
 
 let physics_body = PhysicsBody::new(RigidBodyType::Dynamic)
     .with_collider(ColliderShape::Box { hx: 15.0, hy: 15.0 });
@@ -65,7 +65,7 @@ let physics_body = PhysicsBody::new(RigidBodyType::Dynamic)
 The `AudioSource` component provides positional audio for an entity.
 
 ```rust
-use forge2d::AudioSource;
+use sindri::AudioSource;
 
 let audio = AudioSource::new()
     .with_volume(0.8)
@@ -85,7 +85,7 @@ let audio = AudioSource::new()
 The `CameraComponent` attaches a camera to an entity.
 
 ```rust
-use forge2d::{CameraComponent, Vec2};
+use sindri::{CameraComponent, Vec2};
 
 let camera = CameraComponent::new(Vec2::new(0.0, 0.0))
     .with_zoom(1.5);
@@ -103,7 +103,7 @@ Tag components are simple marker components for categorizing entities.
 ### Player
 
 ```rust
-use forge2d::Player;
+use sindri::Player;
 
 let player = Player;  // Unit struct
 ```
@@ -111,7 +111,7 @@ let player = Player;  // Unit struct
 ### Enemy
 
 ```rust
-use forge2d::Enemy;
+use sindri::Enemy;
 
 let enemy = Enemy;  // Unit struct
 ```
@@ -119,7 +119,7 @@ let enemy = Enemy;  // Unit struct
 ### Collectible
 
 ```rust
-use forge2d::Collectible;
+use sindri::Collectible;
 
 let collectible = Collectible::new(10);  // Value: 10 points
 ```
@@ -127,7 +127,7 @@ let collectible = Collectible::new(10);  // Value: 10 points
 ### Hazard
 
 ```rust
-use forge2d::Hazard;
+use sindri::Hazard;
 
 let hazard = Hazard::new(5);  // Damage: 5 HP
 ```
@@ -135,7 +135,7 @@ let hazard = Hazard::new(5);  // Damage: 5 HP
 ### Checkpoint
 
 ```rust
-use forge2d::Checkpoint;
+use sindri::Checkpoint;
 
 let checkpoint = Checkpoint::new(1);  // Checkpoint ID: 1
 ```
@@ -143,7 +143,7 @@ let checkpoint = Checkpoint::new(1);  // Checkpoint ID: 1
 ### Trigger
 
 ```rust
-use forge2d::Trigger;
+use sindri::Trigger;
 
 let trigger = Trigger::new(1);  // Trigger ID: 1
 // trigger.activated tracks if it's been activated
@@ -152,7 +152,7 @@ let trigger = Trigger::new(1);  // Trigger ID: 1
 ### MovingPlatform
 
 ```rust
-use forge2d::{MovingPlatform, Vec2};
+use sindri::{MovingPlatform, Vec2};
 
 let platform = MovingPlatform::new(
     Vec2::new(100.0, 200.0),  // Start position
@@ -164,7 +164,7 @@ let platform = MovingPlatform::new(
 ## Usage Example
 
 ```rust
-use forge2d::{World, Transform, SpriteComponent, Player, Vec2};
+use sindri::{World, Transform, SpriteComponent, Player, Vec2};
 
 struct Game {
     world: World,

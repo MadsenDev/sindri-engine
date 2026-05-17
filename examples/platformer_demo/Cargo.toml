@@ -9,5 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-forge2d = { path = "../../forge2d" }
+sindri = { path = "../../crates/sindri" }
 

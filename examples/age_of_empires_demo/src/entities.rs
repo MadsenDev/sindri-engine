@@ -1,4 +1,4 @@
-use forge2d::Sprite;
+use sindri::Sprite;
 
 // Entity types
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,7 +27,7 @@ pub enum CarriedResource {
 pub enum UnitAction {
     Idle,
     Moving,
-    Gathering(usize), // Entity index of resource being gathered
+    Gathering(usize),  // Entity index of resource being gathered
     Delivering(usize), // Entity index of town center to deliver to
     Building(usize),   // Entity index of building being constructed
 }
@@ -36,43 +36,38 @@ pub struct GameEntity {
     pub sprite: Sprite,
     pub entity_type: EntityType,
     pub selected: bool,
-    pub target_position: Option<forge2d::Vec2>,
-    pub path: Vec<forge2d::Vec2>,
+    pub target_position: Option<sindri::Vec2>,
+    pub path: Vec<sindri::Vec2>,
     pub path_index: usize,
     pub speed: f32,
     pub action: UnitAction,
-    
+
     // Resource gathering
     pub resource_target: Option<usize>, // Entity index
     pub gather_timer: f32,
     pub gather_rate: f32, // Resources per second
-    
+
     // Inventory (for villagers)
     pub carried_resource: Option<CarriedResource>, // What resource is being carried
-    pub carried_amount: u32, // How much is being carried
-    pub max_carry_capacity: u32, // Maximum carrying capacity
-    
+    pub carried_amount: u32,                       // How much is being carried
+    pub max_carry_capacity: u32,                   // Maximum carrying capacity
+
     // Building construction
-    pub build_progress: f32, // 0.0 to 1.0
+    pub build_progress: f32,         // 0.0 to 1.0
     pub build_target: Option<usize>, // Entity index
-    
+
     // Resource amounts (for trees, gold, stone)
     pub resource_amount: u32,
 }
 
 impl GameEntity {
-    pub fn new(
-        sprite: Sprite,
-        entity_type: EntityType,
-        speed: f32,
-        resource_amount: u32,
-    ) -> Self {
+    pub fn new(sprite: Sprite, entity_type: EntityType, speed: f32, resource_amount: u32) -> Self {
         let max_carry = if entity_type == EntityType::Villager {
             100 // Villagers can carry 100 resources
         } else {
             0
         };
-        
+
         Self {
             sprite,
             entity_type,
@@ -93,20 +88,20 @@ impl GameEntity {
             resource_amount,
         }
     }
-    
-    pub fn get_size(&self) -> forge2d::Vec2 {
+
+    pub fn get_size(&self) -> sindri::Vec2 {
         match self.entity_type {
-            EntityType::Villager => forge2d::Vec2::new(24.0, 24.0),
-            EntityType::Military => forge2d::Vec2::new(28.0, 28.0),
-            EntityType::TownCenter => forge2d::Vec2::new(80.0, 80.0),
-            EntityType::House => forge2d::Vec2::new(50.0, 50.0),
-            EntityType::LumberMill => forge2d::Vec2::new(60.0, 60.0),
-            EntityType::Mine => forge2d::Vec2::new(60.0, 60.0),
-            EntityType::Tree => forge2d::Vec2::new(40.0, 60.0),
-            EntityType::Gold | EntityType::Stone => forge2d::Vec2::new(30.0, 30.0),
+            EntityType::Villager => sindri::Vec2::new(24.0, 24.0),
+            EntityType::Military => sindri::Vec2::new(28.0, 28.0),
+            EntityType::TownCenter => sindri::Vec2::new(80.0, 80.0),
+            EntityType::House => sindri::Vec2::new(50.0, 50.0),
+            EntityType::LumberMill => sindri::Vec2::new(60.0, 60.0),
+            EntityType::Mine => sindri::Vec2::new(60.0, 60.0),
+            EntityType::Tree => sindri::Vec2::new(40.0, 60.0),
+            EntityType::Gold | EntityType::Stone => sindri::Vec2::new(30.0, 30.0),
         }
     }
-    
+
     pub fn get_selection_radius(&self) -> f32 {
         match self.entity_type {
             EntityType::Villager | EntityType::Military => 15.0,
@@ -116,19 +111,28 @@ impl GameEntity {
             EntityType::Gold | EntityType::Stone => 15.0,
         }
     }
-    
+
     pub fn is_unit(&self) -> bool {
-        matches!(self.entity_type, EntityType::Villager | EntityType::Military)
+        matches!(
+            self.entity_type,
+            EntityType::Villager | EntityType::Military
+        )
     }
-    
+
     pub fn is_resource(&self) -> bool {
-        matches!(self.entity_type, EntityType::Tree | EntityType::Gold | EntityType::Stone)
+        matches!(
+            self.entity_type,
+            EntityType::Tree | EntityType::Gold | EntityType::Stone
+        )
     }
-    
+
     pub fn is_building(&self) -> bool {
-        matches!(self.entity_type, EntityType::TownCenter | EntityType::House | EntityType::LumberMill | EntityType::Mine)
+        matches!(
+            self.entity_type,
+            EntityType::TownCenter | EntityType::House | EntityType::LumberMill | EntityType::Mine
+        )
     }
-    
+
     pub fn accepts_resource(&self, resource: CarriedResource) -> bool {
         match (self.entity_type, resource) {
             (EntityType::TownCenter, _) => true, // Town center accepts all resources
@@ -139,4 +143,3 @@ impl GameEntity {
         }
     }
 }
-

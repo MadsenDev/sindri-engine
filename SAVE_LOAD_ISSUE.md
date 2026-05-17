@@ -50,10 +50,10 @@ This suggests:
 
 ## Files to Include
 
-1. `forge2d/src/scene.rs` - Scene serialization/deserialization logic
-2. `forge2d/src/physics.rs` - Physics world implementation
+1. `sindri/src/scene.rs` - Scene serialization/deserialization logic
+2. `sindri/src/physics.rs` - Physics world implementation
 3. `examples/physics_demo/src/main.rs` - Demo with save/load implementation
-4. `forge2d/src/world.rs` - World/EntityId system (for context)
+4. `sindri/src/world.rs` - World/EntityId system (for context)
 
 ## Questions to Investigate
 

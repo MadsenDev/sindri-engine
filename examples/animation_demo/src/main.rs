@@ -1,7 +1,7 @@
 use anyhow::Result;
-use forge2d::{
-    Engine, Game, EngineContext, Camera2D, Vec2,
+use sindri::{
     render::{AnimatedSprite, Animation},
+    Camera2D, Engine, EngineContext, Game, Vec2,
 };
 
 struct AnimationDemo {
@@ -25,9 +25,11 @@ impl Game for AnimationDemo {
         // Load textures
         // We'll generate a dummy spritesheet for now or assume one exists/can be generated
         let character_tex = ctx.renderer().load_texture_from_rgba(
-            &vec![255; 64 * 64 * 4], 64, 64 // Dummy 64x64 texture (checkboard?)
+            &vec![255; 64 * 64 * 4],
+            64,
+            64, // Dummy 64x64 texture (checkboard?)
         )?;
-        
+
         // Actually, let's create a procedural texture that looks like a grid so we can see animation
         let mut bytes = Vec::with_capacity(128 * 64 * 4);
         for y in 0..64 {
@@ -37,13 +39,13 @@ impl Game for AnimationDemo {
                 let g = if cell_x == 1 { 255 } else { 0 };
                 let b = if cell_x == 2 { 255 } else { 0 };
                 let a = if cell_x == 3 { 255 } else { 255 }; // col 3 is white
-                
+
                 // Add a border
                 let is_border = x % 32 < 2 || y < 2 || y > 62;
                 if is_border {
-                     bytes.extend_from_slice(&[0, 0, 0, 255]);
+                    bytes.extend_from_slice(&[0, 0, 0, 255]);
                 } else {
-                     bytes.extend_from_slice(&[r, g, b, 255]);
+                    bytes.extend_from_slice(&[r, g, b, 255]);
                 }
             }
         }
@@ -56,7 +58,7 @@ impl Game for AnimationDemo {
         let anim = Animation::from_grid(
             tex,
             (4, 2),
-            8, // 8 frames total
+            8,   // 8 frames total
             0.2, // 0.2s duration
         );
 
@@ -70,7 +72,7 @@ impl Game for AnimationDemo {
 
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         let dt = ctx.delta_time().as_secs_f32();
-        
+
         if let Some(char) = &mut self.character {
             char.update(dt);
         }
@@ -93,7 +95,7 @@ impl Game for AnimationDemo {
                     &char.transform,
                     char.tint,
                     char.is_occluder,
-                    &self.camera
+                    &self.camera,
                 )?;
             }
         }

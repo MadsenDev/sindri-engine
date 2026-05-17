@@ -1,6 +1,6 @@
 # State Management
 
-Forge2D provides a state management system for organizing your game into distinct states (menu, gameplay, pause, etc.).
+Sindri provides a state management system for organizing your game into distinct states (menu, gameplay, pause, etc.).
 
 ## Overview
 
@@ -15,7 +15,7 @@ The state system uses a **stack-based** approach:
 Implement the `State` trait for each game state:
 
 ```rust
-use forge2d::{State, EngineContext, StateMachineLike};
+use sindri::{State, EngineContext, StateMachineLike};
 use anyhow::Result;
 
 struct MenuState;
@@ -55,7 +55,7 @@ impl State for MenuState {
 The `StateMachine` manages the state stack:
 
 ```rust
-use forge2d::{StateMachine, State};
+use sindri::{StateMachine, State};
 
 // Create with an initial state
 let mut state_machine = StateMachine::with_initial_state(Box::new(MenuState::new()));
@@ -125,7 +125,7 @@ impl State for PauseState {
 `StateMachine` implements `Game`, so you can use it directly:
 
 ```rust
-use forge2d::{Engine, StateMachine, State};
+use sindri::{Engine, StateMachine, State};
 
 fn main() -> Result<()> {
     let state_machine = StateMachine::with_initial_state(Box::new(MenuState::new()));

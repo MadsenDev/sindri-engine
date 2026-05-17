@@ -1,5 +1,5 @@
 use anyhow::Result;
-use forge2d::{
+use sindri::{
     ActionId, AxisBinding, Button, Engine, EngineContext, Frame, InputMap, KeyCode, State,
     StateMachine, StateMachineLike, Vec2,
 };
@@ -40,7 +40,7 @@ impl State for MenuState {
         Ok(())
     }
 
-    fn draw(&mut self, renderer: &mut forge2d::Renderer, frame: &mut forge2d::Frame) -> Result<()> {
+    fn draw(&mut self, renderer: &mut sindri::Renderer, frame: &mut sindri::Frame) -> Result<()> {
         // Draw menu background (dark blue)
         renderer.clear(frame, [0.05, 0.05, 0.15, 1.0])?;
 
@@ -71,14 +71,8 @@ impl GameplayState {
         input_map.set_axis(
             axis_horizontal.clone(),
             AxisBinding::new(
-                vec![
-                    Button::Key(KeyCode::KeyA),
-                    Button::Key(KeyCode::ArrowLeft),
-                ],
-                vec![
-                    Button::Key(KeyCode::KeyD),
-                    Button::Key(KeyCode::ArrowRight),
-                ],
+                vec![Button::Key(KeyCode::KeyA), Button::Key(KeyCode::ArrowLeft)],
+                vec![Button::Key(KeyCode::KeyD), Button::Key(KeyCode::ArrowRight)],
             ),
         );
 
@@ -86,14 +80,8 @@ impl GameplayState {
         input_map.set_axis(
             axis_vertical.clone(),
             AxisBinding::new(
-                vec![
-                    Button::Key(KeyCode::KeyW),
-                    Button::Key(KeyCode::ArrowUp),
-                ],
-                vec![
-                    Button::Key(KeyCode::KeyS),
-                    Button::Key(KeyCode::ArrowDown),
-                ],
+                vec![Button::Key(KeyCode::KeyW), Button::Key(KeyCode::ArrowUp)],
+                vec![Button::Key(KeyCode::KeyS), Button::Key(KeyCode::ArrowDown)],
             ),
         );
 
@@ -146,7 +134,7 @@ impl State for GameplayState {
         Ok(())
     }
 
-    fn draw(&mut self, renderer: &mut forge2d::Renderer, frame: &mut forge2d::Frame) -> Result<()> {
+    fn draw(&mut self, renderer: &mut sindri::Renderer, frame: &mut sindri::Frame) -> Result<()> {
         // Draw gameplay background (lighter blue)
         renderer.clear(frame, [0.1, 0.1, 0.2, 1.0])?;
 
@@ -188,7 +176,7 @@ impl State for PauseState {
         Ok(())
     }
 
-    fn draw(&mut self, renderer: &mut forge2d::Renderer, frame: &mut forge2d::Frame) -> Result<()> {
+    fn draw(&mut self, renderer: &mut sindri::Renderer, frame: &mut sindri::Frame) -> Result<()> {
         // Draw a dark overlay (semi-transparent)
         // Note: clear() with alpha doesn't blend properly, but this demonstrates the concept
         // In a real game, you'd draw a semi-transparent sprite overlay
@@ -205,9 +193,8 @@ fn main() -> Result<()> {
     let state_machine = StateMachine::with_initial_state(Box::new(MenuState::new()));
 
     Engine::new()
-        .with_title("Forge2D State Demo")
+        .with_title("Sindri State Demo")
         .with_size(1024, 768)
         .with_vsync(true)
         .run(state_machine)
 }
-

@@ -1,6 +1,6 @@
-# Forge2D
+# Sindri
 
-Forge2D is a lightweight 2D game framework built with Rust, winit, and wgpu. It provides a clean, simple API for creating 2D games.
+Sindri is a lightweight 2D game framework built with Rust, winit, and wgpu. It provides a clean, simple API for creating 2D games.
 
 ## Quick Start
 
@@ -16,11 +16,11 @@ This launches a window with a bouncing sprite. Press ESC or wait 10 seconds to e
 
 ### Creating Your Own Game
 
-1. **Add Forge2D to your `Cargo.toml`:**
+1. **Add Sindri to your `Cargo.toml`:**
 
 ```toml
 [dependencies]
-forge2d = { path = "../forge2d" }  # or use git/crates.io when published
+sindri = { path = "../sindri" }  # or use git/crates.io when published
 anyhow = "1"
 ```
 
@@ -28,7 +28,7 @@ anyhow = "1"
 
 ```rust
 use anyhow::Result;
-use forge2d::{Engine, EngineContext, Game, KeyCode, Vec2};
+use sindri::{Engine, EngineContext, Game, KeyCode, Vec2};
 
 struct MyGame {
     // Your game state here
@@ -110,7 +110,7 @@ Provides access to engine systems:
 ### Input System
 
 ```rust
-use forge2d::{KeyCode, MouseButton};
+use sindri::{KeyCode, MouseButton};
 
 // Check if key is currently held down
 if ctx.input().is_key_down(KeyCode::KeyW) {
@@ -168,7 +168,7 @@ renderer.end_frame(frame)?;
 ### Math Types
 
 ```rust
-use forge2d::{Vec2, Transform2D, Camera2D};
+use sindri::{Vec2, Transform2D, Camera2D};
 
 // Vec2 - 2D vector
 let position = Vec2::new(100.0, 200.0);
@@ -210,7 +210,7 @@ Engine::new()
 
 ## Project Layout
 
-- `forge2d/`: The engine crate containing the public API
+- `sindri/`: The engine crate containing the public API
 - `examples/basic_game/`: A complete example showing sprite rendering
 
 ## Documentation

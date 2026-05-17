@@ -1,6 +1,6 @@
 # Math Utilities
 
-Forge2D provides essential 2D math types for game development.
+Sindri provides essential 2D math types for game development.
 
 ## Vec2
 
@@ -9,7 +9,7 @@ A 2D vector for positions, velocities, directions, etc.
 ### Creating Vectors
 
 ```rust
-use forge2d::Vec2;
+use sindri::Vec2;
 
 let position = Vec2::new(100.0, 200.0);
 let velocity = Vec2::new(50.0, -30.0);
@@ -87,7 +87,7 @@ Represents position, scale, and rotation of a sprite or entity.
 ### Creating Transforms
 
 ```rust
-use forge2d::Transform2D;
+use sindri::Transform2D;
 
 let transform = Transform2D {
     position: Vec2::new(100.0, 200.0),  // Center of sprite
@@ -116,7 +116,7 @@ A 2D camera for view projection and coordinate conversion.
 ### Creating a Camera
 
 ```rust
-use forge2d::Camera2D;
+use sindri::Camera2D;
 
 // Create at position
 let mut camera = Camera2D::new(Vec2::new(0.0, 0.0));

@@ -14,37 +14,37 @@ impl Resources {
             food: 200,
         }
     }
-    
+
     pub fn can_afford_house(&self, cost_wood: u32, cost_stone: u32) -> bool {
         self.wood >= cost_wood && self.stone >= cost_stone
     }
-    
+
     pub fn can_afford_lumber_mill(&self, cost_wood: u32) -> bool {
         self.wood >= cost_wood
     }
-    
+
     pub fn can_afford_mine(&self, cost_wood: u32, cost_stone: u32) -> bool {
         self.wood >= cost_wood && self.stone >= cost_stone
     }
-    
+
     pub fn can_afford_villager(&self, cost_food: u32) -> bool {
         self.food >= cost_food
     }
-    
+
     pub fn spend_house(&mut self, cost_wood: u32, cost_stone: u32) {
         self.wood -= cost_wood;
         self.stone -= cost_stone;
     }
-    
+
     pub fn spend_lumber_mill(&mut self, cost_wood: u32) {
         self.wood -= cost_wood;
     }
-    
+
     pub fn spend_mine(&mut self, cost_wood: u32, cost_stone: u32) {
         self.wood -= cost_wood;
         self.stone -= cost_stone;
     }
-    
+
     pub fn spend_villager(&mut self, cost_food: u32) {
         self.food -= cost_food;
     }
@@ -71,4 +71,3 @@ impl BuildingCosts {
         }
     }
 }
-

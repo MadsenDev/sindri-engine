@@ -1,6 +1,6 @@
 # Scene Serialization
 
-Forge2D provides a scene serialization system for saving and loading game worlds, including physics state.
+Sindri provides a scene serialization system for saving and loading game worlds, including physics state.
 
 ## Overview
 
@@ -15,7 +15,7 @@ The scene system allows you to:
 ### Saving a Scene
 
 ```rust
-use forge2d::{create_scene, Scene, World, PhysicsWorld};
+use sindri::{create_scene, Scene, World, PhysicsWorld};
 
 fn save_game(world: &World, physics: &PhysicsWorld) -> Result<()> {
     // Create scene from current state
@@ -34,7 +34,7 @@ fn save_game(world: &World, physics: &PhysicsWorld) -> Result<()> {
 ### Loading a Scene
 
 ```rust
-use forge2d::{restore_scene_physics, World, PhysicsWorld};
+use sindri::{restore_scene_physics, World, PhysicsWorld};
 
 fn load_game(world: &mut World, physics: &mut PhysicsWorld) -> Result<()> {
     // Read from file
@@ -98,7 +98,7 @@ pub struct SerializablePhysics {
 To serialize custom components, implement the `ComponentSerializable` trait:
 
 ```rust
-use forge2d::{ComponentSerializable, SerializableComponent};
+use sindri::{ComponentSerializable, SerializableComponent};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
@@ -124,7 +124,7 @@ impl ComponentSerializable for MyComponent {
 ### Serializing Components
 
 ```rust
-use forge2d::World;
+use sindri::World;
 
 fn save_components(world: &World, entity: EntityId) -> Result<Vec<SerializableComponent>> {
     let mut components = Vec::new();
@@ -203,7 +203,7 @@ pub struct SerializableCollider {
 ## Complete Example
 
 ```rust
-use forge2d::{create_scene, restore_scene_physics, Scene, World, PhysicsWorld};
+use sindri::{create_scene, restore_scene_physics, Scene, World, PhysicsWorld};
 use std::fs;
 
 struct Game {

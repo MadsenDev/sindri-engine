@@ -8,6 +8,6 @@ name = "simple_test"
 path = "src/main.rs"
 
 [dependencies]
-forge2d = { path = "../../forge2d" }
+sindri = { path = "../../crates/sindri" }
 anyhow = "1.0"
 

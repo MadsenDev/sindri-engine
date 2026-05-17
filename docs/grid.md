@@ -1,6 +1,6 @@
 # Grid System
 
-Forge2D provides a general-purpose grid system for tile-based games, turn-based strategy games, roguelikes, and other grid-based gameplay.
+Sindri provides a general-purpose grid system for tile-based games, turn-based strategy games, roguelikes, and other grid-based gameplay.
 
 ## Overview
 
@@ -11,7 +11,7 @@ The `Grid<T>` system allows you to store arbitrary data per cell, with utilities
 ### Creating a Grid
 
 ```rust
-use forge2d::{Grid, GridCoord};
+use sindri::{Grid, GridCoord};
 
 // Create a 40x30 grid with 32px cells, defaulting to true (walkable)
 let mut grid = Grid::new(40, 30, 32.0, true);
@@ -96,7 +96,7 @@ impl GridCoord {
 ## Example: Tile-Based Game
 
 ```rust
-use forge2d::{Grid, GridCoord, Vec2};
+use sindri::{Grid, GridCoord, Vec2};
 
 struct TileMap {
     grid: Grid<TileType>,
@@ -136,7 +136,7 @@ impl TileMap {
 The grid system works seamlessly with the pathfinding system:
 
 ```rust
-use forge2d::{Grid, PathfindingGrid, AStarPathfinder};
+use sindri::{Grid, PathfindingGrid, AStarPathfinder};
 
 // Create a grid for gameplay
 let mut game_grid = Grid::new(40, 30, 32.0, true);
@@ -167,7 +167,7 @@ if let Some(path) = AStarPathfinder::find_path(&pathfinding_grid, start, goal) {
 For custom grid types, implement `GridPathfinding`:
 
 ```rust
-use forge2d::{Grid, GridCoord, GridPathfinding};
+use sindri::{Grid, GridCoord, GridPathfinding};
 
 impl GridPathfinding for Grid<MyTileType> {
     fn is_walkable(&self, coord: &GridCoord) -> bool {

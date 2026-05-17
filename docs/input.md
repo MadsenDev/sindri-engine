@@ -1,6 +1,6 @@
 # Input System
 
-Forge2D provides frame-accurate input state tracking for keyboard and mouse input.
+Sindri provides frame-accurate input state tracking for keyboard and mouse input.
 
 ## Accessing Input
 
@@ -15,7 +15,7 @@ let input = ctx.input();
 ### Key States
 
 ```rust
-use forge2d::KeyCode;
+use sindri::KeyCode;
 
 // Check if key is currently held down
 if input.is_key_down(KeyCode::KeyW) {
@@ -76,7 +76,7 @@ let mouse_world = ctx.mouse_world(&camera);
 ### Mouse Buttons
 
 ```rust
-use forge2d::MouseButton;
+use sindri::MouseButton;
 
 // Check if button is currently held down
 if input.is_mouse_down(MouseButton::Left) {
@@ -162,7 +162,7 @@ if input.is_key_pressed(KeyCode::Escape) {
 
 ## High-Level Input Mapping (Actions & Axes)
 
-On top of `InputState`, Forge2D provides a simple, data-driven input mapping layer:
+On top of `InputState`, Sindri provides a simple, data-driven input mapping layer:
 
 - **`ActionId`** – named logical actions (e.g. `"jump"`, `"shoot"`)
 - **`Button`** – physical inputs (keyboard keys or mouse buttons)
@@ -174,7 +174,7 @@ This allows you to write game code against *actions* and *axes* instead of hardc
 ### Defining an InputMap
 
 ```rust
-use forge2d::{ActionId, AxisBinding, Button, InputMap, KeyCode};
+use sindri::{ActionId, AxisBinding, Button, InputMap, KeyCode};
 
 let mut input_map = InputMap::new();
 
@@ -242,7 +242,7 @@ This is ideal for things like `"jump"`, `"shoot"`, `"pause"`, etc.
 
 ## Frame-Accurate Input
 
-Forge2D tracks input state per frame, ensuring:
+Sindri tracks input state per frame, ensuring:
 
 - **`is_key_pressed()`** only returns `true` on the frame the key was first pressed
 - **`is_key_released()`** only returns `true` on the frame the key was released

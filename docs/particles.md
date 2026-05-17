@@ -1,6 +1,6 @@
 # Particle System
 
-Forge2D includes a flexible CPU-based particle system for creating visual effects like fire, smoke, explosions, and magic spells.
+Sindri includes a flexible CPU-based particle system for creating visual effects like fire, smoke, explosions, and magic spells.
 
 ## Overview
 
@@ -34,7 +34,7 @@ impl MyGame {
 Use `EmissionConfig` to define the look and behavior of your particles.
 
 ```rust
-use forge2d::{EmissionConfig, Vec2};
+use sindri::{EmissionConfig, Vec2};
 
 // Create a fire effect configuration
 let fire_config = EmissionConfig::new(Vec2::new(100.0, 100.0))
@@ -51,7 +51,7 @@ let fire_config = EmissionConfig::new(Vec2::new(100.0, 100.0))
 Create an emitter from the config and add it to the system.
 
 ```rust
-use forge2d::ParticleEmitter;
+use sindri::ParticleEmitter;
 
 let mut emitter = ParticleEmitter::new(fire_config)
     .with_max_particles(100);

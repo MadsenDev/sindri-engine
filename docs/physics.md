@@ -1,6 +1,6 @@
 # Physics System
 
-Forge2D includes a 2D physics engine powered by Rapier2D, providing realistic physics simulation for your games.
+Sindri includes a 2D physics engine powered by Rapier2D, providing realistic physics simulation for your games.
 
 ## Overview
 
@@ -17,7 +17,7 @@ The physics system provides:
 ### Creating a Physics World
 
 ```rust
-use forge2d::{PhysicsWorld, Vec2};
+use sindri::{PhysicsWorld, Vec2};
 
 let mut physics = PhysicsWorld::new();
 
@@ -28,7 +28,7 @@ physics.set_gravity(Vec2::new(0.0, 400.0));
 ### Creating Bodies
 
 ```rust
-use forge2d::{RigidBodyType, EntityId};
+use sindri::{RigidBodyType, EntityId};
 
 let entity = world.spawn();
 
@@ -42,7 +42,7 @@ physics.create_body(entity, RigidBodyType::Fixed, Vec2::new(0.0, 500.0), 0.0)?;
 ### Adding Colliders
 
 ```rust
-use forge2d::ColliderShape;
+use sindri::ColliderShape;
 
 // Add a box collider
 physics.add_collider_with_material(
@@ -169,7 +169,7 @@ physics.add_sensor(
 Listen for collision and trigger events:
 
 ```rust
-use forge2d::PhysicsEvent;
+use sindri::PhysicsEvent;
 
 physics.on_event(|event| {
     match event {
@@ -255,7 +255,7 @@ CCD is enabled by default for all dynamic bodies.
 ## Example: Platformer Character
 
 ```rust
-use forge2d::{PhysicsWorld, RigidBodyType, ColliderShape, Vec2};
+use sindri::{PhysicsWorld, RigidBodyType, ColliderShape, Vec2};
 
 fn create_player(physics: &mut PhysicsWorld, entity: EntityId) -> Result<()> {
     // Create dynamic body
@@ -332,7 +332,7 @@ fn create_ground(physics: &mut PhysicsWorld, entity: EntityId) -> Result<()> {
 Physics state can be saved and loaded using the scene serialization system:
 
 ```rust
-use forge2d::{create_scene, restore_scene_physics};
+use sindri::{create_scene, restore_scene_physics};
 
 // Save physics state
 let scene = create_scene(&world, &physics)?;

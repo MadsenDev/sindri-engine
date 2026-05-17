@@ -1,5 +1,5 @@
 use anyhow::Result;
-use forge2d::{Camera2D, Engine, EngineContext, Game, KeyCode, MouseButton, Vec2};
+use sindri::{Camera2D, Engine, EngineContext, Game, KeyCode, MouseButton, Vec2};
 
 const GRAVITY_SCALE: f32 = 5200.0;
 
@@ -80,12 +80,11 @@ impl SolarSystem {
         self.starfield.clear();
         self.star_colors.clear();
         for _ in 0..80 {
-            self.starfield.push(Vec2::new(
-                fastrand::f32() * width,
-                fastrand::f32() * height,
-            ));
+            self.starfield
+                .push(Vec2::new(fastrand::f32() * width, fastrand::f32() * height));
             let tint = 0.5 + fastrand::f32() * 0.5;
-            self.star_colors.push([0.6 * tint, 0.7 * tint, 1.0 * tint, 0.7]);
+            self.star_colors
+                .push([0.6 * tint, 0.7 * tint, 1.0 * tint, 0.7]);
         }
     }
 
@@ -462,10 +461,9 @@ impl Game for SolarSystem {
         } else if input.is_mouse_down(MouseButton::Left) {
             self.drag_end_screen = input.mouse_position_vec2();
         } else if input.is_mouse_released(MouseButton::Left) {
-            if let (Some(start_world), Some(start_screen)) = (
-                self.drag_start_world.take(),
-                self.drag_start_screen.take(),
-            ) {
+            if let (Some(start_world), Some(start_screen)) =
+                (self.drag_start_world.take(), self.drag_start_screen.take())
+            {
                 let drag_screen = self.drag_end_screen - start_screen;
                 if drag_screen.length() > 8.0 {
                     let mut nearest_pos = self.center;
@@ -507,7 +505,11 @@ impl Game for SolarSystem {
                     let cross = to_body_screen.x * drag_screen.y - to_body_screen.y * drag_screen.x;
                     let direction = if cross >= 0.0 { 1.0 } else { -1.0 };
                     let vel = tangent * (orbit_speed * drag_scale * direction)
-                        + if self.nbody_mode { nearest_vel } else { Vec2::ZERO };
+                        + if self.nbody_mode {
+                            nearest_vel
+                        } else {
+                            Vec2::ZERO
+                        };
 
                     self.comets.push(Comet {
                         pos: start_world,
@@ -547,10 +549,12 @@ impl Game for SolarSystem {
                     self.bodies[selected].radius = (self.bodies[selected].radius + 30.0).min(520.0);
                 }
                 if input.is_key_down(KeyCode::Semicolon) {
-                    self.bodies[selected].angular_speed = (self.bodies[selected].angular_speed - 0.15).max(0.05);
+                    self.bodies[selected].angular_speed =
+                        (self.bodies[selected].angular_speed - 0.15).max(0.05);
                 }
                 if input.is_key_down(KeyCode::Quote) {
-                    self.bodies[selected].angular_speed = (self.bodies[selected].angular_speed + 0.15).min(1.6);
+                    self.bodies[selected].angular_speed =
+                        (self.bodies[selected].angular_speed + 0.15).min(1.6);
                 }
             }
         }
@@ -601,12 +605,24 @@ impl Game for SolarSystem {
 
             for moon in &self.moons {
                 let pos = moon.body.prev_pos.lerp(moon.body.pos, alpha);
-                renderer.draw_circle(frame, pos, moon.body.size * 0.5, moon.body.color, &self.camera)?;
+                renderer.draw_circle(
+                    frame,
+                    pos,
+                    moon.body.size * 0.5,
+                    moon.body.color,
+                    &self.camera,
+                )?;
             }
 
             for asteroid in &self.asteroids {
                 let pos = asteroid.prev_pos.lerp(asteroid.pos, alpha);
-                renderer.draw_circle(frame, pos, asteroid.size * 0.5, asteroid.color, &self.camera)?;
+                renderer.draw_circle(
+                    frame,
+                    pos,
+                    asteroid.size * 0.5,
+                    asteroid.color,
+                    &self.camera,
+                )?;
             }
 
             for comet in &self.comets {

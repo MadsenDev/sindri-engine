@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for Forge2D.
+Complete API documentation for Sindri.
 
 ## Engine
 
@@ -821,7 +821,7 @@ impl EntityId {
 
 ## Re-exports
 
-Forge2D re-exports the following from `winit`:
+Sindri re-exports the following from `winit`:
 
 - `KeyCode` - Keyboard key codes
 - `MouseButton` - Mouse button types

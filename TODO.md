@@ -1,6 +1,6 @@
-# Forge2D Editor TODO
+# Sindri Editor TODO
 
-This document tracks the architectural decisions and implementation tasks needed to make Forge2D "editor-ready" without requiring major rewrites later.
+This document tracks the architectural decisions and implementation tasks needed to make Sindri "editor-ready" without requiring major rewrites later.
 
 ## Architecture Decisions
 
@@ -13,9 +13,9 @@ This document tracks the architectural decisions and implementation tasks needed
 
 #### 1. Engine Architecture: Headless Core + Runtime
 - [ ] **Split engine into conceptual layers** (even if single crate initially)
-  - [ ] `forge2d_core`: world, components, scene graph, serialization, asset IDs, commands/undo, reflection
-  - [ ] `forge2d_runtime`: window, input, game loop integration
-  - [ ] `forge2d_editor`: UI app + viewport + inspectors + asset browser
+  - [ ] `sindri_core`: world, components, scene graph, serialization, asset IDs, commands/undo, reflection
+  - [ ] `sindri_runtime`: window, input, game loop integration
+  - [ ] `sindri_editor`: UI app + viewport + inspectors + asset browser
   - [ ] Document the separation clearly in code structure
 
 #### 2. Editor UI Tech: Tauri ✅
@@ -104,7 +104,7 @@ The first editor milestone - a thin editor that proves the pipeline.
   - [x] Viewport coordinate conversion
   - [x] Click to select entity (CPU hit-test)
 - [ ] **Full engine renderer integration:**
-  - [ ] Embed Forge2D renderer in viewport (requires native window or WebGL)
+  - [ ] Embed Sindri renderer in viewport (requires native window or WebGL)
   - [ ] Render sprites, textures, etc.
   - [ ] ID buffer picking for accurate selection
 

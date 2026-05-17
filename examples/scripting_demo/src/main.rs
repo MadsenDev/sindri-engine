@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use forge2d::{
+use sindri::{
     hud::{HudLayer, HudText},
     input::InputState,
     math::{Camera2D, Vec2},
@@ -16,7 +16,7 @@ struct ScriptingDemo {
     world: World,
     physics: PhysicsWorld,
     camera: Camera2D,
-    player: Option<forge2d::EntityId>,
+    player: Option<sindri::EntityId>,
     player_texture: Option<TextureHandle>,
     platform_texture: Option<TextureHandle>,
     // Benchmark stats
@@ -29,7 +29,7 @@ struct ScriptingDemo {
     // HUD and test tracking
     hud: HudLayer,
     font: Option<FontHandle>,
-    test_entity: Option<forge2d::EntityId>,
+    test_entity: Option<sindri::EntityId>,
     test_stats: TestStats,
 }
 
@@ -47,7 +47,7 @@ impl ScriptingDemo {
     fn new() -> Result<Self> {
         let mut physics = PhysicsWorld::new();
         physics.set_gravity(Vec2::new(0.0, 500.0)); // Stronger gravity for better feel
-        
+
         Ok(Self {
             runtime: ScriptRuntime::new()?,
             world: World::new(),
@@ -68,35 +68,40 @@ impl ScriptingDemo {
             test_stats: TestStats::default(),
         })
     }
-    
-    fn spawn_comprehensive_test_entity(&mut self) -> Result<forge2d::EntityId> {
+
+    fn spawn_comprehensive_test_entity(&mut self) -> Result<sindri::EntityId> {
         let position = Vec2::new(600.0, 200.0);
         let entity = self.world.spawn();
         self.world.insert(entity, Transform::new(position));
-        
+
         if let Some(texture) = self.player_texture {
             let mut sprite = SpriteComponent::new(texture);
-            sprite.sprite.set_size_px(Vec2::new(32.0, 32.0), Vec2::new(32.0, 32.0));
+            sprite
+                .sprite
+                .set_size_px(Vec2::new(32.0, 32.0), Vec2::new(32.0, 32.0));
             sprite.sprite.tint = [1.0, 0.5, 0.0, 1.0]; // Orange
             self.world.insert(entity, sprite);
         }
-        
+
         self.world.insert(entity, ScriptTag("test_entity".into()));
         let params = ScriptParams::default();
-        
+
         let script_path = format!(
             "{}/scripts/comprehensive_test.lua",
             env!("CARGO_MANIFEST_DIR")
         );
-        
-        println!("[ScriptingDemo] Attaching comprehensive test script: {} (exists: {})",
-            script_path, Path::new(&script_path).exists());
-        
+
+        println!(
+            "[ScriptingDemo] Attaching comprehensive test script: {} (exists: {})",
+            script_path,
+            Path::new(&script_path).exists()
+        );
+
         self.world.insert(
             entity,
             ScriptComponent::default().with_script(script_path, params),
         );
-        
+
         // Create physics body
         self.physics
             .create_body(entity, RigidBodyType::Dynamic, position, 0.0)?;
@@ -110,28 +115,35 @@ impl ScriptingDemo {
             0.8,
             0.1,
         )?;
-        
+
         // Create a sensor/trigger zone for testing trigger events
         let trigger_entity = self.world.spawn();
-        self.world.insert(trigger_entity, Transform::new(Vec2::new(400.0, 300.0)));
-        self.physics
-            .create_body(trigger_entity, RigidBodyType::Fixed, Vec2::new(400.0, 300.0), 0.0)?;
+        self.world
+            .insert(trigger_entity, Transform::new(Vec2::new(400.0, 300.0)));
+        self.physics.create_body(
+            trigger_entity,
+            RigidBodyType::Fixed,
+            Vec2::new(400.0, 300.0),
+            0.0,
+        )?;
         self.physics.add_sensor(
             trigger_entity,
             ColliderShape::Circle { radius: 50.0 },
             Vec2::ZERO,
         )?;
-        
+
         Ok(entity)
     }
-    
+
     fn spawn_benchmark_entity(&mut self, x: f32, y: f32) -> Result<()> {
         let entity = self.world.spawn();
         self.world.insert(entity, Transform::new(Vec2::new(x, y)));
-        
+
         if let Some(texture) = self.player_texture {
             let mut sprite = SpriteComponent::new(texture);
-            sprite.sprite.set_size_px(Vec2::new(16.0, 16.0), Vec2::new(32.0, 32.0));
+            sprite
+                .sprite
+                .set_size_px(Vec2::new(16.0, 16.0), Vec2::new(32.0, 32.0));
             sprite.sprite.tint = [
                 0.5 + (x as f32 / 1000.0) * 0.5,
                 0.5 + (y as f32 / 1000.0) * 0.5,
@@ -140,23 +152,23 @@ impl ScriptingDemo {
             ];
             self.world.insert(entity, sprite);
         }
-        
+
         let params = ScriptParams::default()
             .insert("speed", 30.0 + (x as f32 % 50.0))
             .insert("radius", 50.0 + (y as f32 % 100.0))
             .insert("center_x", x)
             .insert("center_y", y);
-        
+
         let script_path = format!(
             "{}/scripts/benchmark_entity.lua",
             env!("CARGO_MANIFEST_DIR")
         );
-        
+
         self.world.insert(
             entity,
             ScriptComponent::default().with_script(script_path, params),
         );
-        
+
         self.physics
             .create_body(entity, RigidBodyType::Dynamic, Vec2::new(x, y), 0.0)?;
         self.physics.lock_rotations(entity, true);
@@ -169,7 +181,7 @@ impl ScriptingDemo {
             0.5,
             0.1,
         )?;
-        
+
         self.entity_count += 1;
         Ok(())
     }
@@ -250,11 +262,11 @@ impl ScriptingDemo {
 
     fn spawn_platform(&mut self, center: Vec2, size: Vec2) -> Result<()> {
         let entity = self.world.spawn();
-        
+
         // Calculate scale based on desired size and texture size (64x64)
         let texture_size = Vec2::new(64.0, 64.0);
         let scale = Vec2::new(size.x / texture_size.x, size.y / texture_size.y);
-        
+
         // Create transform with position and calculated scale
         let mut transform = Transform::new(center);
         transform.scale = scale;
@@ -365,30 +377,33 @@ impl Game for ScriptingDemo {
     fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
         self.camera = ctx.screen_camera();
         self.create_textures(ctx.renderer())?;
-        
+
         // Load a default font for HUD (using built-in font if available, or create a simple one)
         // For now, we'll try to load a font - if it fails, HUD just won't show text
         // In a real scenario, you'd include a font file
         self.font = None; // We'll add font loading if needed
-        
+
         // Check if benchmark mode (press B during init, or set via env var)
         // For now, let's make it toggleable with a key press
         // Default to normal mode
-        
+
         // Spawn a ground platform first (at the bottom of the screen)
         let screen_h = ctx.window().inner_size().height as f32;
         let screen_w = ctx.window().inner_size().width as f32;
         let ground_y = screen_h - 50.0;
         self.spawn_platform(Vec2::new(480.0, ground_y), Vec2::new(960.0, 50.0))?;
-        
+
         // Spawn a wall on the right side for wall jumping (visible on screen)
-        self.spawn_platform(Vec2::new(screen_w - 50.0, screen_h / 2.0), Vec2::new(50.0, screen_h - 100.0))?;
-        
+        self.spawn_platform(
+            Vec2::new(screen_w - 50.0, screen_h / 2.0),
+            Vec2::new(50.0, screen_h - 100.0),
+        )?;
+
         if !self.benchmark_mode {
             self.spawn_player()?;
             self.spawn_platform(Vec2::new(300.0, 420.0), Vec2::new(240.0, 24.0))?;
             self.spawn_platform(Vec2::new(520.0, 520.0), Vec2::new(420.0, 24.0))?;
-            
+
             // Spawn comprehensive test entity
             self.test_entity = Some(self.spawn_comprehensive_test_entity()?);
         } else {
@@ -417,7 +432,7 @@ impl Game for ScriptingDemo {
 
     fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
         let dt = ctx.delta_time().as_secs_f32();
-        
+
         // Toggle benchmark mode with B key
         if ctx.input().is_key_pressed(KeyCode::KeyB) {
             self.benchmark_mode = !self.benchmark_mode;
@@ -428,7 +443,7 @@ impl Game for ScriptingDemo {
             self.entity_count = 0;
             self.init(ctx)?;
         }
-        
+
         // Measure script execution time
         let script_start = std::time::Instant::now();
         self.runtime
@@ -442,23 +457,29 @@ impl Game for ScriptingDemo {
 
             self.physics.step(fixed_dt);
             let events = self.physics.drain_events();
-            
+
             // Track test entity collisions/triggers
             if let Some(test_entity) = self.test_entity {
                 for event in &events {
                     match event {
-                        forge2d::physics::PhysicsEvent::CollisionEnter { a, b } |
-                        forge2d::physics::PhysicsEvent::CollisionExit { a, b } => {
+                        sindri::physics::PhysicsEvent::CollisionEnter { a, b }
+                        | sindri::physics::PhysicsEvent::CollisionExit { a, b } => {
                             if *a == test_entity || *b == test_entity {
-                                if matches!(event, forge2d::physics::PhysicsEvent::CollisionEnter { .. }) {
+                                if matches!(
+                                    event,
+                                    sindri::physics::PhysicsEvent::CollisionEnter { .. }
+                                ) {
                                     self.test_stats.collision_count += 1;
                                 }
                             }
                         }
-                        forge2d::physics::PhysicsEvent::TriggerEnter { a, b } |
-                        forge2d::physics::PhysicsEvent::TriggerExit { a, b } => {
+                        sindri::physics::PhysicsEvent::TriggerEnter { a, b }
+                        | sindri::physics::PhysicsEvent::TriggerExit { a, b } => {
                             if *a == test_entity || *b == test_entity {
-                                if matches!(event, forge2d::physics::PhysicsEvent::TriggerEnter { .. }) {
+                                if matches!(
+                                    event,
+                                    sindri::physics::PhysicsEvent::TriggerEnter { .. }
+                                ) {
                                     self.test_stats.trigger_count += 1;
                                 }
                             }
@@ -466,7 +487,7 @@ impl Game for ScriptingDemo {
                     }
                 }
             }
-            
+
             self.runtime.handle_physics_events(
                 &events,
                 &mut self.world,
@@ -508,58 +529,71 @@ impl Game for ScriptingDemo {
                 renderer.draw_sprite(&mut frame, &sprite.sprite, &self.camera)?;
             }
         }
-        
+
         // Draw visual HUD with test stats
         self.hud.clear();
-        
+
         if !self.benchmark_mode && self.test_entity.is_some() {
             // Draw status panel background
-            self.hud.add_rect(forge2d::hud::HudRect {
+            self.hud.add_rect(sindri::hud::HudRect {
                 position: Vec2::new(5.0, 5.0),
                 size: Vec2::new(280.0, 200.0),
                 color: [0.0, 0.0, 0.0, 0.7], // Semi-transparent black
             });
-            
+
             // Status indicators as colored squares (visual feedback)
-            let start_color = if self.test_stats.start_called { [0.0, 1.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0, 1.0] };
-            self.hud.add_rect(forge2d::hud::HudRect {
+            let start_color = if self.test_stats.start_called {
+                [0.0, 1.0, 0.0, 1.0]
+            } else {
+                [1.0, 0.0, 0.0, 1.0]
+            };
+            self.hud.add_rect(sindri::hud::HudRect {
                 position: Vec2::new(15.0, 15.0),
                 size: Vec2::new(30.0, 30.0),
                 color: start_color,
             });
-            
+
             // Update counter indicator (green if updating)
-            let update_color = if self.test_stats.update_count > 0 { [0.0, 1.0, 0.0, 1.0] } else { [0.5, 0.5, 0.5, 1.0] };
-            self.hud.add_rect(forge2d::hud::HudRect {
+            let update_color = if self.test_stats.update_count > 0 {
+                [0.0, 1.0, 0.0, 1.0]
+            } else {
+                [0.5, 0.5, 0.5, 1.0]
+            };
+            self.hud.add_rect(sindri::hud::HudRect {
                 position: Vec2::new(15.0, 55.0),
                 size: Vec2::new(30.0, 30.0),
                 color: update_color,
             });
-            
+
             // Collision indicator
-            let collision_color = if self.test_stats.collision_count > 0 { [0.0, 0.5, 1.0, 1.0] } else { [0.3, 0.3, 0.3, 1.0] };
-            self.hud.add_rect(forge2d::hud::HudRect {
+            let collision_color = if self.test_stats.collision_count > 0 {
+                [0.0, 0.5, 1.0, 1.0]
+            } else {
+                [0.3, 0.3, 0.3, 1.0]
+            };
+            self.hud.add_rect(sindri::hud::HudRect {
                 position: Vec2::new(15.0, 95.0),
                 size: Vec2::new(30.0, 30.0),
                 color: collision_color,
             });
-            
+
             // Trigger indicator
-            let trigger_color = if self.test_stats.trigger_count > 0 { [1.0, 0.5, 0.0, 1.0] } else { [0.3, 0.3, 0.3, 1.0] };
-            self.hud.add_rect(forge2d::hud::HudRect {
+            let trigger_color = if self.test_stats.trigger_count > 0 {
+                [1.0, 0.5, 0.0, 1.0]
+            } else {
+                [0.3, 0.3, 0.3, 1.0]
+            };
+            self.hud.add_rect(sindri::hud::HudRect {
                 position: Vec2::new(15.0, 135.0),
                 size: Vec2::new(30.0, 30.0),
                 color: trigger_color,
             });
-            
+
             // Position indicator (small square that moves)
             if let Some(pos) = self.test_stats.last_position {
                 // Draw a small indicator at the test entity's position (scaled to screen)
-                let screen_pos = Vec2::new(
-                    60.0 + (pos.x / 10.0) % 200.0,
-                    175.0
-                );
-                self.hud.add_rect(forge2d::hud::HudRect {
+                let screen_pos = Vec2::new(60.0 + (pos.x / 10.0) % 200.0, 175.0);
+                self.hud.add_rect(sindri::hud::HudRect {
                     position: screen_pos,
                     size: Vec2::new(10.0, 10.0),
                     color: [1.0, 1.0, 0.0, 1.0], // Yellow dot
@@ -567,7 +601,7 @@ impl Game for ScriptingDemo {
             }
         } else if self.benchmark_mode {
             // Benchmark mode - draw performance panel
-            self.hud.add_rect(forge2d::hud::HudRect {
+            self.hud.add_rect(sindri::hud::HudRect {
                 position: Vec2::new(5.0, 5.0),
                 size: Vec2::new(200.0, 100.0),
                 color: [0.0, 0.0, 0.0, 0.7],
@@ -583,7 +617,7 @@ impl Game for ScriptingDemo {
 
 fn main() -> Result<()> {
     Engine::new()
-        .with_title("Forge2D Scripting Demo")
+        .with_title("Sindri Scripting Demo")
         .with_size(960, 540)
         .run(ScriptingDemo::new()?)
 }

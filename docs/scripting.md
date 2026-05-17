@@ -1,6 +1,6 @@
-# Forge2D scripting overview
+# Sindri scripting overview
 
-Forge2D now ships with a lightweight, Unity-like scripting layer powered by [Rhai](https://rhai.rs/). Scripts are treated as components that attach behavior to entities without exposing internal engine state.
+Sindri now ships with a lightweight, Unity-like scripting layer powered by [Rhai](https://rhai.rs/). Scripts are treated as components that attach behavior to entities without exposing internal engine state.
 
 ## Key concepts
 - **ScriptComponent**: a component that holds an ordered list of script attachments (file path plus optional `ScriptParams`). Attach it to an entity to run one or more scripts in insertion order.
@@ -39,7 +39,7 @@ fn on_trigger_exit(self, other_entity)
 All writes are deferred through the internal command buffer and applied after script execution, which keeps the engine authoritative for rendering and physics.
 
 ## Script logging
-Rhai scripts emit output through the runtime's print/debug hooks. Forge2D registers default handlers so `print()` and `debug()` show up in the engine console:
+Rhai scripts emit output through the runtime's print/debug hooks. Sindri registers default handlers so `print()` and `debug()` show up in the engine console:
 
 ```rhai
 print("hello world");            // prints: [RHAI] hello world

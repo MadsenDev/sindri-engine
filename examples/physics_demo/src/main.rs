@@ -1,9 +1,9 @@
 use anyhow::Result;
-use forge2d::{
+use sindri::{
     math::{Camera2D, Vec2},
     physics::{ColliderShape, PhysicsEvent, PhysicsWorld, RigidBodyType},
     render::{Renderer, Sprite, TextureHandle},
-    scene::{create_scene, restore_scene_physics, Scene},
+    scene_physics::{create_scene, restore_scene_physics, Scene},
     Engine, Game, KeyCode,
 };
 use std::collections::HashSet;
@@ -11,22 +11,22 @@ use std::collections::HashSet;
 struct PhysicsDemo {
     camera: Camera2D,
     physics: PhysicsWorld,
-    world: forge2d::World,
+    world: sindri::World,
 
     textures: TextureSet,
     entities: Vec<PhysicsEntity>,
 
     // for tint feedback
-    colliding_entities: HashSet<forge2d::EntityId>,
+    colliding_entities: HashSet<sindri::EntityId>,
 
     last_spawn_time: std::time::Instant,
 
     // Track static entities separately so they don't get deleted on load
-    ground_entity: Option<forge2d::EntityId>,
-    sensor_entity: Option<forge2d::EntityId>,
+    ground_entity: Option<sindri::EntityId>,
+    sensor_entity: Option<sindri::EntityId>,
 
     // Debug tracking
-    debug_entity: Option<forge2d::EntityId>,
+    debug_entity: Option<sindri::EntityId>,
     debug_frame_count: u32,
 }
 
@@ -41,7 +41,7 @@ struct TextureSet {
 }
 
 struct PhysicsEntity {
-    entity: forge2d::EntityId,
+    entity: sindri::EntityId,
     shape: ShapeType,
     material: MaterialType,
     is_sensor: bool,
@@ -69,7 +69,7 @@ impl PhysicsDemo {
         Self {
             camera: Camera2D::default(),
             physics,
-            world: forge2d::World::new(),
+            world: sindri::World::new(),
             textures: TextureSet {
                 ground: None,
                 box_normal: None,
@@ -219,7 +219,7 @@ impl PhysicsDemo {
 }
 
 impl Game for PhysicsDemo {
-    fn init(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+    fn init(&mut self, ctx: &mut sindri::EngineContext) -> Result<()> {
         self.camera = ctx.screen_camera();
         self.create_textures(&mut *ctx.renderer())?;
 
@@ -310,13 +310,13 @@ impl Game for PhysicsDemo {
         Ok(())
     }
 
-    fn update(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+    fn update(&mut self, ctx: &mut sindri::EngineContext) -> Result<()> {
         let mouse_world = ctx.mouse_world(&self.camera);
 
         // Spawn on left click
         {
             let input = ctx.input();
-            if input.is_mouse_pressed(forge2d::MouseButton::Left) {
+            if input.is_mouse_pressed(sindri::MouseButton::Left) {
                 let now = std::time::Instant::now();
                 if now.duration_since(self.last_spawn_time).as_millis() > 200 {
                     self.last_spawn_time = now;
@@ -404,7 +404,7 @@ impl Game for PhysicsDemo {
         // Right click impulse
         {
             let input = ctx.input();
-            if input.is_mouse_pressed(forge2d::MouseButton::Right) {
+            if input.is_mouse_pressed(sindri::MouseButton::Right) {
                 for e in &self.entities {
                     if e.is_sensor {
                         continue;
@@ -477,13 +477,13 @@ impl Game for PhysicsDemo {
 
                         // Create new World entities and remap scene data
                         let mut id_mapping: std::collections::HashMap<
-                            forge2d::EntityId,
-                            forge2d::EntityId,
+                            sindri::EntityId,
+                            sindri::EntityId,
                         > = std::collections::HashMap::new();
                         let mut remapped_scene = scene.clone();
 
                         // Collect all unique entity IDs
-                        let mut all_entity_ids: std::collections::HashSet<forge2d::EntityId> =
+                        let mut all_entity_ids: std::collections::HashSet<sindri::EntityId> =
                             std::collections::HashSet::new();
                         for body in &remapped_scene.physics.bodies {
                             all_entity_ids.insert(body.entity);
@@ -911,7 +911,7 @@ impl Game for PhysicsDemo {
         Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut forge2d::EngineContext) -> Result<()> {
+    fn draw(&mut self, ctx: &mut sindri::EngineContext) -> Result<()> {
         let screen_size = ctx.window().inner_size();
         let renderer = ctx.renderer();
         let mut frame = renderer.begin_frame()?;
@@ -973,7 +973,7 @@ impl Game for PhysicsDemo {
 
 fn main() -> Result<()> {
     Engine::new()
-        .with_title("Forge2D Physics Showcase")
+        .with_title("Sindri Physics Showcase")
         .with_size(1280, 720)
         .with_vsync(true)
         .run(PhysicsDemo::new())

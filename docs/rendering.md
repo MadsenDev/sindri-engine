@@ -1,6 +1,6 @@
 # Rendering
 
-Forge2D provides hardware-accelerated 2D rendering using wgpu.
+Sindri provides hardware-accelerated 2D rendering using wgpu.
 
 ## Basic Rendering Flow
 
@@ -53,7 +53,7 @@ if let Some(texture) = ctx.assets().get_texture("my_texture") {
 ### Creating Sprites
 
 ```rust
-use forge2d::{Sprite, Vec2};
+use sindri::{Sprite, Vec2};
 
 // Create a sprite
 let mut sprite = Sprite::new(texture);
@@ -97,7 +97,7 @@ sprite.transform.position.x = sprite.transform.position.x.clamp(
 ### Drawing Sprites
 
 ```rust
-use forge2d::Camera2D;
+use sindri::Camera2D;
 
 let camera = Camera2D::default();
 renderer.draw_sprite(&mut frame, &sprite, &camera)?;
@@ -115,7 +115,7 @@ renderer.draw_sprite(&mut frame, &sprite, &camera)?;
 ### Creating a Camera
 
 ```rust
-use forge2d::Camera2D;
+use sindri::Camera2D;
 
 // Create camera at position
 let mut camera = Camera2D::new(Vec2::new(0.0, 0.0));
@@ -160,7 +160,7 @@ camera.position = camera.position.lerp(target_pos, camera_speed * dt);
 ### Loading Fonts
 
 ```rust
-use forge2d::{EngineContext, FontHandle};
+use sindri::{EngineContext, FontHandle};
 
 // Load a font (TTF/OTF format) via AssetManager (preferred)
 const FONT_BYTES: &[u8] = include_bytes!("assets/font.ttf");
@@ -202,12 +202,12 @@ renderer.draw_text(
 
 ## HUD Layer
 
-Forge2D provides a HUD (Heads-Up Display) layer for screen-space UI elements that stay fixed on screen regardless of camera position.
+Sindri provides a HUD (Heads-Up Display) layer for screen-space UI elements that stay fixed on screen regardless of camera position.
 
 ### Creating a HUD
 
 ```rust
-use forge2d::{HudLayer, HudText};
+use sindri::{HudLayer, HudText};
 
 struct MyGame {
     hud: HudLayer,
@@ -216,7 +216,7 @@ struct MyGame {
 
 impl Game for MyGame {
     fn init(&mut self, ctx: &mut EngineContext) -> Result<()> {
-        self.font = Some(ctx.builtin_font(forge2d::BuiltinFont::Ui)?);
+        self.font = Some(ctx.builtin_font(sindri::BuiltinFont::Ui)?);
         Ok(())
     }
     
@@ -260,7 +260,7 @@ HUD positions use screen-space coordinates where `(0, 0)` is the top-left corner
 
 ### Batched Rendering
 
-Forge2D automatically batches all sprites into a single render pass per frame for optimal performance. You don't need to do anything special - just call `draw_sprite()` for each sprite.
+Sindri automatically batches all sprites into a single render pass per frame for optimal performance. You don't need to do anything special - just call `draw_sprite()` for each sprite.
 
 ### Sprite Limit
 
@@ -320,7 +320,7 @@ sprite.tint = [1.0, 1.0, 1.0, 0.5];
 
 ## Vector Shape Rendering
 
-Forge2D provides GPU-accelerated vector shape drawing for lines, circles, and polygons. These are useful for procedural graphics, debug visualization, and games that work well with geometric shapes.
+Sindri provides GPU-accelerated vector shape drawing for lines, circles, and polygons. These are useful for procedural graphics, debug visualization, and games that work well with geometric shapes.
 
 ### Drawing Lines
 
@@ -428,14 +428,14 @@ fn draw_asteroid(&self, renderer: &mut Renderer, frame: &mut Frame,
 
 ## Lighting System
 
-Forge2D includes a 2D dynamic lighting system supporting point lights, soft shadows, and occlusion.
+Sindri includes a 2D dynamic lighting system supporting point lights, soft shadows, and occlusion.
 
 ### Adding Lights
 
 Lights are drawn using `draw_point_light`. They are additive, meaning they brighten the scene.
 
 ```rust
-use forge2d::PointLight;
+use sindri::PointLight;
 
 // Create a light
 let light = PointLight::new(

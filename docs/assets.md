@@ -1,6 +1,6 @@
 # Asset Management
 
-Forge2D provides an `AssetManager` for caching loaded assets, preventing duplicate loads and improving performance.
+Sindri provides an `AssetManager` for caching loaded assets, preventing duplicate loads and improving performance.
 
 ## Using AssetManager
 
@@ -104,7 +104,7 @@ let texture = ctx.assets().get_texture("my_texture");
 Fonts are also managed through `AssetManager` and cached by string keys:
 
 ```rust
-use forge2d::FontHandle;
+use sindri::FontHandle;
 
 const FONT_BYTES: &[u8] = include_bytes!("assets/font.ttf");
 

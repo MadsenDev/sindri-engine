@@ -1,23 +1,22 @@
 use anyhow::Result;
-use forge2d::{
-    Camera2D, Engine, EngineContext, Game, KeyCode, Vec2,
+use sindri::{
     camera::active_camera,
     physics::{ColliderShape, PhysicsWorld, RigidBodyType},
     render::TextureHandle,
     script::{ScriptComponent, ScriptParams, ScriptRuntime, ScriptTag},
-    CameraComponent, SpriteComponent, Transform,
-    ParticleEmitter, ParticleSystem, EmissionConfig,
+    Camera2D, CameraComponent, EmissionConfig, Engine, EngineContext, Game, KeyCode,
+    ParticleEmitter, ParticleSystem, SpriteComponent, Transform, Vec2,
 };
 use std::sync::{Arc, Mutex};
 
 struct WallJumpDemo {
     runtime: ScriptRuntime,
     camera: Camera2D,
-    camera_entity: Option<forge2d::EntityId>,
+    camera_entity: Option<sindri::EntityId>,
     physics: PhysicsWorld,
-    world: forge2d::World,
+    world: sindri::World,
 
-    player_entity: forge2d::EntityId,
+    player_entity: sindri::EntityId,
     player_texture: Option<TextureHandle>,
     block_texture: Option<TextureHandle>,
     particle_texture: Option<TextureHandle>,
@@ -69,7 +68,7 @@ impl WallJumpDemo {
             camera: Camera2D::default(),
             camera_entity: None,
             physics,
-            world: forge2d::World::new(),
+            world: sindri::World::new(),
             player_entity: unsafe { std::mem::zeroed() },
             player_texture: None,
             block_texture: None,
@@ -93,7 +92,9 @@ impl WallJumpDemo {
             .flat_map(|_| [45u8, 52, 70, 255])
             .collect();
 
-        let player = ctx.renderer().load_texture_from_rgba(&player_data, 32, 32)?;
+        let player = ctx
+            .renderer()
+            .load_texture_from_rgba(&player_data, 32, 32)?;
         let block = ctx.renderer().load_texture_from_rgba(&block_data, 32, 32)?;
         let white_pixel = [255u8, 255u8, 255u8, 255u8];
         let particle = ctx.renderer().load_texture_from_rgba(&white_pixel, 1, 1)?;
@@ -130,14 +131,12 @@ impl WallJumpDemo {
             })?;
 
         let bridge = Arc::clone(&self.script_bridge);
-        self.runtime.register_function(
-            "set_respawn_point",
-            move |_, (x, y): (f64, f64)| {
+        self.runtime
+            .register_function("set_respawn_point", move |_, (x, y): (f64, f64)| {
                 let mut bridge = bridge.lock().unwrap();
                 bridge.respawn_point = Some(Vec2::new(x as f32, y as f32));
                 Ok(())
-            },
-        )?;
+            })?;
 
         let bridge = Arc::clone(&self.script_bridge);
         self.runtime.register_function(
@@ -158,11 +157,12 @@ impl WallJumpDemo {
         position: Vec2,
         size: Vec2,
         tag: &'static str,
-    ) -> Result<forge2d::EntityId> {
+    ) -> Result<sindri::EntityId> {
         let entity = self.world.spawn();
         self.world.insert(entity, Transform::new(position));
         self.world.insert(entity, ScriptTag(tag.to_string()));
-        self.physics.create_body(entity, RigidBodyType::Fixed, position, 0.0)?;
+        self.physics
+            .create_body(entity, RigidBodyType::Fixed, position, 0.0)?;
         self.physics.add_collider_with_material(
             entity,
             ColliderShape::Box {
@@ -176,9 +176,7 @@ impl WallJumpDemo {
         )?;
 
         let mut sprite = SpriteComponent::new(texture);
-        sprite
-            .sprite
-            .set_size_px(size, Vec2::new(32.0, 32.0));
+        sprite.sprite.set_size_px(size, Vec2::new(32.0, 32.0));
         sprite.sprite.transform.position = position;
         sprite.sprite.tint = [0.2, 0.3, 0.45, 1.0];
         sprite.sprite.is_occluder = false;
@@ -191,12 +189,10 @@ impl WallJumpDemo {
         let texture = self.player_texture.expect("player texture missing");
         let entity = self.world.spawn();
         self.player_entity = entity;
-        self.world.insert(entity, Transform::new(self.respawn_point));
+        self.world
+            .insert(entity, Transform::new(self.respawn_point));
         self.world.insert(entity, ScriptTag("player".to_string()));
-        let script_path = format!(
-            "{}/scripts/walljump_player.lua",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let script_path = format!("{}/scripts/walljump_player.lua", env!("CARGO_MANIFEST_DIR"));
         let params = ScriptParams::default()
             .insert("move_speed", 260.0)
             .insert("jump_impulse", 620.0)
@@ -258,10 +254,7 @@ impl WallJumpDemo {
             .unwrap_or(self.respawn_point);
         self.world.insert(entity, Transform::new(start_pos));
         self.world.insert(entity, CameraComponent::new(Vec2::ZERO));
-        let script_path = format!(
-            "{}/scripts/walljump_camera.lua",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let script_path = format!("{}/scripts/walljump_camera.lua", env!("CARGO_MANIFEST_DIR"));
         let params = ScriptParams::default()
             .insert("look_ahead", 0.0)
             .insert("look_ahead_y", 0.0)
@@ -281,11 +274,12 @@ impl WallJumpDemo {
         texture: TextureHandle,
         position: Vec2,
         size: Vec2,
-    ) -> Result<forge2d::EntityId> {
+    ) -> Result<sindri::EntityId> {
         let entity = self.world.spawn();
         self.world.insert(entity, Transform::new(position));
         self.world.insert(entity, ScriptTag("one_way".to_string()));
-        self.physics.create_body(entity, RigidBodyType::Fixed, position, 0.0)?;
+        self.physics
+            .create_body(entity, RigidBodyType::Fixed, position, 0.0)?;
         self.physics.add_sensor(
             entity,
             ColliderShape::Box {
@@ -296,9 +290,7 @@ impl WallJumpDemo {
         )?;
 
         let mut sprite = SpriteComponent::new(texture);
-        sprite
-            .sprite
-            .set_size_px(size, Vec2::new(32.0, 32.0));
+        sprite.sprite.set_size_px(size, Vec2::new(32.0, 32.0));
         sprite.sprite.transform.position = position;
         sprite.sprite.tint = [0.18, 0.26, 0.4, 1.0];
         sprite.sprite.is_occluder = false;
@@ -311,7 +303,7 @@ impl WallJumpDemo {
         texture: TextureHandle,
         position: Vec2,
         size: Vec2,
-    ) -> Result<forge2d::EntityId> {
+    ) -> Result<sindri::EntityId> {
         let entity = self.spawn_static_block(texture, position, size, "checkpoint")?;
         if let Some(sprite) = self.world.get_mut::<SpriteComponent>(entity) {
             sprite.sprite.tint = [0.3, 0.9, 0.7, 1.0];
@@ -382,7 +374,9 @@ impl WallJumpDemo {
             .collect();
         for entity in entities {
             let transform = self.world.get::<Transform>(entity).cloned();
-            if let (Some(transform), Some(sprite)) = (transform, self.world.get_mut::<SpriteComponent>(entity)) {
+            if let (Some(transform), Some(sprite)) =
+                (transform, self.world.get_mut::<SpriteComponent>(entity))
+            {
                 sprite.sprite.transform.position = transform.position;
                 sprite.sprite.transform.rotation = transform.rotation;
             }
@@ -424,27 +418,11 @@ impl WallJumpDemo {
             "wall",
         )?;
 
-        self.spawn_one_way_platform(
-            block,
-            Vec2::new(300.0, 380.0),
-            Vec2::new(220.0, 28.0),
-        )?;
-        self.spawn_one_way_platform(
-            block,
-            Vec2::new(640.0, 320.0),
-            Vec2::new(260.0, 28.0),
-        )?;
-        self.spawn_one_way_platform(
-            block,
-            Vec2::new(460.0, 240.0),
-            Vec2::new(180.0, 24.0),
-        )?;
+        self.spawn_one_way_platform(block, Vec2::new(300.0, 380.0), Vec2::new(220.0, 28.0))?;
+        self.spawn_one_way_platform(block, Vec2::new(640.0, 320.0), Vec2::new(260.0, 28.0))?;
+        self.spawn_one_way_platform(block, Vec2::new(460.0, 240.0), Vec2::new(180.0, 24.0))?;
 
-        self.spawn_checkpoint_block(
-            block,
-            Vec2::new(760.0, 440.0),
-            Vec2::new(140.0, 24.0),
-        )?;
+        self.spawn_checkpoint_block(block, Vec2::new(760.0, 440.0), Vec2::new(140.0, 24.0))?;
         self.respawn_point = Vec2::new(220.0, 320.0);
         self.spawn_player()?;
         self.spawn_camera();
@@ -478,12 +456,8 @@ impl Game for WallJumpDemo {
             ctx.input(),
         )?;
 
-        self.runtime.post_physics_update(
-            &mut self.world,
-            &mut self.physics,
-            ctx.input(),
-            dt,
-        )?;
+        self.runtime
+            .post_physics_update(&mut self.world, &mut self.physics, ctx.input(), dt)?;
 
         self.apply_script_bridge();
         self.sync_transforms_from_physics();
@@ -509,7 +483,8 @@ impl Game for WallJumpDemo {
         if self.respawn_now {
             let pos = self.respawn_point;
             self.physics.set_body_position(self.player_entity, pos);
-            self.physics.set_linear_velocity(self.player_entity, Vec2::ZERO);
+            self.physics
+                .set_linear_velocity(self.player_entity, Vec2::ZERO);
             if let Some(transform) = self.world.get_mut::<Transform>(self.player_entity) {
                 transform.position = pos;
             }
@@ -520,7 +495,7 @@ impl Game for WallJumpDemo {
 
         if ctx.input().is_key_pressed(KeyCode::KeyR) {
             self.physics.clear();
-            self.world = forge2d::World::new();
+            self.world = sindri::World::new();
             self.rebuild_level(ctx)?;
             self.runtime
                 .update(&mut self.world, &mut self.physics, ctx.input(), 0.0)?;
@@ -560,7 +535,12 @@ impl Game for WallJumpDemo {
             }
 
             if let Some(texture) = self.particle_texture {
-                renderer.draw_particles(frame, &self.particle_system, &self.camera, Some(texture))?;
+                renderer.draw_particles(
+                    frame,
+                    &self.particle_system,
+                    &self.camera,
+                    Some(texture),
+                )?;
             }
 
             if fade_alpha > 0.0 {

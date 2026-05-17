@@ -1,6 +1,6 @@
 # Audio System
 
-Forge2D provides audio support through the `AudioSystem`, which wraps `rodio` for cross-platform audio playback.
+Sindri provides audio support through the `AudioSystem`, which wraps `rodio` for cross-platform audio playback.
 
 ## Checking Audio Availability
 
@@ -30,7 +30,7 @@ if ctx.audio().is_available() {
 
 ```rust
 struct MyGame {
-    jump_sound: Option<forge2d::SoundHandle>,
+    jump_sound: Option<sindri::SoundHandle>,
 }
 
 impl Game for MyGame {

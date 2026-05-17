@@ -1,7 +1,7 @@
 -- Simple player controller used by the scripting demo.
 -- Horizontal movement uses WASD/arrow keys; Space provides a small hop.
 
--- Defaults tuned for the Forge2D scripting demo scale.
+-- Defaults tuned for the Sindri scripting demo scale.
 local SPEED = params.speed or 200.0
 local JUMP = params.jump or 75.0
 

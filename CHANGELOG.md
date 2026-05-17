@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Added
+- **Sindri rename and workspace migration** - Moved the engine from the old Forge2D crate layout into the Sindri workspace structure.
+- **Engine improvement pass** - Completed all tasks from `IMPROVEMENTS.md`.
+  - Added `PhysicsWorld::sync_transforms()` for physics-to-transform synchronization.
+  - Added `World::query_mut()` for mutable component iteration.
+  - Expanded Lua key parsing and added `input:axis()` / `input:axis_raw()`.
+  - Added `Renderer::draw_world()` for stable default world rendering.
+  - Implemented real glyphon-backed `measure_text_width()`.
+  - Added untextured particle rendering via soft colored circle sprites.
+  - Added physics collision group/layer/mask helpers and Lua bindings.
+  - Added `Renderer::draw_physics_debug()` for development overlays.
+  - Added `EntityBuilder` plus a `Name` component for fluent entity setup.
+- **Sindri editor/server/AI foundation** - Added the new Tauri editor shell, `sindri-server`, and local Ollama-based AI action flow.
+  - Added AI action execution for entity creation, transforms, scripts, and components.
+  - Made AI entity creation idempotent by exact name to avoid duplicate `Player`/`Ground` entities.
+  - Added deterministic `entity_name` resolution and idempotent component/script attachment.
+  - Added coordinate-system guardrails so “below” maps to larger Y and keeps vertical relationships aligned.
+  - Added explicit editor `PhysicsBody` support with body type, lock rotation, damping, and collision layer/mask fields.
+- **Build hygiene** - Cleaned warning output for `cargo build -p sindri-server` without changing engine event-loop behavior.
 - **Asset system v2 (textures + fonts)** - Extended `AssetManager` to manage fonts in addition to textures
   - Fonts cached by string key and loaded via renderer font API
   - `AssetManager::load_font_from_bytes()` and `AssetManager::get_font()` for font management
@@ -12,7 +30,7 @@ All notable changes to this project will be documented in this file.
  - **World & EntityId** - Added a minimal world/entity layer for centralized entity/component storage
    - `World` manages `EntityId`s and typed component storage keyed by entity
    - APIs for `spawn`, `despawn`, `insert`, `remove`, `get`, `get_mut`, and `query::<T>()`
-   - Exported from crate root as `forge2d::{World, EntityId}`
+   - Exported from crate root as `sindri::{World, EntityId}`
    - Documented in `docs/world.md` with usage patterns
 - **Input mapping layer** - Added high-level `InputMap` on top of `InputState`
   - `ActionId` and `Button` types to describe logical actions and physical inputs
@@ -79,7 +97,7 @@ All notable changes to this project will be documented in this file.
   - All render passes use LoadOp::Load to preserve previous draws
   - This fixes the issue where only the last-drawn sprite was visible
 ### Added (previous)
-- Initialized the Forge2D workspace with the core `Engine` API and game loop skeleton.
+- Initialized the Sindri workspace with the core `Engine` API and game loop skeleton.
 - Added a `basic_game` example demonstrating window creation and a simple timed exit.
 - Introduced starter project documentation including TODO tracking.
 - Implemented an `InputState` module for tracking keyboard and mouse state, integrated into the engine loop, and exposed through `EngineContext`.

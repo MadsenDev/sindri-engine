@@ -1,8 +1,8 @@
-# Forge2D Roadmap & Development Philosophy
+# Sindri Roadmap & Development Philosophy
 
 ## Current Status
 
-Forge2D has reached a point where it has **enough subsystems to build real games**, but the focus is shifting from "adding features" to "making existing features cohere."
+Sindri has reached a point where it has **enough subsystems to build real games**, but the focus is shifting from "adding features" to "making existing features cohere."
 
 ## Development Philosophy
 
@@ -102,7 +102,7 @@ The recommended development cycle:
    - Puzzle game (grid logic, UI, state management)
 
 2. **Build it using existing systems:**
-   - Use Forge2D's physics, rendering, pathfinding, etc.
+   - Use Sindri's physics, rendering, pathfinding, etc.
    - Implement missing pieces (animation, UI) as needed
    - Keep it simple—don't add features "just in case"
 
@@ -123,7 +123,7 @@ The recommended development cycle:
 
 ## Success Metrics
 
-Forge2D is "winning" if:
+Sindri is "winning" if:
 
 - ✅ You can build a complete game slice (not just a demo)
 - ✅ Building the same game twice is faster the second time
@@ -133,7 +133,7 @@ Forge2D is "winning" if:
 
 ## Anti-Goals
 
-Things Forge2D explicitly **won't** become:
+Things Sindri explicitly **won't** become:
 
 - ❌ A "do everything" engine (like Unity/Godot)
 - ❌ A framework that requires learning a custom language/scripting system
@@ -144,7 +144,7 @@ Things Forge2D explicitly **won't** become:
 
 **Right now:** The engine has enough features. The focus is on:
 
-1. **Documentation** - Make it clear what Forge2D does and doesn't do
+1. **Documentation** - Make it clear what Sindri does and doesn't do
 2. **Examples** - Build complete game slices, not just demos
 3. **Coherence** - Make existing systems work better together
 4. **Reference game** - Pick one and use it to drive decisions
