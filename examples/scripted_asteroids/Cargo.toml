@@ -1,0 +1,13 @@
+[package]
+name = "scripted_asteroids"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "scripted_asteroids"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+sindri = { path = "../../crates/sindri" }
+fastrand = "2.0"

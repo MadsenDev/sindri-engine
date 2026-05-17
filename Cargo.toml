@@ -24,6 +24,8 @@ members = [
     "examples/fireflies_demo",
     "examples/solar_system_demo",
     "examples/walljump_demo",
+    "examples/platformer",
+    "examples/scripted_asteroids",
 ]
 resolver = "2"
 
