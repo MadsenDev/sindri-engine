@@ -23,6 +23,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(routes::health))
         .route("/scene", get(routes::get_scene).put(routes::put_scene))
+        .route("/scene/open", post(routes::open_scene))
         .route(
             "/scene/entity/:id",
             get(routes::get_entity).delete(routes::delete_entity),

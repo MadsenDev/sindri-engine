@@ -125,6 +125,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 | `GET` | `/health` | `{"status":"ok"}` |
 | `GET` | `/scene` | Full scene JSON |
 | `PUT` | `/scene` | Replace scene |
+| `POST` | `/scene/open` | Load a project-relative `.sindri` file and make it the active autosave target |
 | `GET` | `/scene/entity/:id` | Single entity |
 | `PATCH` | `/scene/entity/:id/transform` | Update transform fields |
 | `POST` | `/scene/entity` | Create entity |
@@ -139,7 +140,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 
 Port: `127.0.0.1:7878`, configurable via `SINDRI_PORT` env var.
 
-Shared state: `Arc<RwLock<Scene>>` and `Arc<RwLock<World>>` between engine loop and server.
+Shared state: `Arc<RwLock<Scene>>` and active `Arc<RwLock<PathBuf>>` scene path between engine loop and server.
 
 The engine spawns the server in a background Tokio task after `init()`.
 

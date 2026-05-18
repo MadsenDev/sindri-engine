@@ -23,6 +23,7 @@ const AXIS_COLOR = "rgba(255,255,255,0.15)";
 const ENTITY_COLOR = "#4da6ff";
 const SELECTED_COLOR = "#e8a838";
 const COLLIDER_COLOR = "rgba(80,230,100,0.35)";
+const CAMERA_COLOR = "#5b8aff";
 const LABEL_COLOR = "#8a9bb0";
 
 export default function Viewport({ scene, selectedId, onSelect, screenshotB64, engineReady, isPlaying }: Props) {
@@ -267,9 +268,10 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
     for (const entity of Object.values(scene.entities)) {
       const transform = entity.components.find(c => c.type === "Transform") as { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number } | undefined;
       const sprite = entity.components.find(c => c.type === "Sprite") as { type: "Sprite"; width: number; height: number } | undefined;
+      const camera = entity.components.find(c => c.type === "Camera") as { type: "Camera"; zoom: number } | undefined;
       if (!transform) continue;
-      const hw = sprite ? sprite.width * 0.5 : Math.max(transform.scale_x * 16, 12);
-      const hh = sprite ? sprite.height * 0.5 : Math.max(transform.scale_y * 16, 12);
+      const hw = sprite ? sprite.width * 0.5 : camera ? 12 : Math.max(transform.scale_x * 16, 12);
+      const hh = sprite ? sprite.height * 0.5 : camera ? 12 : Math.max(transform.scale_y * 16, 12);
       if (wx >= transform.x - hw && wx <= transform.x + hw && wy >= transform.y - hh && wy <= transform.y + hh) {
         hit = entity.id;
         break;
@@ -309,6 +311,9 @@ function drawEntity(
   const collider = entity.components.find(c => c.type === "Collider") as
     | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
     | undefined;
+  const cameraComp = entity.components.find(c => c.type === "Camera") as
+    | { type: "Camera"; active?: boolean; zoom: number }
+    | undefined;
 
   const isSelected = entity.id === selectedId;
   const tx = transform?.x ?? 0;
@@ -324,6 +329,11 @@ function drawEntity(
     ctx.arc(ox, oy, 5, 0, Math.PI * 2);
     ctx.stroke();
     return;
+  }
+
+  if (cameraComp) {
+    drawCameraFrame(ctx, entity.name, sx, sy, transform.rotation, cameraComp.zoom, cam.zoom, cameraComp.active ?? true, isSelected);
+    if (!sprite && !collider) return;
   }
 
   const hw = sprite ? sprite.width * 0.5 : Math.max(transform.scale_x * 16, 1);
@@ -368,6 +378,46 @@ function drawEntity(
     ctx.fillStyle = isSelected ? SELECTED_COLOR : LABEL_COLOR;
     ctx.fillText(entity.name, sx + screenW / 2 + 4, sy - screenH / 2 + 10);
   }
+}
+
+function drawCameraFrame(
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  sx: number,
+  sy: number,
+  rotation: number,
+  cameraZoom: number,
+  sceneZoom: number,
+  active: boolean,
+  selected: boolean,
+) {
+  const safeZoom = Math.max(cameraZoom, 0.01);
+  const frameW = (1280 / safeZoom) * sceneZoom;
+  const frameH = (720 / safeZoom) * sceneZoom;
+  const color = selected ? SELECTED_COLOR : active ? CAMERA_COLOR : "rgba(91,138,255,0.45)";
+
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(rotation);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = selected ? 2 : 1;
+  ctx.setLineDash(active ? [] : [6, 4]);
+  ctx.fillStyle = active ? "rgba(91,138,255,0.12)" : "rgba(91,138,255,0.05)";
+  ctx.fillRect(-frameW / 2, -frameH / 2, frameW, frameH);
+  ctx.strokeRect(-frameW / 2, -frameH / 2, frameW, frameH);
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(9, 8);
+  ctx.lineTo(-9, 8);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.font = "10px monospace";
+  ctx.fillText(active ? `${name} · active` : name, -frameW / 2 + 6, -frameH / 2 + 14);
+  ctx.restore();
 }
 
 // ─── Game tab ───────────────────────────────────────────────────────────────

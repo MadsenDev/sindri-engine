@@ -26,7 +26,11 @@ All notable changes to this project will be documented in this file.
   - Added `editor_scene` for `.sindri` loading, scene-driven entities, Lua script attachment, and hot reload.
   - Made the editor auto-build the dev `sindri-server` binary when needed before starting the engine sidecar.
   - Scoped AI chat history per project so unrelated projects no longer share assistant logs.
-  - Made scene files in the Files tab load the selected `.sindri` scene into the running editor session.
+  - Made scene files in the Files tab load the selected `.sindri` scene into the running editor session and become the active autosave target.
+  - Made new projects start with a `Main Camera` entity containing `Transform` and `Camera` components.
+  - Added hierarchy context-menu creation presets for cameras, sprites, physics bodies, platforms, triggers, scripts, and audio sources.
+  - Made play-mode rendering use the active scene camera entity and stop drawing camera-only transform entities as game objects.
+  - Expanded editor scene cameras with active-camera selection, offsets, bounds, smoothing, dead zones, Scene view camera frames, and Lua camera helpers.
   - Added `rendering` for particles, lighting, camera effects, animation-like motion, and large object counts.
   - Kept `platformer` as the Rust-first physics/gameplay baseline.
   - Promoted `scripted_asteroids` as the flagship Lua scripting showcase.

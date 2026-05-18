@@ -25,6 +25,80 @@ const COMPONENT_ICON: Record<string, string> = {
   AudioSource: "♪",
 };
 
+interface CreatePreset {
+  label: string;
+  icon: string;
+  name: string;
+  transform?: { x: number; y: number; scale_x?: number; scale_y?: number; rotation?: number };
+  components?: {
+    type: Exclude<Component["type"], "Transform">;
+    data?: Record<string, unknown>;
+  }[];
+}
+
+const CREATE_PRESETS: CreatePreset[] = [
+  {
+    label: "Camera",
+    icon: "◉",
+    name: "Main Camera",
+    transform: { x: 0, y: 0 },
+    components: [{ type: "Camera", data: { active: true, zoom: 1.0, follow_entity: null, offset_x: 0.0, offset_y: 0.0, smoothing: 1.0, dead_zone_width: 0.0, dead_zone_height: 0.0 } }],
+  },
+  {
+    label: "Sprite",
+    icon: "▣",
+    name: "Sprite",
+    transform: { x: 0, y: 0 },
+    components: [{ type: "Sprite", data: { texture_path: "generated:white", width: 64, height: 64, color: [0.34, 0.54, 1.0, 1.0] } }],
+  },
+  {
+    label: "Physics Body",
+    icon: "●",
+    name: "Physics Body",
+    transform: { x: 0, y: 0 },
+    components: [
+      { type: "Sprite", data: { texture_path: "generated:white", width: 48, height: 48, color: [0.0, 1.0, 0.9, 0.85] } },
+      { type: "PhysicsBody", data: { body_type: "Dynamic", lock_rotation: true } },
+      { type: "Collider", data: { width: 48, height: 48, is_trigger: false } },
+    ],
+  },
+  {
+    label: "Ground Platform",
+    icon: "▭",
+    name: "Ground",
+    transform: { x: 0, y: 160 },
+    components: [
+      { type: "Sprite", data: { texture_path: "generated:white", width: 360, height: 32, color: [0.18, 0.22, 0.28, 1.0] } },
+      { type: "PhysicsBody", data: { body_type: "Fixed" } },
+      { type: "Collider", data: { width: 360, height: 32, is_trigger: false } },
+    ],
+  },
+  {
+    label: "Trigger Zone",
+    icon: "⬡",
+    name: "Trigger",
+    transform: { x: 0, y: 0 },
+    components: [
+      { type: "Sprite", data: { texture_path: "generated:white", width: 96, height: 64, color: [0.5, 0.35, 1.0, 0.25] } },
+      { type: "Collider", data: { width: 96, height: 64, is_trigger: true } },
+    ],
+  },
+  {
+    label: "Scripted Entity",
+    icon: "⚡",
+    name: "Scripted Entity",
+    transform: { x: 0, y: 0 },
+    components: [{ type: "Script", data: { path: "scripts/entity.lua" } }],
+  },
+  {
+    label: "Audio Source",
+    icon: "♪",
+    name: "Audio Source",
+    transform: { x: 0, y: 0 },
+    components: [{ type: "AudioSource", data: { path: "", volume: 1.0, looping: false, play_on_start: false } }],
+  },
+];
+
 export default function Hierarchy({ scene, selectedId, selectedComponent, onSelect, onSelectComponent, onSceneChange, onDeleteEntity }: Props) {
   const entities = scene ? scene.entities : {};
   const [renamingId, setRenamingId] = useState<number | null>(null);
@@ -40,6 +114,49 @@ export default function Hierarchy({ scene, selectedId, selectedComponent, onSele
       onSceneChange();
     } catch {}
   };
+
+  const handleCreatePreset = async (preset: CreatePreset, parentId: number | null = null) => {
+    try {
+      const created = await invoke<{ id: number }>("create_entity", { name: preset.name, parentId });
+      const entityId = Number(created.id);
+      let componentIdx = 0;
+
+      if (preset.transform) {
+        await invoke("patch_transform", {
+          entityId,
+          x: preset.transform.x,
+          y: preset.transform.y,
+          scaleX: preset.transform.scale_x ?? 1.0,
+          scaleY: preset.transform.scale_y ?? 1.0,
+          rotation: preset.transform.rotation ?? 0.0,
+        });
+        componentIdx = 1;
+      }
+
+      for (const component of preset.components ?? []) {
+        await invoke("add_component", { entityId, componentType: component.type });
+        if (component.data) {
+          await invoke("patch_component", { entityId, componentIdx, data: component.data });
+        }
+        componentIdx += 1;
+      }
+
+      onSelect(entityId);
+      onSceneChange();
+    } catch (err) {
+      console.error("create preset failed:", err);
+    }
+  };
+
+  const createMenuItems = (parentId: number | null) => [
+    { label: "Empty Entity", icon: "◻", onClick: () => handleAddEntity(parentId) },
+    { divider: true as const },
+    ...CREATE_PRESETS.map(preset => ({
+      label: preset.label,
+      icon: preset.icon,
+      onClick: () => handleCreatePreset(preset, parentId),
+    })),
+  ];
 
   const handleAddComponent = async (entityId: number, componentType: string) => {
     try {
@@ -81,7 +198,7 @@ export default function Hierarchy({ scene, selectedId, selectedComponent, onSele
           onClick: () => handleAddComponent(entity.id, ct),
         })),
       },
-      { label: "Create Child Entity", icon: "◻", onClick: () => handleAddEntity(entity.id) },
+      { label: "Create Child", icon: "◻", children: createMenuItems(entity.id) },
       { divider: true as const },
       { label: "Rename", icon: "✎", onClick: () => { onSelect(entity.id); setRenamingId(entity.id); } },
       { label: "Delete", icon: "×", danger: true, onClick: () => onDeleteEntity(entity.id) },
@@ -99,9 +216,7 @@ export default function Hierarchy({ scene, selectedId, selectedComponent, onSele
   const handleTreeContextMenu = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-entity-item]")) return;
     e.preventDefault();
-    show(e.clientX, e.clientY, [
-      { label: "Create Entity", icon: "◻", onClick: () => handleAddEntity(null) },
-    ]);
+    show(e.clientX, e.clientY, createMenuItems(null));
   };
 
 

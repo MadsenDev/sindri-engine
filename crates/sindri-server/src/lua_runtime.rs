@@ -6,6 +6,157 @@ use std::sync::{Arc, RwLock};
 use sindri::component::Component;
 use sindri::scene::Scene;
 
+enum CameraCommand {
+    SetActive(bool),
+    SetZoom(f32),
+    ZoomTo {
+        target: f32,
+        speed: f32,
+    },
+    SetOffset {
+        x: f32,
+        y: f32,
+    },
+    SetBounds {
+        min_x: f32,
+        min_y: f32,
+        max_x: f32,
+        max_y: f32,
+    },
+    ClearBounds,
+    Shake {
+        intensity: f32,
+        duration: f32,
+    },
+}
+
+fn apply_camera_commands(scene: &mut Scene, entity_id: u64, commands: Vec<CameraCommand>) {
+    for command in commands {
+        match command {
+            CameraCommand::SetActive(active) => {
+                if active {
+                    for (other_id, entity) in scene.entities.iter_mut() {
+                        for component in &mut entity.components {
+                            if let Component::Camera(camera) = component {
+                                camera.active = *other_id == entity_id;
+                            }
+                        }
+                    }
+                } else if let Some(entity) = scene.entities.get_mut(&entity_id) {
+                    for component in &mut entity.components {
+                        if let Component::Camera(camera) = component {
+                            camera.active = false;
+                        }
+                    }
+                }
+            }
+            CameraCommand::SetZoom(zoom) => {
+                if let Some(camera) = entity_camera_mut(scene, entity_id) {
+                    camera.zoom = zoom.max(0.01);
+                    camera.runtime_target_zoom = None;
+                    camera.runtime_zoom_speed = 0.0;
+                }
+            }
+            CameraCommand::ZoomTo { target, speed } => {
+                if let Some(camera) = entity_camera_mut(scene, entity_id) {
+                    camera.runtime_target_zoom = Some(target.max(0.01));
+                    camera.runtime_zoom_speed = speed.max(0.0);
+                }
+            }
+            CameraCommand::SetOffset { x, y } => {
+                if let Some(camera) = entity_camera_mut(scene, entity_id) {
+                    camera.offset_x = x;
+                    camera.offset_y = y;
+                }
+            }
+            CameraCommand::SetBounds {
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            } => {
+                if let Some(camera) = entity_camera_mut(scene, entity_id) {
+                    camera.bounds_min_x = Some(min_x);
+                    camera.bounds_min_y = Some(min_y);
+                    camera.bounds_max_x = Some(max_x);
+                    camera.bounds_max_y = Some(max_y);
+                }
+            }
+            CameraCommand::ClearBounds => {
+                if let Some(camera) = entity_camera_mut(scene, entity_id) {
+                    camera.bounds_min_x = None;
+                    camera.bounds_min_y = None;
+                    camera.bounds_max_x = None;
+                    camera.bounds_max_y = None;
+                }
+            }
+            CameraCommand::Shake {
+                intensity,
+                duration,
+            } => {
+                if let Some(camera) = entity_camera_mut(scene, entity_id) {
+                    camera.runtime_shake_intensity = intensity.max(camera.runtime_shake_intensity);
+                    camera.runtime_shake_timer = duration.max(camera.runtime_shake_timer);
+                    camera.runtime_shake_seed = 0.0;
+                }
+            }
+        }
+    }
+    normalize_camera_activity(scene);
+}
+
+fn entity_camera_mut(scene: &mut Scene, entity_id: u64) -> Option<&mut sindri::component::Camera> {
+    scene
+        .entities
+        .get_mut(&entity_id)?
+        .components
+        .iter_mut()
+        .find_map(|component| {
+            if let Component::Camera(camera) = component {
+                Some(camera)
+            } else {
+                None
+            }
+        })
+}
+
+fn normalize_camera_activity(scene: &mut Scene) {
+    let mut camera_refs: Vec<(u64, usize, bool)> =
+        scene
+            .entities
+            .iter()
+            .flat_map(|(entity_id, entity)| {
+                entity.components.iter().enumerate().filter_map(
+                    move |(component_idx, component)| {
+                        if let Component::Camera(camera) = component {
+                            Some((*entity_id, component_idx, camera.active))
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
+            .collect();
+    camera_refs.sort_by_key(|(entity_id, component_idx, _)| (*entity_id, *component_idx));
+    let active = camera_refs
+        .iter()
+        .find(|(_, _, active)| *active)
+        .or_else(|| camera_refs.first())
+        .copied();
+    let Some((active_entity, active_component_idx, _)) = active else {
+        return;
+    };
+
+    for (entity_id, entity) in scene.entities.iter_mut() {
+        for (component_idx, component) in entity.components.iter_mut().enumerate() {
+            if let Component::Camera(camera) = component {
+                camera.active =
+                    *entity_id == active_entity && component_idx == active_component_idx;
+            }
+        }
+    }
+}
+
 pub struct LuaRuntime {
     lua: Lua,
     envs: HashMap<(u64, String), mlua::RegistryKey>,
@@ -116,6 +267,118 @@ impl LuaRuntime {
         Ok(())
     }
 
+    fn create_camera_table<'lua>(
+        lua: &'lua Lua,
+        entity_id: u64,
+        camera: &sindri::component::Camera,
+        commands: Arc<std::sync::Mutex<Vec<CameraCommand>>>,
+    ) -> mlua::Result<Table<'lua>> {
+        let table = lua.create_table()?;
+        table.set("is_active", {
+            let active = camera.active;
+            lua.create_function(move |_, _: Table| Ok(active))?
+        })?;
+        table.set("set_active", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, active): (Table, bool)| {
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::SetActive(active));
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("zoom", {
+            let zoom = camera.zoom;
+            lua.create_function(move |_, _: Table| Ok(zoom))?
+        })?;
+        table.set("set_zoom", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, zoom): (Table, f64)| {
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::SetZoom(zoom as f32));
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("zoom_to", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, target, speed): (Table, f64, f64)| {
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::ZoomTo {
+                        target: target as f32,
+                        speed: speed as f32,
+                    });
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("offset", {
+            let x = camera.offset_x;
+            let y = camera.offset_y;
+            lua.create_function(move |lua, _: Table| {
+                let offset = lua.create_table()?;
+                offset.set("x", x)?;
+                offset.set("y", y)?;
+                Ok(offset)
+            })?
+        })?;
+        table.set("set_offset", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, offset): (Table, Table)| {
+                let x = offset.get::<_, f64>("x").or_else(|_| offset.get(1))?;
+                let y = offset.get::<_, f64>("y").or_else(|_| offset.get(2))?;
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::SetOffset {
+                        x: x as f32,
+                        y: y as f32,
+                    });
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("set_bounds", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, min, max): (Table, Table, Table)| {
+                let min_x = min.get::<_, f64>("x").or_else(|_| min.get(1))?;
+                let min_y = min.get::<_, f64>("y").or_else(|_| min.get(2))?;
+                let max_x = max.get::<_, f64>("x").or_else(|_| max.get(1))?;
+                let max_y = max.get::<_, f64>("y").or_else(|_| max.get(2))?;
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::SetBounds {
+                        min_x: min_x as f32,
+                        min_y: min_y as f32,
+                        max_x: max_x as f32,
+                        max_y: max_y as f32,
+                    });
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("clear_bounds", {
+            let commands = commands.clone();
+            lua.create_function(move |_, _: Table| {
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::ClearBounds);
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("shake", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, intensity, duration): (Table, f64, f64)| {
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(CameraCommand::Shake {
+                        intensity: intensity as f32,
+                        duration: duration as f32,
+                    });
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("entity_id", entity_id)?;
+        Ok(table)
+    }
+
     /// Called when play starts — clears cached envs and started set so scripts restart cleanly.
     pub fn reset(&mut self) {
         self.envs.clear();
@@ -166,6 +429,13 @@ impl LuaRuntime {
             let transform = entity.components.iter().find_map(|c| {
                 if let Component::Transform(t) = c {
                     Some(t.clone())
+                } else {
+                    None
+                }
+            });
+            let camera = entity.components.iter().find_map(|c| {
+                if let Component::Camera(camera) = c {
+                    Some(camera.clone())
                 } else {
                     None
                 }
@@ -221,6 +491,29 @@ impl LuaRuntime {
                     let _ = self_tbl.set("scale_x", 1.0f64);
                     let _ = self_tbl.set("scale_y", 1.0f64);
                 }
+                let camera_commands: Arc<std::sync::Mutex<Vec<CameraCommand>>> =
+                    Arc::new(std::sync::Mutex::new(Vec::new()));
+                if let Some(camera) = camera.clone() {
+                    let commands = camera_commands.clone();
+                    match self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                        Self::create_camera_table(lua, entity_id, &camera, commands.clone())
+                            .map(Some)
+                    }) {
+                        Ok(camera_fn) => {
+                            let _ = self_tbl.set("camera", camera_fn);
+                        }
+                        Err(e) => eprintln!("[lua] camera method error ({script_path}): {e}"),
+                    }
+                } else {
+                    match self.lua.create_function(|_, _: mlua::MultiValue| {
+                        Ok::<Option<Table>, mlua::Error>(None)
+                    }) {
+                        Ok(camera_fn) => {
+                            let _ = self_tbl.set("camera", camera_fn);
+                        }
+                        Err(e) => eprintln!("[lua] camera method error ({script_path}): {e}"),
+                    }
+                }
 
                 // on_start (once)
                 if !self.started.contains(&key) {
@@ -268,6 +561,14 @@ impl LuaRuntime {
                         t.scale_x = nsx;
                         t.scale_y = nsy;
                     }
+                }
+
+                let camera_commands = camera_commands
+                    .lock()
+                    .map(|mut commands| std::mem::take(&mut *commands))
+                    .unwrap_or_default();
+                if !camera_commands.is_empty() {
+                    apply_camera_commands(scene, entity_id, camera_commands);
                 }
             }
         }

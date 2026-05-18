@@ -24,7 +24,7 @@ export type Component =
   | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number }
   | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number; is_trigger: boolean }
   | { type: "Script"; path: string }
-  | { type: "Camera"; zoom: number; follow_entity: number | null }
+  | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number }
   | { type: "AudioSource"; path: string; volume: number; looping: boolean; play_on_start: boolean };
 
 export interface Scene {

@@ -1,16 +1,16 @@
 {
   "name": "Editor Scene Showcase",
   "entities": {
-    "1": {
-      "id": 1,
-      "name": "Beacon",
+    "3": {
+      "id": 3,
+      "name": "Ground",
       "parent": null,
       "children": [],
       "components": [
         {
           "type": "Transform",
           "x": 640.0,
-          "y": 360.0,
+          "y": 540.0,
           "scale_x": 1.0,
           "scale_y": 1.0,
           "rotation": 0.0
@@ -18,15 +18,48 @@
         {
           "type": "Sprite",
           "texture_path": "generated:white",
-          "width": 96.0,
-          "height": 96.0,
+          "width": 720.0,
+          "height": 28.0,
           "flip_x": false,
           "flip_y": false,
-          "color": [1.0, 0.66, 0.2, 1.0]
+          "color": [
+            0.18,
+            0.22,
+            0.28,
+            1.0
+          ]
+        }
+      ],
+      "active": true
+    },
+    "4": {
+      "id": 4,
+      "name": "Main Camera",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 630.0,
+          "y": 360.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0
         },
         {
-          "type": "Script",
-          "path": "scripts/beacon.lua"
+          "type": "Camera",
+          "active": true,
+          "zoom": 1.0,
+          "follow_entity": null,
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "bounds_min_x": null,
+          "bounds_min_y": null,
+          "bounds_max_x": null,
+          "bounds_max_y": null,
+          "smoothing": 1.0,
+          "dead_zone_width": 0.0,
+          "dead_zone_height": 0.0
         }
       ],
       "active": true
@@ -52,7 +85,12 @@
           "height": 36.0,
           "flip_x": false,
           "flip_y": false,
-          "color": [0.34, 0.54, 1.0, 1.0]
+          "color": [
+            0.34,
+            0.54,
+            1.0,
+            1.0
+          ]
         },
         {
           "type": "Script",
@@ -61,16 +99,16 @@
       ],
       "active": true
     },
-    "3": {
-      "id": 3,
-      "name": "Ground",
+    "1": {
+      "id": 1,
+      "name": "Beacon",
       "parent": null,
       "children": [],
       "components": [
         {
           "type": "Transform",
           "x": 640.0,
-          "y": 540.0,
+          "y": 360.0,
           "scale_x": 1.0,
           "scale_y": 1.0,
           "rotation": 0.0
@@ -78,15 +116,24 @@
         {
           "type": "Sprite",
           "texture_path": "generated:white",
-          "width": 720.0,
-          "height": 28.0,
+          "width": 96.0,
+          "height": 96.0,
           "flip_x": false,
           "flip_y": false,
-          "color": [0.18, 0.22, 0.28, 1.0]
+          "color": [
+            1.0,
+            0.66,
+            0.2,
+            1.0
+          ]
+        },
+        {
+          "type": "Script",
+          "path": "scripts/beacon.lua"
         }
       ],
       "active": true
     }
   },
-  "next_id": 4
+  "next_id": 5
 }

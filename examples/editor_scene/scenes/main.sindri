@@ -1,0 +1,38 @@
+{
+  "name": "main",
+  "entities": {
+    "0": {
+      "id": 0,
+      "name": "Main Camera",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 0.0,
+          "y": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0
+        },
+        {
+          "type": "Camera",
+          "active": true,
+          "zoom": 1.0,
+          "follow_entity": null,
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "bounds_min_x": null,
+          "bounds_min_y": null,
+          "bounds_max_x": null,
+          "bounds_max_y": null,
+          "smoothing": 1.0,
+          "dead_zone_width": 0.0,
+          "dead_zone_height": 0.0
+        }
+      ],
+      "active": true
+    }
+  },
+  "next_id": 1
+}

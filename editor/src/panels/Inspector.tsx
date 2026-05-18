@@ -36,7 +36,7 @@ export default function Inspector({ entity, selectedComponent, onSelectComponent
   return (
     <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0, maxHeight: "45%", overflow: "auto" }}>
       {comp !== null && selectedComponent !== null
-        ? <ComponentView entity={entity} component={comp} componentIdx={selectedComponent} onBack={() => onSelectComponent(null)} onSceneChange={onSceneChange} onOpenScript={onOpenScript} />
+        ? <ComponentView key={`${entity.id}:${selectedComponent}:${comp.type}`} entity={entity} component={comp} componentIdx={selectedComponent} onBack={() => onSelectComponent(null)} onSceneChange={onSceneChange} onOpenScript={onOpenScript} />
         : <EntityOverview entity={entity} onSelectComponent={onSelectComponent} />
       }
     </div>
@@ -365,8 +365,18 @@ function CameraFields({ comp, entityId, componentIdx, onSceneChange }: {
 
   return (
     <>
-      <NumberInputField label="zoom" value={comp.zoom} onCommit={v => patch({ zoom: v })} />
+      <BoolField label="active" value={comp.active ?? true} onChange={v => patch({ active: v })} />
+      <NumberInputField label="zoom" value={comp.zoom} min={0.01} onCommit={v => patch({ zoom: v })} />
       <OptionalEntityField label="follow" value={comp.follow_entity} onCommit={v => patch({ follow_entity: v })} />
+      <NumberInputField label="offset x" value={comp.offset_x ?? 0} onCommit={v => patch({ offset_x: v })} />
+      <NumberInputField label="offset y" value={comp.offset_y ?? 0} onCommit={v => patch({ offset_y: v })} />
+      <NumberInputField label="smoothing" value={comp.smoothing ?? 1} min={0} max={1} onCommit={v => patch({ smoothing: v })} />
+      <NumberInputField label="dead w" value={comp.dead_zone_width ?? 0} min={0} onCommit={v => patch({ dead_zone_width: v })} />
+      <NumberInputField label="dead h" value={comp.dead_zone_height ?? 0} min={0} onCommit={v => patch({ dead_zone_height: v })} />
+      <OptionalNumberField label="min x" value={comp.bounds_min_x ?? null} onCommit={v => patch({ bounds_min_x: v })} />
+      <OptionalNumberField label="min y" value={comp.bounds_min_y ?? null} onCommit={v => patch({ bounds_min_y: v })} />
+      <OptionalNumberField label="max x" value={comp.bounds_max_x ?? null} onCommit={v => patch({ bounds_max_x: v })} />
+      <OptionalNumberField label="max y" value={comp.bounds_max_y ?? null} onCommit={v => patch({ bounds_max_y: v })} />
     </>
   );
 }
@@ -473,6 +483,38 @@ function OptionalEntityField({ label, value, onCommit }: {
     }
     const next = Number(trimmed);
     if (Number.isInteger(next) && next >= 0) onCommit(next);
+  };
+
+  return (
+    <EditableRow label={label}>
+      <input
+        type="number"
+        defaultValue={value ?? ""}
+        placeholder="none"
+        onFocus={() => setFocused(true)}
+        onBlur={e => { setFocused(false); commit(e.currentTarget.value); }}
+        onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        style={inputStyle(focused)}
+      />
+    </EditableRow>
+  );
+}
+
+function OptionalNumberField({ label, value, onCommit }: {
+  label: string;
+  value: number | null;
+  onCommit: (value: number | null) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  const commit = (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      onCommit(null);
+      return;
+    }
+    const next = Number(trimmed);
+    if (Number.isFinite(next)) onCommit(next);
   };
 
   return (

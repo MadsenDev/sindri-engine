@@ -76,8 +76,52 @@ pub struct Script {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Camera {
+    #[serde(default = "default_camera_active")]
+    pub active: bool,
+    #[serde(default = "default_camera_zoom")]
     pub zoom: f32,
+    #[serde(default)]
     pub follow_entity: Option<u64>,
+    #[serde(default)]
+    pub offset_x: f32,
+    #[serde(default)]
+    pub offset_y: f32,
+    #[serde(default)]
+    pub bounds_min_x: Option<f32>,
+    #[serde(default)]
+    pub bounds_min_y: Option<f32>,
+    #[serde(default)]
+    pub bounds_max_x: Option<f32>,
+    #[serde(default)]
+    pub bounds_max_y: Option<f32>,
+    #[serde(default = "default_camera_smoothing")]
+    pub smoothing: f32,
+    #[serde(default)]
+    pub dead_zone_width: f32,
+    #[serde(default)]
+    pub dead_zone_height: f32,
+    #[serde(skip)]
+    pub runtime_target_zoom: Option<f32>,
+    #[serde(skip)]
+    pub runtime_zoom_speed: f32,
+    #[serde(skip)]
+    pub runtime_shake_intensity: f32,
+    #[serde(skip)]
+    pub runtime_shake_timer: f32,
+    #[serde(skip)]
+    pub runtime_shake_seed: f32,
+}
+
+fn default_camera_active() -> bool {
+    true
+}
+
+fn default_camera_zoom() -> f32 {
+    1.0
+}
+
+fn default_camera_smoothing() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

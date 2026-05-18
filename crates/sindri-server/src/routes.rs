@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -16,16 +17,81 @@ use sindri::component::Transform;
 use sindri::scene::Scene;
 
 pub type SharedScene = Arc<RwLock<Scene>>;
+pub type SharedScenePath = Arc<RwLock<PathBuf>>;
 pub type SharedKeys = Arc<RwLock<HashSet<String>>>;
 
 #[derive(Clone)]
 pub struct AppState {
     pub scene: SharedScene,
+    pub scene_path: SharedScenePath,
+    pub project_root: PathBuf,
     pub screenshot_fn: Arc<dyn Fn() -> Option<Vec<u8>> + Send + Sync>,
     pub scripts_root: std::path::PathBuf,
     pub model: String,
     pub keys: SharedKeys,
     pub paused: Arc<AtomicBool>,
+}
+
+fn has_active_camera(scene: &Scene) -> bool {
+    scene.entities.values().any(|entity| {
+        entity.components.iter().any(|component| {
+            matches!(
+                component,
+                sindri::component::Component::Camera(camera) if camera.active
+            )
+        })
+    })
+}
+
+fn deactivate_other_cameras(scene: &mut Scene, active_entity: u64, active_component_idx: usize) {
+    for (entity_id, entity) in scene.entities.iter_mut() {
+        for (component_idx, component) in entity.components.iter_mut().enumerate() {
+            if *entity_id == active_entity && component_idx == active_component_idx {
+                continue;
+            }
+            if let sindri::component::Component::Camera(camera) = component {
+                camera.active = false;
+            }
+        }
+    }
+}
+
+pub fn normalize_scene_cameras(scene: &mut Scene) {
+    let mut camera_refs: Vec<(u64, usize, bool)> =
+        scene
+            .entities
+            .iter()
+            .flat_map(|(entity_id, entity)| {
+                entity.components.iter().enumerate().filter_map(
+                    move |(component_idx, component)| {
+                        if let sindri::component::Component::Camera(camera) = component {
+                            Some((*entity_id, component_idx, camera.active))
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
+            .collect();
+    camera_refs.sort_by_key(|(entity_id, component_idx, _)| (*entity_id, *component_idx));
+
+    let active = camera_refs
+        .iter()
+        .find(|(_, _, active)| *active)
+        .or_else(|| camera_refs.first())
+        .copied();
+    let Some((active_entity, active_component_idx, _)) = active else {
+        return;
+    };
+
+    for (entity_id, entity) in scene.entities.iter_mut() {
+        for (component_idx, component) in entity.components.iter_mut().enumerate() {
+            if let sindri::component::Component::Camera(camera) = component {
+                camera.active =
+                    *entity_id == active_entity && component_idx == active_component_idx;
+            }
+        }
+    }
 }
 
 // GET /health
@@ -63,12 +129,75 @@ pub async fn get_scene(State(state): State<AppState>) -> impl IntoResponse {
 // PUT /scene
 pub async fn put_scene(State(state): State<AppState>, body: String) -> impl IntoResponse {
     match Scene::from_json(&body) {
-        Ok(new_scene) => {
+        Ok(mut new_scene) => {
+            normalize_scene_cameras(&mut new_scene);
             *state.scene.write().await = new_scene;
             StatusCode::OK.into_response()
         }
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
+}
+
+#[derive(Deserialize)]
+pub struct OpenSceneBody {
+    pub path: String,
+}
+
+fn resolve_project_scene_path(
+    project_root: &FsPath,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let requested = FsPath::new(relative_path);
+    if requested.is_absolute() {
+        return Err("scene path must be project-relative".into());
+    }
+
+    let full = project_root.join(requested);
+    let canon_root = std::fs::canonicalize(project_root).map_err(|e| e.to_string())?;
+    let canon_file = std::fs::canonicalize(&full).map_err(|e| e.to_string())?;
+    if !canon_file.starts_with(&canon_root) {
+        return Err("scene path escapes project directory".into());
+    }
+
+    let ext = canon_file
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+    if ext != "sindri" {
+        return Err("only .sindri scene files can be opened".into());
+    }
+
+    Ok(canon_file)
+}
+
+// POST /scene/open
+pub async fn open_scene(
+    State(state): State<AppState>,
+    Json(body): Json<OpenSceneBody>,
+) -> impl IntoResponse {
+    let next_path = match resolve_project_scene_path(&state.project_root, &body.path) {
+        Ok(path) => path,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+
+    let mut next_scene = match Scene::load(&next_path) {
+        Ok(scene) => scene,
+        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    normalize_scene_cameras(&mut next_scene);
+
+    // Persist the current active scene before switching, so opening another
+    // scene does not drop recent edits that have not reached the autosave tick.
+    let current_path = state.scene_path.read().await.clone();
+    let current_scene = state.scene.read().await.clone();
+    if let Err(e) = current_scene.save(&current_path) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+
+    *state.scene.write().await = next_scene;
+    *state.scene_path.write().await = next_path;
+    StatusCode::OK.into_response()
 }
 
 // GET /scene/entity/:id
@@ -192,7 +321,7 @@ pub async fn add_component(
     Json(body): Json<AddComponentBody>,
 ) -> impl IntoResponse {
     use sindri::component::*;
-    let component = match body.component_type.as_str() {
+    let mut component = match body.component_type.as_str() {
         "Transform" => Component::Transform(Transform {
             x: 0.0,
             y: 0.0,
@@ -227,8 +356,23 @@ pub async fn add_component(
             path: String::new(),
         }),
         "Camera" => Component::Camera(Camera {
+            active: true,
             zoom: 1.0,
             follow_entity: None,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            bounds_min_x: None,
+            bounds_min_y: None,
+            bounds_max_x: None,
+            bounds_max_y: None,
+            smoothing: 1.0,
+            dead_zone_width: 0.0,
+            dead_zone_height: 0.0,
+            runtime_target_zoom: None,
+            runtime_zoom_speed: 0.0,
+            runtime_shake_intensity: 0.0,
+            runtime_shake_timer: 0.0,
+            runtime_shake_seed: 0.0,
         }),
         "AudioSource" => Component::AudioSource(AudioSource {
             path: String::new(),
@@ -239,9 +383,17 @@ pub async fn add_component(
         _ => return (StatusCode::BAD_REQUEST, "unknown component type").into_response(),
     };
     let mut scene = state.scene.write().await;
+    if let Component::Camera(camera) = &mut component {
+        camera.active = !has_active_camera(&scene);
+    }
     match scene.entities.get_mut(&id) {
         Some(e) => {
+            let component_idx = e.components.len();
+            let activates_camera = matches!(&component, Component::Camera(camera) if camera.active);
             e.components.push(component);
+            if activates_camera {
+                deactivate_other_cameras(&mut scene, id, component_idx);
+            }
             StatusCode::OK.into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
@@ -319,6 +471,25 @@ fn patch_f32(body: &serde_json::Value, key: &str, target: &mut f32) -> Result<()
         };
         *target = number as f32;
     }
+    Ok(())
+}
+
+fn patch_optional_f32(
+    body: &serde_json::Value,
+    key: &str,
+    target: &mut Option<f32>,
+) -> Result<(), String> {
+    let Some(value) = body.get(key) else {
+        return Ok(());
+    };
+    if value.is_null() {
+        *target = None;
+        return Ok(());
+    }
+    let Some(number) = value.as_f64() else {
+        return Err(format!("{key} must be a number or null"));
+    };
+    *target = Some(number as f32);
     Ok(())
 }
 
@@ -421,6 +592,8 @@ pub async fn patch_component(
     let Some(comp) = entity.components.get_mut(p.idx) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let mut patched_camera = false;
+    let mut requested_active_camera = false;
     let result = match comp {
         sindri::component::Component::Transform(t) => patch_f32(&body, "x", &mut t.x)
             .and_then(|_| patch_f32(&body, "y", &mut t.y))
@@ -459,8 +632,32 @@ pub async fn patch_component(
             .and_then(|_| patch_f32(&body, "offset_x", &mut c.offset_x))
             .and_then(|_| patch_f32(&body, "offset_y", &mut c.offset_y))
             .and_then(|_| patch_bool(&body, "is_trigger", &mut c.is_trigger)),
-        sindri::component::Component::Camera(c) => patch_f32(&body, "zoom", &mut c.zoom)
-            .and_then(|_| patch_follow_entity(&body, "follow_entity", &mut c.follow_entity)),
+        sindri::component::Component::Camera(c) => {
+            requested_active_camera = body
+                .get("active")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let result = patch_bool(&body, "active", &mut c.active)
+                .and_then(|_| patch_f32(&body, "zoom", &mut c.zoom))
+                .and_then(|_| patch_follow_entity(&body, "follow_entity", &mut c.follow_entity))
+                .and_then(|_| patch_f32(&body, "offset_x", &mut c.offset_x))
+                .and_then(|_| patch_f32(&body, "offset_y", &mut c.offset_y))
+                .and_then(|_| patch_optional_f32(&body, "bounds_min_x", &mut c.bounds_min_x))
+                .and_then(|_| patch_optional_f32(&body, "bounds_min_y", &mut c.bounds_min_y))
+                .and_then(|_| patch_optional_f32(&body, "bounds_max_x", &mut c.bounds_max_x))
+                .and_then(|_| patch_optional_f32(&body, "bounds_max_y", &mut c.bounds_max_y))
+                .and_then(|_| patch_f32(&body, "smoothing", &mut c.smoothing))
+                .and_then(|_| patch_f32(&body, "dead_zone_width", &mut c.dead_zone_width))
+                .and_then(|_| patch_f32(&body, "dead_zone_height", &mut c.dead_zone_height));
+            if result.is_ok() {
+                c.zoom = c.zoom.max(0.01);
+                c.smoothing = c.smoothing.clamp(0.0, 1.0);
+                c.dead_zone_width = c.dead_zone_width.max(0.0);
+                c.dead_zone_height = c.dead_zone_height.max(0.0);
+                patched_camera = true;
+            }
+            result
+        }
         sindri::component::Component::AudioSource(a) => patch_string(&body, "path", &mut a.path)
             .and_then(|_| patch_f32(&body, "volume", &mut a.volume))
             .and_then(|_| patch_bool(&body, "looping", &mut a.looping))
@@ -468,7 +665,14 @@ pub async fn patch_component(
     };
 
     match result {
-        Ok(()) => StatusCode::OK.into_response(),
+        Ok(()) => {
+            if requested_active_camera {
+                deactivate_other_cameras(&mut scene, p.id, p.idx);
+            } else if patched_camera {
+                normalize_scene_cameras(&mut scene);
+            }
+            StatusCode::OK.into_response()
+        }
         Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
     }
 }

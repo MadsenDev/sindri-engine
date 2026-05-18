@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 const ENGINE_BASE: &str = "http://127.0.0.1:7878";
 
@@ -44,6 +45,73 @@ fn engine_binary_in_workspace(root: &Path) -> Option<PathBuf> {
     None
 }
 
+fn newest_mtime(path: &Path) -> Option<SystemTime> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if metadata.is_file() {
+        return metadata.modified().ok();
+    }
+
+    let mut newest = metadata.modified().ok();
+    if metadata.is_dir() {
+        for entry in std::fs::read_dir(path).ok()? {
+            let entry = entry.ok()?;
+            if let Some(modified) = newest_mtime(&entry.path()) {
+                if newest.map_or(true, |current| modified > current) {
+                    newest = Some(modified);
+                }
+            }
+        }
+    }
+    newest
+}
+
+fn engine_binary_is_stale(root: &Path, binary: &Path) -> bool {
+    let Some(binary_time) = std::fs::metadata(binary)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+    else {
+        return true;
+    };
+
+    [
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/sindri-server/Cargo.toml",
+        "crates/sindri-server/src",
+        "crates/sindri/Cargo.toml",
+        "crates/sindri/src",
+    ]
+    .iter()
+    .map(|path| root.join(path))
+    .filter_map(|path| newest_mtime(&path))
+    .any(|source_time| source_time > binary_time)
+}
+
+async fn build_engine_binary(root: &Path, reason: &str) -> Result<PathBuf, String> {
+    eprintln!("[start_engine] {reason}; running cargo build -p sindri-server");
+    let output = tokio::process::Command::new("cargo")
+        .args(["build", "-p", "sindri-server"])
+        .current_dir(root)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run cargo build -p sindri-server: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to build sindri-server.\n\nstdout:\n{}\n\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    engine_binary_in_workspace(root).ok_or_else(|| {
+        format!(
+            "cargo build -p sindri-server succeeded, but no binary was found under {}",
+            root.join("target").display()
+        )
+    })
+}
+
 fn find_engine_binary() -> PathBuf {
     if let Ok(path) = std::env::var("SINDRI_ENGINE_BIN") {
         return PathBuf::from(path);
@@ -70,31 +138,13 @@ async fn ensure_engine_binary() -> Result<PathBuf, String> {
 
     if let Some(root) = find_workspace_root() {
         if let Some(binary) = engine_binary_in_workspace(&root) {
-            return Ok(binary);
+            if !engine_binary_is_stale(&root, &binary) {
+                return Ok(binary);
+            }
+            return build_engine_binary(&root, "sindri-server is older than its sources").await;
         }
 
-        eprintln!("[start_engine] sindri-server missing; running cargo build -p sindri-server");
-        let output = tokio::process::Command::new("cargo")
-            .args(["build", "-p", "sindri-server"])
-            .current_dir(&root)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to run cargo build -p sindri-server: {e}"))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Failed to build sindri-server.\n\nstdout:\n{}\n\nstderr:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        return engine_binary_in_workspace(&root).ok_or_else(|| {
-            format!(
-                "cargo build -p sindri-server succeeded, but no binary was found under {}",
-                root.join("target").display()
-            )
-        });
+        return build_engine_binary(&root, "sindri-server is missing").await;
     }
 
     let fallback = PathBuf::from("sindri-server");
@@ -183,9 +233,49 @@ pub async fn create_project(parent_dir: String, name: String) -> Result<String, 
     let meta = serde_json::json!({ "name": name, "version": "0.1.0" });
     std::fs::write(project_dir.join("project.f2proj"), meta.to_string())
         .map_err(|e| e.to_string())?;
-    let scene = serde_json::json!({ "name": "main", "entities": {}, "next_id": 0 });
-    std::fs::write(project_dir.join("scenes/main.sindri"), scene.to_string())
-        .map_err(|e| e.to_string())?;
+    let scene = serde_json::json!({
+        "name": "main",
+        "entities": {
+            "0": {
+                "id": 0,
+                "name": "Main Camera",
+                "parent": null,
+                "children": [],
+                "components": [
+                    {
+                        "type": "Transform",
+                        "x": 0.0,
+                        "y": 0.0,
+                        "scale_x": 1.0,
+                        "scale_y": 1.0,
+                        "rotation": 0.0
+                    },
+                    {
+                        "type": "Camera",
+                        "active": true,
+                        "zoom": 1.0,
+                        "follow_entity": null,
+                        "offset_x": 0.0,
+                        "offset_y": 0.0,
+                        "bounds_min_x": null,
+                        "bounds_min_y": null,
+                        "bounds_max_x": null,
+                        "bounds_max_y": null,
+                        "smoothing": 1.0,
+                        "dead_zone_width": 0.0,
+                        "dead_zone_height": 0.0
+                    }
+                ],
+                "active": true
+            }
+        },
+        "next_id": 1
+    });
+    std::fs::write(
+        project_dir.join("scenes/main.sindri"),
+        serde_json::to_string_pretty(&scene).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(project_dir.to_string_lossy().to_string())
 }
 
@@ -206,12 +296,15 @@ pub async fn get_scene() -> Result<String, String> {
 #[tauri::command]
 pub async fn put_scene(scene_json: String) -> Result<(), String> {
     let client = reqwest::Client::new();
-    client
+    let resp = client
         .put(engine_url("/scene"))
         .body(scene_json)
         .send()
         .await
         .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_else(|e| e.to_string()));
+    }
     Ok(())
 }
 
@@ -236,7 +329,26 @@ pub async fn open_scene_file(project_path: String, relative_path: String) -> Res
     let scene_json = std::fs::read_to_string(&canon_file).map_err(|e| e.to_string())?;
     // Validate that this is JSON locally; the server performs full Scene parsing.
     serde_json::from_str::<serde_json::Value>(&scene_json).map_err(|e| e.to_string())?;
-    put_scene(scene_json).await
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(engine_url("/scene/open"))
+        .json(&serde_json::json!({ "path": relative_path }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_FOUND
+            || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+        {
+            return Err(
+                "The running sindri-server does not support scene opening yet. Restart the editor so it can rebuild and relaunch the engine sidecar.".into(),
+            );
+        }
+        return Err(resp.text().await.unwrap_or_else(|e| e.to_string()));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -358,7 +470,7 @@ Action block schema — use as many actions as needed in one block:
     {{ "type": "add_component", "entity_id": 1, "component_type": "Script" }},
     {{ "type": "remove_component", "entity_id": 1, "component_type": "Script" }},
     {{ "type": "patch_component", "entity_id": 1, "component_idx": 0, "data": {{ "path": "scripts/player.lua" }} }},
-    {{ "type": "patch_component", "entity_id": 1, "component_type": "Camera", "data": {{ "zoom": 1.0, "follow_entity": null }} }},
+    {{ "type": "patch_component", "entity_id": 1, "component_type": "Camera", "data": {{ "active": true, "zoom": 1.0, "follow_entity": null, "offset_x": 0.0, "offset_y": 0.0, "smoothing": 1.0, "dead_zone_width": 0.0, "dead_zone_height": 0.0 }} }},
     {{ "type": "patch_component", "entity_id": 1, "component_type": "AudioSource", "data": {{ "path": "audio/jump.ogg", "volume": 0.8, "looping": false, "play_on_start": false }} }},
 
     // Transform
@@ -388,7 +500,7 @@ Rules:
 - For platformer-style players, set PhysicsBody lock_rotation=true.
 - Supported scene component types are exactly: Transform, Sprite, PhysicsBody, Collider, Script, Camera, AudioSource. You may add, remove, and patch these scene components.
 - Do NOT create unsupported engine-only components such as Tilemap, Animation, ParticleEmitter, PointLight, DirectionalLight, HUD, PathfindingGrid, or gameplay marker components through AI actions. If asked for one of these, explain that editor/AI scene support is not implemented yet and suggest Lua/scripted or Rust-side alternatives.
-- `patch_component` data fields: Sprite supports texture_path, width, height, flip_x, flip_y, color [r,g,b,a]; Collider supports width, height, offset_x, offset_y, is_trigger; PhysicsBody supports body_type, lock_rotation, linear_damping, angular_damping, collision_layer, collision_mask; Script supports path; Camera supports zoom and follow_entity; AudioSource supports path, volume, looping, play_on_start.
+- `patch_component` data fields: Sprite supports texture_path, width, height, flip_x, flip_y, color [r,g,b,a]; Collider supports width, height, offset_x, offset_y, is_trigger; PhysicsBody supports body_type, lock_rotation, linear_damping, angular_damping, collision_layer, collision_mask; Script supports path; Camera supports active, zoom, follow_entity, offset_x, offset_y, bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, smoothing, dead_zone_width, dead_zone_height; AudioSource supports path, volume, looping, play_on_start.
 - Scripts are Lua 5.4 with a CUSTOM engine API. Do NOT use LÖVE2D (`love.*`), Unity, Godot, or any other engine's API.
 - Sindri script API: `on_start(self)` and `on_update(self, dt)` hooks. `self` is a table with `x`, `y`, `rotation`, `scale_x`, `scale_y`, `entity_id`, `elapsed`. Globals: `key_down(key)`, `key_pressed(key)`, `print(...)`. Key names are browser KeyboardEvent.key strings: `"ArrowLeft"`, `"ArrowRight"`, `"ArrowUp"`, `"ArrowDown"`, `" "` (Space), `"a"`–`"z"`, etc.
 - Correct movement example: `if key_down("ArrowRight") then self.x = self.x + 200 * dt end`
