@@ -22,7 +22,8 @@ Sindri is designed around a simple idea:
 > Lua owns gameplay behavior.
 > The editor and AI should understand both.
 
-![Sindri Editor](docs/images/editor-overview.png)
+
+![Sindri Editor](docs/images/editor_overview.png)
 > Early Sindri editor prototype with scene viewport, script editing, and local AI tooling.
 
 ---
