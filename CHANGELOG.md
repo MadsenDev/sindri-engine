@@ -21,6 +21,15 @@ All notable changes to this project will be documented in this file.
   - Added deterministic `entity_name` resolution and idempotent component/script attachment.
   - Added coordinate-system guardrails so “below” maps to larger Y and keeps vertical relationships aligned.
   - Added explicit editor `PhysicsBody` support with body type, lock rotation, damping, and collision layer/mask fields.
+- **Curated example suite** - Replaced the historical demo pile with five identity-focused examples.
+  - Added `hello_sindri` for first-run onboarding.
+  - Added `editor_scene` for `.f2scene` loading, scene-driven entities, Lua script attachment, and hot reload.
+  - Added `rendering` for particles, lighting, camera effects, animation-like motion, and large object counts.
+  - Kept `platformer` as the Rust-first physics/gameplay baseline.
+  - Promoted `scripted_asteroids` as the flagship Lua scripting showcase.
+- **Adoption/parity tracking** - Added a matrix for engine/runtime/editor/serialization/AI capability support.
+  - Split AI support into read, create, modify, debug, explain, and scene-aware capabilities.
+  - Added ownership tracking and rules for when features can be treated as editor/AI-ready.
 - **Build hygiene** - Cleaned warning output for `cargo build -p sindri-server` without changing engine event-loop behavior.
 - **Asset system v2 (textures + fonts)** - Extended `AssetManager` to manage fonts in addition to textures
   - Fonts cached by string key and loaded via renderer font API

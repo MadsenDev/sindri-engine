@@ -16,6 +16,16 @@ examples/          Engine demos and reference games
 docs/              Engine documentation
 ```
 
+## Examples
+
+The public example suite is intentionally small:
+
+- `hello_sindri` - minimal onboarding
+- `platformer` - Rust-first physics gameplay
+- `scripted_asteroids` - Lua scripting flagship
+- `editor_scene` - scene loading and script attachment workflow
+- `rendering` - particles, lighting, camera effects, and object-count showcase
+
 ## Quick Start
 
 Build everything:
@@ -27,7 +37,7 @@ cargo build --workspace
 Run an example:
 
 ```bash
-cargo run -p basic_game
+cargo run -p hello_sindri
 ```
 
 Run the editor:
@@ -124,12 +134,13 @@ Start with:
 - [Physics](docs/physics.md)
 - [Scripting](docs/scripting.md)
 - [World & Entities](docs/world.md)
+- [Adoption / Parity Matrix](docs/adoption-parity-matrix.md)
 - [Examples](docs/examples.md)
 - [API Reference](docs/api-reference.md)
 
 ## Repository Status
 
-`IMPROVEMENTS.md` tasks 1-10 are complete. Current work is focused on editor/server/AI parity with the engine core and keeping docs aligned with the Sindri rename.
+`IMPROVEMENTS.md` tasks 1-10 are complete. Current work is focused on editor/server/AI parity with the engine core, strengthening Lua-first workflows, keeping the curated example suite polished, and tracking subsystem adoption through the parity matrix.
 
 ## Requirements
 

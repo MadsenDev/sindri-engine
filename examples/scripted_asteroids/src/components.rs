@@ -63,8 +63,8 @@ impl PolygonShape {
         const POINTS: usize = 10;
 
         let seed = ((position.x * 13.37) as i32 as u32)
-        ^ ((position.y * 91.17) as i32 as u32)
-        ^ radius as u32;
+            ^ ((position.y * 91.17) as i32 as u32)
+            ^ radius as u32;
 
         let mut offsets = Vec::with_capacity(POINTS);
 
@@ -83,12 +83,12 @@ impl PolygonShape {
         let sin = rotation.sin();
 
         self.offsets
-        .iter()
-        .map(|p| {
-            let rotated = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
-            position + rotated
-        })
-        .collect()
+            .iter()
+            .map(|p| {
+                let rotated = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+                position + rotated
+            })
+            .collect()
     }
 }
 

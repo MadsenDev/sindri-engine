@@ -25,14 +25,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "age_of_empires_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -119,14 +111,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "animation_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -166,15 +150,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb44936d800fea8f016d7f2311c6a4f97aebd5dc86f09906139ec848cf3a46f"
 dependencies = [
  "libloading",
-]
-
-[[package]]
-name = "asteroids_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "fastrand",
- "sindri",
 ]
 
 [[package]]
@@ -260,14 +235,6 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "basic_game"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
 
 [[package]]
 name = "bindgen"
@@ -413,14 +380,6 @@ dependencies = [
  "rustix 0.38.44",
  "wayland-backend",
  "wayland-client",
-]
-
-[[package]]
-name = "camera_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
 ]
 
 [[package]]
@@ -777,6 +736,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
+name = "editor_scene"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sindri",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -852,15 +819,6 @@ name = "find-msvc-tools"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
-
-[[package]]
-name = "fireflies_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "fastrand",
- "sindri",
-]
 
 [[package]]
 name = "flate2"
@@ -971,14 +929,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "full_game"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
 ]
 
 [[package]]
@@ -1145,14 +1095,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "grid_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1216,6 +1158,14 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hello_sindri"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sindri",
 ]
 
 [[package]]
@@ -1624,14 +1574,6 @@ dependencies = [
  "bitflags 2.10.0",
  "libc",
  "redox_syscall 0.5.18",
-]
-
-[[package]]
-name = "lighting_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
 ]
 
 [[package]]
@@ -2417,50 +2359,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "particles_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pathfinding_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
-
-[[package]]
-name = "performance_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "fastrand",
- "sindri",
-]
-
-[[package]]
-name = "physics_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rand",
- "sindri",
-]
 
 [[package]]
 name = "pin-project"
@@ -2502,14 +2410,6 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "platformer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
-name = "platformer_demo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2574,15 +2474,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ppv-lite86"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
-dependencies = [
- "zerocopy",
-]
-
-[[package]]
 name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2641,36 +2532,6 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
-
-[[package]]
-name = "rand"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
-dependencies = [
- "libc",
- "rand_chacha",
- "rand_core",
-]
-
-[[package]]
-name = "rand_chacha"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
-dependencies = [
- "ppv-lite86",
- "rand_core",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
-dependencies = [
- "getrandom 0.2.16",
-]
 
 [[package]]
 name = "range-alloc"
@@ -2779,6 +2640,15 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "rendering"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fastrand",
+ "sindri",
+]
 
 [[package]]
 name = "reqwest"
@@ -2991,23 +2861,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scripted_grid_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "mlua",
- "sindri",
-]
-
-[[package]]
-name = "scripting_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "sctk-adwaita"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3150,14 +3003,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
-name = "simple_test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
-
-[[package]]
 name = "sindri"
 version = "0.1.0"
 dependencies = [
@@ -3285,15 +3130,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solar_system_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "fastrand",
- "sindri",
-]
-
-[[package]]
 name = "spade"
 version = "2.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3319,14 +3155,6 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
-
-[[package]]
-name = "state_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
-]
 
 [[package]]
 name = "static_assertions"
@@ -3544,14 +3372,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
-]
-
-[[package]]
-name = "tilemap_editor_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
 ]
 
 [[package]]
@@ -3878,14 +3698,6 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
-]
-
-[[package]]
-name = "walljump_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "sindri",
 ]
 
 [[package]]

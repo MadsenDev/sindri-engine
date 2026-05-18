@@ -43,20 +43,20 @@ impl ScriptedAsteroids {
 
         Ok(Self {
             runtime: ScriptRuntime::new()?.with_hot_reload(true),
-           world: World::new(),
-           physics,
-           camera: Camera2D::default(),
-           white_texture: None,
-           font: None,
-           hud: HudLayer::new(),
-           player: None,
-           score: 0,
-           lives: 3,
-           game_over: false,
-           shoot_cooldown: 0.0,
-           spawn_timer: 0.0,
-           frame_count: 0,
-           initialized: false,
+            world: World::new(),
+            physics,
+            camera: Camera2D::default(),
+            white_texture: None,
+            font: None,
+            hud: HudLayer::new(),
+            player: None,
+            score: 0,
+            lives: 3,
+            game_over: false,
+            shoot_cooldown: 0.0,
+            spawn_timer: 0.0,
+            frame_count: 0,
+            initialized: false,
         })
     }
 
@@ -89,7 +89,7 @@ impl ScriptedAsteroids {
         }
 
         self.runtime
-        .update(&mut self.world, &mut self.physics, ctx.input(), 0.0)?;
+            .update(&mut self.world, &mut self.physics, ctx.input(), 0.0)?;
 
         Ok(())
     }
@@ -105,7 +105,9 @@ impl ScriptedAsteroids {
         self.world.insert(entity, ScriptTag("player".to_string()));
 
         let mut sprite = SpriteComponent::new(texture);
-        sprite.sprite.set_size_px(Vec2::new(32.0, 32.0), Vec2::new(1.0, 1.0));
+        sprite
+            .sprite
+            .set_size_px(Vec2::new(32.0, 32.0), Vec2::new(1.0, 1.0));
         sprite.sprite.tint = [1.0, 1.0, 1.0, 1.0];
         self.world.insert(entity, sprite);
 
@@ -117,12 +119,12 @@ impl ScriptedAsteroids {
         );
 
         let params = ScriptParams::default()
-        .insert("screen_w", SCREEN_W)
-        .insert("screen_h", SCREEN_H)
-        .insert("rotation_speed", 5.0)
-        .insert("thrust", 260.0)
-        .insert("friction", 0.985)
-        .insert("max_speed", 340.0);
+            .insert("screen_w", SCREEN_W)
+            .insert("screen_h", SCREEN_H)
+            .insert("rotation_speed", 5.0)
+            .insert("thrust", 260.0)
+            .insert("friction", 0.985)
+            .insert("max_speed", 340.0);
 
         self.world.insert(
             entity,
@@ -156,16 +158,18 @@ impl ScriptedAsteroids {
         self.world.insert(entity, ScriptTag("bullet".to_string()));
 
         let mut sprite = SpriteComponent::new(texture);
-        sprite.sprite.set_size_px(Vec2::new(6.0, 6.0), Vec2::new(1.0, 1.0));
+        sprite
+            .sprite
+            .set_size_px(Vec2::new(6.0, 6.0), Vec2::new(1.0, 1.0));
         sprite.sprite.tint = [1.0, 0.92, 0.35, 1.0];
         self.world.insert(entity, sprite);
 
         let script = Self::script_path("bullet.lua");
         let params = ScriptParams::default()
-        .insert("screen_w", SCREEN_W)
-        .insert("screen_h", SCREEN_H)
-        .insert("speed", 520.0)
-        .insert("lifetime", 1.35);
+            .insert("screen_w", SCREEN_W)
+            .insert("screen_h", SCREEN_H)
+            .insert("speed", 520.0)
+            .insert("lifetime", 1.35);
 
         self.world.insert(
             entity,
@@ -182,9 +186,9 @@ impl ScriptedAsteroids {
             let side = fastrand::u8(0..4);
             match side {
                 0 => Vec2::new(0.0, fastrand::f32() * SCREEN_H),
-                                               1 => Vec2::new(SCREEN_W, fastrand::f32() * SCREEN_H),
-                                               2 => Vec2::new(fastrand::f32() * SCREEN_W, 0.0),
-                                               _ => Vec2::new(fastrand::f32() * SCREEN_W, SCREEN_H),
+                1 => Vec2::new(SCREEN_W, fastrand::f32() * SCREEN_H),
+                2 => Vec2::new(fastrand::f32() * SCREEN_W, 0.0),
+                _ => Vec2::new(fastrand::f32() * SCREEN_W, SCREEN_H),
             }
         });
 
@@ -193,11 +197,14 @@ impl ScriptedAsteroids {
 
         self.world.insert(entity, Transform::new(position));
         self.world.insert(entity, AsteroidMarker { size, radius });
-        self.world.insert(entity, PolygonShape::asteroid(position, radius));
+        self.world
+            .insert(entity, PolygonShape::asteroid(position, radius));
         self.world.insert(entity, ScriptTag("asteroid".to_string()));
 
         let mut sprite = SpriteComponent::new(texture);
-        sprite.sprite.set_size_px(Vec2::new(radius * 2.0, radius * 2.0), Vec2::new(1.0, 1.0));
+        sprite
+            .sprite
+            .set_size_px(Vec2::new(radius * 2.0, radius * 2.0), Vec2::new(1.0, 1.0));
         sprite.sprite.tint = [0.65, 0.68, 0.72, 1.0];
         self.world.insert(entity, sprite);
 
@@ -213,10 +220,10 @@ impl ScriptedAsteroids {
 
         let script = Self::script_path("asteroid.lua");
         let params = ScriptParams::default()
-        .insert("screen_w", SCREEN_W)
-        .insert("screen_h", SCREEN_H)
-        .insert("velocity", velocity)
-        .insert("rotation_speed", rotation_speed);
+            .insert("screen_w", SCREEN_W)
+            .insert("screen_h", SCREEN_H)
+            .insert("velocity", velocity)
+            .insert("rotation_speed", rotation_speed);
 
         self.world.insert(
             entity,
@@ -228,11 +235,11 @@ impl ScriptedAsteroids {
 
     fn sync_sprite_transforms(&mut self) {
         let entities: Vec<_> = self
-        .world
-        .query::<SpriteComponent>()
-        .into_iter()
-        .map(|(entity, _)| entity)
-        .collect();
+            .world
+            .query::<SpriteComponent>()
+            .into_iter()
+            .map(|(entity, _)| entity)
+            .collect();
 
         for entity in entities {
             let Some(transform) = self.world.get::<Transform>(entity).cloned() else {
@@ -272,24 +279,24 @@ impl ScriptedAsteroids {
 
     fn handle_collisions(&mut self) -> Result<()> {
         let bullets: Vec<_> = self
-        .world
-        .query::<BulletMarker>()
-        .into_iter()
-        .filter_map(|(entity, _)| {
-            let pos = self.world.get::<Transform>(entity)?.position;
-            Some((entity, pos))
-        })
-        .collect();
+            .world
+            .query::<BulletMarker>()
+            .into_iter()
+            .filter_map(|(entity, _)| {
+                let pos = self.world.get::<Transform>(entity)?.position;
+                Some((entity, pos))
+            })
+            .collect();
 
         let asteroids: Vec<_> = self
-        .world
-        .query::<AsteroidMarker>()
-        .into_iter()
-        .filter_map(|(entity, marker)| {
-            let pos = self.world.get::<Transform>(entity)?.position;
-            Some((entity, pos, *marker))
-        })
-        .collect();
+            .world
+            .query::<AsteroidMarker>()
+            .into_iter()
+            .filter_map(|(entity, marker)| {
+                let pos = self.world.get::<Transform>(entity)?.position;
+                Some((entity, pos, *marker))
+            })
+            .collect();
 
         let mut bullets_to_remove = Vec::new();
         let mut asteroids_to_remove = Vec::new();
@@ -321,10 +328,7 @@ impl ScriptedAsteroids {
         }
 
         for (position, size) in asteroid_splits {
-            let jitter = Vec2::new(
-                fastrand::f32() * 18.0 - 9.0,
-                                   fastrand::f32() * 18.0 - 9.0,
-            );
+            let jitter = Vec2::new(fastrand::f32() * 18.0 - 9.0, fastrand::f32() * 18.0 - 9.0);
             self.spawn_asteroid(size, Some(position + jitter))?;
         }
 
@@ -347,25 +351,25 @@ impl ScriptedAsteroids {
         };
 
         let asteroids: Vec<_> = self
-        .world
-        .query::<AsteroidMarker>()
-        .into_iter()
-        .filter_map(|(entity, marker)| {
-            let pos = self.world.get::<Transform>(entity)?.position;
-            Some((entity, pos, *marker))
-        })
-        .collect();
+            .world
+            .query::<AsteroidMarker>()
+            .into_iter()
+            .filter_map(|(entity, marker)| {
+                let pos = self.world.get::<Transform>(entity)?.position;
+                Some((entity, pos, *marker))
+            })
+            .collect();
 
         for (_, asteroid_pos, asteroid) in asteroids {
             if distance_sq(player_pos, asteroid_pos) < (asteroid.radius + 16.0).powi(2) {
                 self.lives = self.lives.saturating_sub(1);
 
                 let bullets: Vec<_> = self
-                .world
-                .query::<BulletMarker>()
-                .into_iter()
-                .map(|(entity, _)| entity)
-                .collect();
+                    .world
+                    .query::<BulletMarker>()
+                    .into_iter()
+                    .map(|(entity, _)| entity)
+                    .collect();
 
                 for bullet in bullets {
                     self.world.despawn(bullet);
@@ -396,10 +400,10 @@ impl ScriptedAsteroids {
 
         let points = ship_points(transform.position, transform.rotation);
         ctx.renderer()
-        .draw_polygon(frame, &points, [0.95, 0.98, 1.0, 1.0], &self.camera)?;
+            .draw_polygon(frame, &points, [0.95, 0.98, 1.0, 1.0], &self.camera)?;
 
-        let thrusting = ctx.input().is_key_down(KeyCode::KeyW)
-        || ctx.input().is_key_down(KeyCode::ArrowUp);
+        let thrusting =
+            ctx.input().is_key_down(KeyCode::KeyW) || ctx.input().is_key_down(KeyCode::ArrowUp);
 
         if thrusting && !self.game_over {
             let flame = flame_points(
@@ -408,7 +412,7 @@ impl ScriptedAsteroids {
                 ctx.elapsed_time().as_secs_f32(),
             );
             ctx.renderer()
-            .draw_polygon(frame, &flame, [1.0, 0.48, 0.05, 1.0], &self.camera)?;
+                .draw_polygon(frame, &flame, [1.0, 0.48, 0.05, 1.0], &self.camera)?;
         }
 
         Ok(())
@@ -425,7 +429,7 @@ impl ScriptedAsteroids {
 
             let points = shape.transformed(transform.position, transform.rotation);
             ctx.renderer()
-            .draw_polygon(frame, &points, [0.64, 0.67, 0.72, 1.0], &self.camera)?;
+                .draw_polygon(frame, &points, [0.64, 0.67, 0.72, 1.0], &self.camera)?;
         }
 
         Ok(())
@@ -455,36 +459,36 @@ impl ScriptedAsteroids {
         if let Some(font) = self.font {
             self.hud.add_text(HudText::new(
                 format!("Score: {}", self.score),
-                    font,
-                    24.0,
-                    Vec2::new(20.0, 20.0),
-                                           [0.95, 0.95, 1.0, 1.0],
+                font,
+                24.0,
+                Vec2::new(20.0, 20.0),
+                [0.95, 0.95, 1.0, 1.0],
             ));
 
             self.hud.add_text(HudText::new(
                 format!("Lives: {}", self.lives),
-                    font,
-                    24.0,
-                    Vec2::new(20.0, 50.0),
-                                           [0.95, 0.95, 1.0, 1.0],
+                font,
+                24.0,
+                Vec2::new(20.0, 50.0),
+                [0.95, 0.95, 1.0, 1.0],
             ));
 
             self.hud.add_text(HudText::new(
                 "Lua scripts: player movement · bullets · asteroids · hot reload ON".to_string(),
-                                           font,
-                                           16.0,
-                                           Vec2::new(20.0, 684.0),
-                                           [0.72, 0.76, 0.85, 1.0],
+                font,
+                16.0,
+                Vec2::new(20.0, 684.0),
+                [0.72, 0.76, 0.85, 1.0],
             ));
 
             if self.game_over {
                 self.hud.add_text(
                     HudText::new(
                         "GAME OVER".to_string(),
-                                 font,
-                                 54.0,
-                                 Vec2::new(SCREEN_W * 0.5, SCREEN_H * 0.5 - 40.0),
-                                 [1.0, 0.2, 0.18, 1.0],
+                        font,
+                        54.0,
+                        Vec2::new(SCREEN_W * 0.5, SCREEN_H * 0.5 - 40.0),
+                        [1.0, 0.2, 0.18, 1.0],
                     )
                     .with_align(TextAlign::Center),
                 );
@@ -492,10 +496,10 @@ impl ScriptedAsteroids {
                 self.hud.add_text(
                     HudText::new(
                         "Press R to restart".to_string(),
-                                 font,
-                                 24.0,
-                                 Vec2::new(SCREEN_W * 0.5, SCREEN_H * 0.5 + 22.0),
-                                 [0.95, 0.95, 1.0, 1.0],
+                        font,
+                        24.0,
+                        Vec2::new(SCREEN_W * 0.5, SCREEN_H * 0.5 + 22.0),
+                        [0.95, 0.95, 1.0, 1.0],
                     )
                     .with_align(TextAlign::Center),
                 );
@@ -535,7 +539,7 @@ impl Game for ScriptedAsteroids {
         let dt = ctx.delta_seconds();
 
         self.runtime
-        .update(&mut self.world, &mut self.physics, ctx.input(), dt)?;
+            .update(&mut self.world, &mut self.physics, ctx.input(), dt)?;
 
         if !self.game_over {
             self.update_gameplay(ctx)?;
@@ -555,12 +559,8 @@ impl Game for ScriptedAsteroids {
 
         let fixed_dt = ctx.fixed_delta_seconds();
 
-        self.runtime.fixed_update(
-            &mut self.world,
-            &mut self.physics,
-            ctx.input(),
-                                  fixed_dt,
-        )?;
+        self.runtime
+            .fixed_update(&mut self.world, &mut self.physics, ctx.input(), fixed_dt)?;
 
         self.physics.step(fixed_dt);
 
@@ -577,7 +577,8 @@ impl Game for ScriptedAsteroids {
 
     fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
         let mut frame = ctx.renderer().begin_frame()?;
-        ctx.renderer().clear(&mut frame, [0.015, 0.018, 0.026, 1.0])?;
+        ctx.renderer()
+            .clear(&mut frame, [0.015, 0.018, 0.026, 1.0])?;
 
         draw_starfield(ctx, &mut frame, self.frame_count, &self.camera)?;
 
@@ -629,12 +630,12 @@ fn rotate_points(points: &[Vec2], position: Vec2, rotation: f32) -> Vec<Vec2> {
     let sin = rotation.sin();
 
     points
-    .iter()
-    .map(|p| {
-        let rotated = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
-        position + rotated
-    })
-    .collect()
+        .iter()
+        .map(|p| {
+            let rotated = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+            position + rotated
+        })
+        .collect()
 }
 
 fn draw_starfield(
@@ -651,9 +652,9 @@ fn draw_starfield(
         ctx.renderer().draw_circle(
             frame,
             Vec2::new(x, y),
-                                   if i % 7 == 0 { 1.8 } else { 1.1 },
-                                       [pulse, pulse, pulse + 0.12, 1.0],
-                                   camera,
+            if i % 7 == 0 { 1.8 } else { 1.1 },
+            [pulse, pulse, pulse + 0.12, 1.0],
+            camera,
         )?;
     }
 

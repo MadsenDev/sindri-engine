@@ -247,14 +247,5 @@ impl State for GameplayState {
 
 ## Example
 
-See `examples/state_demo/` for a complete example demonstrating:
-- Menu state
-- Gameplay state
-- Pause state
-- State transitions
-
-Run it with:
-
-```bash
-cargo run -p state_demo
-```
+The state system is intentionally small and can be layered into any of the curated
+examples when a game needs menu, gameplay, pause, or overlay states.

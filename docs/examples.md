@@ -126,9 +126,11 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 
 ## Highlighted Examples
 
-- `fireflies_demo` — fixed-step swarm with interpolation, mouse attract/repel, and `ctx.draw()` usage.
-- `solar_system_demo` — orbital system with zoom controls, center dragging, and fixed-step interpolation.
-- `walljump_demo` — physics-driven platformer with wall jumps, camera follow, and reset key.
+- `hello_sindri` — tiny onboarding example for booting the engine, drawing a sprite, and reading input.
+- `platformer` — Rust-first gameplay baseline with physics, camera follow, collisions, particles, and game loop structure.
+- `scripted_asteroids` — flagship Lua scripting example with `ScriptRuntime`, `ScriptComponent`, `ScriptParams`, hot reload, and world-driven gameplay.
+- `editor_scene` — scene/editor workflow example that loads a `.f2scene`, attaches Lua scripts, and renders entities from `World`.
+- `rendering` — curated rendering showcase for particles, lighting, camera effects, animation-like motion, and large object counts.
 
 ### Collision Detection
 
@@ -378,80 +380,69 @@ fn draw(&mut self, ctx: &mut EngineContext) -> Result<()> {
 }
 ```
 
-## Available Demos
+## Curated Examples
 
-Sindri includes several complete example demos:
+Sindri keeps a small public example suite focused on engine identity rather than one demo per subsystem.
 
-### Basic Game (`examples/basic_game/`)
+### Hello Sindri (`examples/hello_sindri/`)
 
-Complete working example demonstrating:
+Tiny first-run example:
+- Engine startup
 - Sprite rendering
-- Input handling
-- Camera following
-- Collision detection
-- Text rendering
-- Asset management
+- Keyboard input
+- Simple camera usage
 
 ```bash
-cargo run -p basic_game
+cargo run -p hello_sindri
 ```
 
-### Physics Demo (`examples/physics_demo/`)
+### Platformer (`examples/platformer/`)
 
-Physics engine demonstration:
-- Dynamic, kinematic, and fixed bodies
-- Collision detection and events
-- Sensors and triggers
-- Scene save/load functionality
+Rust-first gameplay baseline:
+- Rapier physics
+- Camera follow
+- Collision checks
+- Collectibles, hazards, reset flow
+- Lightweight particles and HUD text
 
 ```bash
-cargo run -p physics_demo
+cargo run -p platformer
 ```
 
-### Platformer Demo (`examples/platformer_demo/`)
+### Scripted Asteroids (`examples/scripted_asteroids/`)
 
-2D platformer example:
-- Physics-based character controller
-- Jumping mechanics
-- Camera follow with dead-zone
-- Platform navigation
+Primary scripting showcase:
+- `ScriptRuntime` wiring
+- `ScriptComponent` and `ScriptParams`
+- Lua-controlled player, bullet, and asteroid behavior
+- Hot reload
+- World/component-driven gameplay
 
 ```bash
-cargo run -p platformer_demo
+cargo run -p scripted_asteroids
 ```
 
-### Pathfinding Demo (`examples/pathfinding_demo/`)
+### Editor Scene (`examples/editor_scene/`)
 
-A* pathfinding visualization:
-- Interactive pathfinding
-- Obstacle avoidance
-- Path visualization
-- Agent movement
+Scene and editor workflow reference:
+- Loads a `.f2scene`
+- Restores entities into `World`
+- Attaches Lua scripts from scene data
+- Renders scene entities with hot reload enabled
 
 ```bash
-cargo run -p pathfinding_demo
+cargo run -p editor_scene
 ```
 
-### Grid Demo (`examples/grid_demo/`)
+### Rendering (`examples/rendering/`)
 
-Grid-based movement demo:
-- Discrete grid movement
-- A* pathfinding integration
-- Grid-snapped movement
-- Smooth interpolation
-
-```bash
-cargo run -p grid_demo
-```
-
-### Performance Demo (`examples/performance_demo/`)
-
-Performance benchmark:
-- Large-scale physics simulation
-- Performance metrics (FPS, physics time, render time)
-- Stress testing
-- Real-time statistics
+Rendering and polish showcase:
+- Particles
+- Point lighting
+- Camera zoom
+- Large animated object counts
+- Occluders and shape rendering
 
 ```bash
-cargo run -p performance_demo
+cargo run -p rendering
 ```

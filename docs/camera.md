@@ -288,4 +288,4 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 
 ## Examples
 
-For working examples of these features, check `examples/camera_demo`.
+For working examples of camera usage, check `examples/platformer` and `examples/rendering`.

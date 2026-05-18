@@ -18,7 +18,6 @@ const DASH_COOLDOWN: f32 = 0.35;
 
 #[derive(Clone, Copy)]
 struct Platform {
-    entity: EntityId,
     position: Vec2,
     size: Vec2,
 }
@@ -154,7 +153,7 @@ impl EmberRun {
         self.player = Some(player);
 
         self.physics
-        .create_body(player, RigidBodyType::Dynamic, player_start, 0.0)?;
+            .create_body(player, RigidBodyType::Dynamic, player_start, 0.0)?;
 
         self.physics.add_collider_with_material(
             player,
@@ -175,9 +174,9 @@ impl EmberRun {
         self.camera.position = player_start;
 
         self.camera_follow = CameraFollow::new()
-        .follow_entity(player)
-        .with_dead_zone(180.0, 120.0)
-        .with_smoothing(0.12);
+            .follow_entity(player)
+            .with_dead_zone(180.0, 120.0)
+            .with_smoothing(0.12);
 
         self.spawn_platform(Vec2::new(500.0, 650.0), Vec2::new(1100.0, 40.0))?;
         self.spawn_platform(Vec2::new(260.0, 535.0), Vec2::new(170.0, 22.0))?;
@@ -196,17 +195,17 @@ impl EmberRun {
 
         self.hazards.push(Hazard {
             position: Vec2::new(650.0, 625.0),
-                          size: Vec2::new(70.0, 28.0),
+            size: Vec2::new(70.0, 28.0),
         });
 
         self.hazards.push(Hazard {
             position: Vec2::new(1010.0, 625.0),
-                          size: Vec2::new(90.0, 28.0),
+            size: Vec2::new(90.0, 28.0),
         });
 
         self.hazards.push(Hazard {
             position: Vec2::new(1320.0, 535.0),
-                          size: Vec2::new(60.0, 28.0),
+            size: Vec2::new(60.0, 28.0),
         });
 
         self.exit_gate = ExitGate {
@@ -222,7 +221,7 @@ impl EmberRun {
         let entity = self.world.spawn();
 
         self.physics
-        .create_body(entity, RigidBodyType::Fixed, position, 0.0)?;
+            .create_body(entity, RigidBodyType::Fixed, position, 0.0)?;
 
         self.physics.add_collider_with_material(
             entity,
@@ -236,11 +235,7 @@ impl EmberRun {
             0.0,
         )?;
 
-        self.platforms.push(Platform {
-            entity,
-            position,
-            size,
-        });
+        self.platforms.push(Platform { position, size });
 
         Ok(entity)
     }
@@ -258,7 +253,7 @@ impl EmberRun {
 
     fn player_position(&self) -> Option<Vec2> {
         self.player
-        .and_then(|entity| self.physics.body_position(entity))
+            .and_then(|entity| self.physics.body_position(entity))
     }
 
     fn rects_overlap(a_pos: Vec2, a_size: Vec2, b_pos: Vec2, b_size: Vec2) -> bool {
@@ -266,9 +261,9 @@ impl EmberRun {
         let b_half = b_size * 0.5;
 
         a_pos.x - a_half.x < b_pos.x + b_half.x
-        && a_pos.x + a_half.x > b_pos.x - b_half.x
-        && a_pos.y - a_half.y < b_pos.y + b_half.y
-        && a_pos.y + a_half.y > b_pos.y - b_half.y
+            && a_pos.x + a_half.x > b_pos.x - b_half.x
+            && a_pos.y - a_half.y < b_pos.y + b_half.y
+            && a_pos.y + a_half.y > b_pos.y - b_half.y
     }
 
     fn update_grounded(&mut self) {
@@ -295,7 +290,7 @@ impl EmberRun {
             let right = platform.position.x + platform.size.x * 0.5;
 
             let horizontally_overlapping =
-            pos.x + player_half_w > left && pos.x - player_half_w < right;
+                pos.x + player_half_w > left && pos.x - player_half_w < right;
 
             let close_to_top = player_bottom >= top - 6.0 && player_bottom <= top + 14.0;
 
@@ -357,16 +352,21 @@ impl EmberRun {
         }
 
         let wants_jump = input.is_key_pressed(KeyCode::Space)
-        || input.is_key_pressed(KeyCode::KeyW)
-        || input.is_key_pressed(KeyCode::ArrowUp);
+            || input.is_key_pressed(KeyCode::KeyW)
+            || input.is_key_pressed(KeyCode::ArrowUp);
 
         if wants_jump && self.is_grounded && self.jump_cooldown <= 0.0 && !self.won {
-            self.physics.apply_impulse(player, Vec2::new(0.0, JUMP_IMPULSE));
+            self.physics
+                .apply_impulse(player, Vec2::new(0.0, JUMP_IMPULSE));
             self.jump_cooldown = 0.16;
             self.is_grounded = false;
 
             if let Some(pos) = self.player_position() {
-                self.spawn_burst(pos + Vec2::new(0.0, PLAYER_SIZE.y * 0.5), 10, [0.95, 0.55, 0.2, 1.0]);
+                self.spawn_burst(
+                    pos + Vec2::new(0.0, PLAYER_SIZE.y * 0.5),
+                    10,
+                    [0.95, 0.55, 0.2, 1.0],
+                );
             }
         }
 
@@ -446,10 +446,10 @@ impl EmberRun {
             self.particles.push(BurstParticle {
                 position: origin,
                 velocity: Vec2::from_angle(angle) * speed + Vec2::new(0.0, -35.0),
-                                life: 0.45,
-                                max_life: 0.45,
-                                size: 4.0 + (i % 3) as f32,
-                                color,
+                life: 0.45,
+                max_life: 0.45,
+                size: 4.0 + (i % 3) as f32,
+                color,
             });
         }
     }
@@ -518,8 +518,8 @@ impl EmberRun {
             white,
             &self.camera,
             Vec2::new(eye_x, eye_y),
-                        Vec2::new(5.0, 5.0),
-                        [0.92, 0.96, 1.0, 1.0],
+            Vec2::new(5.0, 5.0),
+            [0.92, 0.96, 1.0, 1.0],
         )?;
 
         Ok(())
@@ -556,8 +556,8 @@ impl EmberRun {
                 white,
                 &self.camera,
                 platform.position + Vec2::new(0.0, -platform.size.y * 0.5 + 2.0),
-                            Vec2::new(platform.size.x, 4.0),
-                            [0.86, 0.56, 0.18, 1.0],
+                Vec2::new(platform.size.x, 4.0),
+                [0.86, 0.56, 0.18, 1.0],
             )?;
         }
 
@@ -616,7 +616,7 @@ impl EmberRun {
             &self.camera,
             self.exit_gate.position,
             Vec2::new(self.exit_gate.size.x - 18.0, self.exit_gate.size.y - 18.0),
-                        [0.05, 0.07, 0.09, 1.0],
+            [0.05, 0.07, 0.09, 1.0],
         )?;
 
         for spark in &self.sparks {
@@ -644,11 +644,7 @@ impl EmberRun {
         Ok(())
     }
 
-    fn draw_particles(
-        &self,
-        renderer: &mut Renderer,
-        frame: &mut sindri::Frame,
-    ) -> Result<()> {
+    fn draw_particles(&self, renderer: &mut Renderer, frame: &mut sindri::Frame) -> Result<()> {
         for particle in &self.particles {
             let alpha = (particle.life / particle.max_life).clamp(0.0, 1.0);
             let mut color = particle.color;
@@ -658,8 +654,8 @@ impl EmberRun {
                 frame,
                 particle.position,
                 particle.size * alpha.max(0.25),
-                                 color,
-                                 &self.camera,
+                color,
+                &self.camera,
             )?;
         }
 
@@ -711,8 +707,8 @@ impl EmberRun {
             font,
             18.0,
             top_left + Vec2::new(0.0, 28.0),
-                           [0.95, 0.72, 0.28, 1.0],
-                           &self.camera,
+            [0.95, 0.72, 0.28, 1.0],
+            &self.camera,
         )?;
 
         renderer.draw_text(
@@ -721,8 +717,8 @@ impl EmberRun {
             font,
             15.0,
             top_left + Vec2::new(0.0, 54.0),
-                           [0.72, 0.76, 0.82, 1.0],
-                           &self.camera,
+            [0.72, 0.76, 0.82, 1.0],
+            &self.camera,
         )?;
 
         Ok(())
@@ -809,8 +805,8 @@ impl Game for EmberRun {
             white,
             &self.camera,
             Vec2::new(950.0, 450.0),
-                        Vec2::new(2300.0, 900.0),
-                        [0.045, 0.055, 0.075, 1.0],
+            Vec2::new(2300.0, 900.0),
+            [0.045, 0.055, 0.075, 1.0],
         )?;
 
         for i in 0..18 {
@@ -821,8 +817,8 @@ impl Game for EmberRun {
                 white,
                 &self.camera,
                 Vec2::new(x, 260.0 + (i % 3) as f32 * 34.0),
-                            Vec2::new(70.0, 10.0),
-                            [0.09, 0.10, 0.13, 1.0],
+                Vec2::new(70.0, 10.0),
+                [0.09, 0.10, 0.13, 1.0],
             )?;
         }
 
@@ -838,8 +834,8 @@ impl Game for EmberRun {
 
 fn main() -> Result<()> {
     Engine::new()
-    .with_title("Sindri Engine · Ember Run")
-    .with_size(1280, 720)
-    .with_vsync(true)
-    .run(EmberRun::new())
+        .with_title("Sindri Engine · Ember Run")
+        .with_size(1280, 720)
+        .with_vsync(true)
+        .run(EmberRun::new())
 }

@@ -24,8 +24,9 @@ Welcome to the Sindri documentation! This guide will help you get started with c
 18. [Animation](animation.md) - Spritesheet animation helpers
 19. [Particles](particles.md) - Particle emitters and systems
 20. [API Reference](api-reference.md) - Public API overview
-21. [Examples](examples.md) - Code examples and tutorials
-22. [Roadmap](ROADMAP.md) - Development philosophy and future direction
+21. [Adoption / Parity Matrix](adoption-parity-matrix.md) - Engine/editor/runtime/AI support tracking
+22. [Examples](examples.md) - Code examples and tutorials
+23. [Roadmap](ROADMAP.md) - Development philosophy and future direction
 
 ## Quick Links
 
@@ -33,6 +34,7 @@ Welcome to the Sindri documentation! This guide will help you get started with c
 - [Your First Game](getting-started.md#your-first-game)
 - [Common Patterns](examples.md#common-patterns)
 - [Performance Tips](rendering.md#performance-notes)
+- [Adoption / Parity Matrix](adoption-parity-matrix.md)
 
 ## What is Sindri?
 
@@ -113,4 +115,4 @@ This keeps Sindri focused and prevents it from becoming a "forever project" that
 
 - Check the [Examples](examples.md) for code samples
 - Review the [API Reference](api-reference.md) for detailed method documentation
-- See the `examples/` directory for working demos (physics, platformer, pathfinding, grid, performance)
+- See the `examples/` directory for the curated examples: `hello_sindri`, `platformer`, `scripted_asteroids`, `editor_scene`, and `rendering`
