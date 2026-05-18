@@ -312,7 +312,103 @@ pub struct PatchScriptBody {
     pub path: String,
 }
 
-// PATCH /scene/entity/:id/component/:idx  (currently only updates Script path)
+fn patch_f32(body: &serde_json::Value, key: &str, target: &mut f32) -> Result<(), String> {
+    if let Some(value) = body.get(key) {
+        let Some(number) = value.as_f64() else {
+            return Err(format!("{key} must be a number"));
+        };
+        *target = number as f32;
+    }
+    Ok(())
+}
+
+fn patch_bool(body: &serde_json::Value, key: &str, target: &mut bool) -> Result<(), String> {
+    if let Some(value) = body.get(key) {
+        let Some(boolean) = value.as_bool() else {
+            return Err(format!("{key} must be a boolean"));
+        };
+        *target = boolean;
+    }
+    Ok(())
+}
+
+fn patch_string(body: &serde_json::Value, key: &str, target: &mut String) -> Result<(), String> {
+    if let Some(value) = body.get(key) {
+        let Some(string) = value.as_str() else {
+            return Err(format!("{key} must be a string"));
+        };
+        *target = string.to_string();
+    }
+    Ok(())
+}
+
+fn patch_u8(body: &serde_json::Value, key: &str, target: &mut u8) -> Result<(), String> {
+    if let Some(value) = body.get(key) {
+        let Some(number) = value.as_u64() else {
+            return Err(format!("{key} must be an unsigned integer"));
+        };
+        if number > u8::MAX as u64 {
+            return Err(format!("{key} must be <= {}", u8::MAX));
+        }
+        *target = number as u8;
+    }
+    Ok(())
+}
+
+fn patch_u32(body: &serde_json::Value, key: &str, target: &mut u32) -> Result<(), String> {
+    if let Some(value) = body.get(key) {
+        let Some(number) = value.as_u64() else {
+            return Err(format!("{key} must be an unsigned integer"));
+        };
+        if number > u32::MAX as u64 {
+            return Err(format!("{key} must be <= {}", u32::MAX));
+        }
+        *target = number as u32;
+    }
+    Ok(())
+}
+
+fn patch_color(body: &serde_json::Value, key: &str, target: &mut [f32; 4]) -> Result<(), String> {
+    let Some(value) = body.get(key) else {
+        return Ok(());
+    };
+    let Some(values) = value.as_array() else {
+        return Err(format!("{key} must be an array"));
+    };
+    if values.len() != 4 {
+        return Err(format!("{key} must contain exactly 4 numbers"));
+    }
+    let mut color = [0.0; 4];
+    for (idx, value) in values.iter().enumerate() {
+        let Some(number) = value.as_f64() else {
+            return Err(format!("{key}[{idx}] must be a number"));
+        };
+        color[idx] = number as f32;
+    }
+    *target = color;
+    Ok(())
+}
+
+fn patch_follow_entity(
+    body: &serde_json::Value,
+    key: &str,
+    target: &mut Option<u64>,
+) -> Result<(), String> {
+    let Some(value) = body.get(key) else {
+        return Ok(());
+    };
+    if value.is_null() {
+        *target = None;
+        return Ok(());
+    }
+    let Some(number) = value.as_u64() else {
+        return Err(format!("{key} must be an unsigned integer or null"));
+    };
+    *target = Some(number);
+    Ok(())
+}
+
+// PATCH /scene/entity/:id/component/:idx
 pub async fn patch_component(
     State(state): State<AppState>,
     Path(p): Path<ComponentIdxPath>,
@@ -325,17 +421,26 @@ pub async fn patch_component(
     let Some(comp) = entity.components.get_mut(p.idx) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match comp {
-        sindri::component::Component::Script(s) => {
-            if let Some(path) = body["path"].as_str() {
-                s.path = path.to_string();
-                StatusCode::OK.into_response()
-            } else {
-                (StatusCode::BAD_REQUEST, "missing path").into_response()
-            }
+    let result = match comp {
+        sindri::component::Component::Transform(t) => patch_f32(&body, "x", &mut t.x)
+            .and_then(|_| patch_f32(&body, "y", &mut t.y))
+            .and_then(|_| patch_f32(&body, "scale_x", &mut t.scale_x))
+            .and_then(|_| patch_f32(&body, "scale_y", &mut t.scale_y))
+            .and_then(|_| patch_f32(&body, "rotation", &mut t.rotation)),
+        sindri::component::Component::Sprite(s) => {
+            patch_string(&body, "texture_path", &mut s.texture_path)
+                .and_then(|_| patch_f32(&body, "width", &mut s.width))
+                .and_then(|_| patch_f32(&body, "height", &mut s.height))
+                .and_then(|_| patch_bool(&body, "flip_x", &mut s.flip_x))
+                .and_then(|_| patch_bool(&body, "flip_y", &mut s.flip_y))
+                .and_then(|_| patch_color(&body, "color", &mut s.color))
         }
+        sindri::component::Component::Script(s) => patch_string(&body, "path", &mut s.path),
         sindri::component::Component::PhysicsBody(p) => {
-            if let Some(body_type) = body["body_type"].as_str() {
+            if let Some(value) = body.get("body_type") {
+                let Some(body_type) = value.as_str() else {
+                    return (StatusCode::BAD_REQUEST, "body_type must be a string").into_response();
+                };
                 p.body_type = match body_type {
                     "Dynamic" => sindri::component::BodyType::Dynamic,
                     "Kinematic" => sindri::component::BodyType::Kinematic,
@@ -343,46 +448,28 @@ pub async fn patch_component(
                     _ => return (StatusCode::BAD_REQUEST, "unknown body_type").into_response(),
                 };
             }
-            if let Some(lock_rotation) = body["lock_rotation"].as_bool() {
-                p.lock_rotation = lock_rotation;
-            }
-            if let Some(linear_damping) = body["linear_damping"].as_f64() {
-                p.linear_damping = linear_damping as f32;
-            }
-            if let Some(angular_damping) = body["angular_damping"].as_f64() {
-                p.angular_damping = angular_damping as f32;
-            }
-            if let Some(collision_layer) = body["collision_layer"].as_u64() {
-                p.collision_layer = collision_layer.min(u8::MAX as u64) as u8;
-            }
-            if let Some(collision_mask) = body["collision_mask"].as_u64() {
-                p.collision_mask = collision_mask.min(u32::MAX as u64) as u32;
-            }
-            StatusCode::OK.into_response()
+            patch_bool(&body, "lock_rotation", &mut p.lock_rotation)
+                .and_then(|_| patch_f32(&body, "linear_damping", &mut p.linear_damping))
+                .and_then(|_| patch_f32(&body, "angular_damping", &mut p.angular_damping))
+                .and_then(|_| patch_u8(&body, "collision_layer", &mut p.collision_layer))
+                .and_then(|_| patch_u32(&body, "collision_mask", &mut p.collision_mask))
         }
-        sindri::component::Component::Collider(c) => {
-            if let Some(width) = body["width"].as_f64() {
-                c.width = width as f32;
-            }
-            if let Some(height) = body["height"].as_f64() {
-                c.height = height as f32;
-            }
-            if let Some(offset_x) = body["offset_x"].as_f64() {
-                c.offset_x = offset_x as f32;
-            }
-            if let Some(offset_y) = body["offset_y"].as_f64() {
-                c.offset_y = offset_y as f32;
-            }
-            if let Some(is_trigger) = body["is_trigger"].as_bool() {
-                c.is_trigger = is_trigger;
-            }
-            StatusCode::OK.into_response()
-        }
-        _ => (
-            StatusCode::BAD_REQUEST,
-            "unsupported component type for patch",
-        )
-            .into_response(),
+        sindri::component::Component::Collider(c) => patch_f32(&body, "width", &mut c.width)
+            .and_then(|_| patch_f32(&body, "height", &mut c.height))
+            .and_then(|_| patch_f32(&body, "offset_x", &mut c.offset_x))
+            .and_then(|_| patch_f32(&body, "offset_y", &mut c.offset_y))
+            .and_then(|_| patch_bool(&body, "is_trigger", &mut c.is_trigger)),
+        sindri::component::Component::Camera(c) => patch_f32(&body, "zoom", &mut c.zoom)
+            .and_then(|_| patch_follow_entity(&body, "follow_entity", &mut c.follow_entity)),
+        sindri::component::Component::AudioSource(a) => patch_string(&body, "path", &mut a.path)
+            .and_then(|_| patch_f32(&body, "volume", &mut a.volume))
+            .and_then(|_| patch_bool(&body, "looping", &mut a.looping))
+            .and_then(|_| patch_bool(&body, "play_on_start", &mut a.play_on_start)),
+    };
+
+    match result {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
     }
 }
 

@@ -129,7 +129,7 @@ fn update(&mut self, ctx: &mut EngineContext) -> Result<()> {
 - `hello_sindri` — tiny onboarding example for booting the engine, drawing a sprite, and reading input.
 - `platformer` — Rust-first gameplay baseline with physics, camera follow, collisions, particles, and game loop structure.
 - `scripted_asteroids` — flagship Lua scripting example with `ScriptRuntime`, `ScriptComponent`, `ScriptParams`, hot reload, and world-driven gameplay.
-- `editor_scene` — scene/editor workflow example that loads a `.f2scene`, attaches Lua scripts, and renders entities from `World`.
+- `editor_scene` — scene/editor workflow example that loads a `.sindri`, attaches Lua scripts, and renders entities from `World`.
 - `rendering` — curated rendering showcase for particles, lighting, camera effects, animation-like motion, and large object counts.
 
 ### Collision Detection
@@ -425,7 +425,7 @@ cargo run -p scripted_asteroids
 ### Editor Scene (`examples/editor_scene/`)
 
 Scene and editor workflow reference:
-- Loads a `.f2scene`
+- Loads a `.sindri`
 - Restores entities into `World`
 - Attaches Lua scripts from scene data
 - Renders scene entities with hot reload enabled

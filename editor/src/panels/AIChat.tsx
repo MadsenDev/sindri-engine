@@ -20,6 +20,7 @@ interface ProjectFile {
 
 interface Props {
   scene: Scene | null;
+  projectPath: string;
   openScript: { path: string; content: string } | null;
   screenshotB64: string | null;
   selectedModel: string | null;
@@ -35,21 +36,27 @@ interface MentionCandidate {
   hint?: string;    // secondary info shown in the popup
 }
 
-export default function AIChat({ scene, openScript: _openScript, screenshotB64: _screenshotB64, selectedModel, projectFiles, onSceneChange }: Props) {
-  const [messages, setMessages] = useState<Message[]>(() => {
-    try {
-      const saved = localStorage.getItem("sindri_chat_history");
-      if (!saved) return [];
-      const parsed = JSON.parse(saved) as Message[];
-      // Migrate old boolean applied[] to ActionStatus[] (pre-ActionStatus format)
-      return parsed.map(m => ({
-        ...m,
-        applied: m.applied?.map(a =>
-          typeof a === "boolean" ? (a ? "ok" : "pending") : a as ActionStatus
-        ),
-      }));
-    } catch { return []; }
-  });
+function chatHistoryKey(projectPath: string) {
+  return `sindri_chat_history:${projectPath}`;
+}
+
+function loadMessages(projectPath: string): Message[] {
+  try {
+    const saved = localStorage.getItem(chatHistoryKey(projectPath));
+    if (!saved) return [];
+    const parsed = JSON.parse(saved) as Message[];
+    // Migrate old boolean applied[] to ActionStatus[] (pre-ActionStatus format)
+    return parsed.map(m => ({
+      ...m,
+      applied: m.applied?.map(a =>
+        typeof a === "boolean" ? (a ? "ok" : "pending") : a as ActionStatus
+      ),
+    }));
+  } catch { return []; }
+}
+
+export default function AIChat({ scene, projectPath, openScript: _openScript, screenshotB64: _screenshotB64, selectedModel, projectFiles, onSceneChange }: Props) {
+  const [messages, setMessages] = useState<Message[]>(() => loadMessages(projectPath));
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [activeFlags, setActiveFlags] = useState<Set<ContextFlag>>(new Set(["scene"]));
@@ -60,6 +67,10 @@ export default function AIChat({ scene, openScript: _openScript, screenshotB64: 
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = closed
   const [mentionSigil, setMentionSigil] = useState<"@" | "#">("@");
   const [mentionIdx, setMentionIdx] = useState(0);
+
+  useEffect(() => {
+    setMessages(loadMessages(projectPath));
+  }, [projectPath]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -249,7 +260,7 @@ export default function AIChat({ scene, openScript: _openScript, screenshotB64: 
 
     try {
       const finalMessages = await callAI(text, nextMessages, false);
-      localStorage.setItem("sindri_chat_history", JSON.stringify(finalMessages.slice(-40)));
+      localStorage.setItem(chatHistoryKey(projectPath), JSON.stringify(finalMessages.slice(-40)));
     } catch (err) {
       setMessages(prev => [...prev, { role: "ai", text: `Error: ${String(err)}` }]);
     } finally {
@@ -282,7 +293,7 @@ export default function AIChat({ scene, openScript: _openScript, screenshotB64: 
           <button
             onClick={() => {
               setMessages([]);
-              localStorage.removeItem("sindri_chat_history");
+              localStorage.removeItem(chatHistoryKey(projectPath));
             }}
             title="Clear history"
             style={{

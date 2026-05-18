@@ -8,6 +8,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_scene,
             commands::put_scene,
+            commands::open_scene_file,
             commands::patch_transform,
             commands::get_screenshot,
             commands::send_ai_message,

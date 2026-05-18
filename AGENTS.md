@@ -31,7 +31,7 @@ The work remaining is:
 | `entities.rs` | All built-in components: `Transform`, `SpriteComponent`, `PhysicsBody`, `AudioSource`, `CameraComponent`, `TilemapComponent`, `Player`, `Enemy`, `Collectible`, `Hazard`, `Checkpoint`, `Trigger`, `MovingPlatform` |
 | `hierarchy.rs` | Parent/child entity relationships, world position/rotation/scale computation |
 | `physics.rs` | Full Rapier2D integration: Dynamic/Kinematic/Fixed bodies, Box/Circle/Capsule colliders, sensors/triggers, CCD, raycasting, point queries, all force/impulse/velocity APIs, collision events via channels |
-| `scene.rs` | Scene serialization/deserialization. `Scene`, `SerializablePhysics`, `ComponentSerializable` trait, save/load to `.f2scene` files. Physics world has `extract_serializable` and `restore_from_serializable` |
+| `scene.rs` | Scene serialization/deserialization. `Scene`, `SerializablePhysics`, `ComponentSerializable` trait, save/load to `.sindri` files. Physics world has `extract_serializable` and `restore_from_serializable` |
 | `script.rs` | Full Lua scripting via mlua. `ScriptRuntime`, `ScriptComponent`, hot reload, all lifecycle hooks, typed facets for all components, command buffer pattern |
 | `commands.rs` | Full undo/redo: `Command` trait, `CommandHistory`, `CreateEntity`, `DeleteEntity`, `SetTransform`, `ReparentEntity`, `AddComponent`, `RemoveComponent` |
 | `component_metadata.rs` | Runtime component reflection: `ComponentMetadataRegistry`, `ComponentMetadataHandler`, `FieldDescriptor`, `TransformMetadataHandler` |
@@ -74,7 +74,7 @@ The work remaining is:
 - **`apply_impulse` uses velocity addition** — intentional, documented in a comment. Leave it.
 - **`script.rs.rhai_backup`** — leave this file. Do not delete it.
 - **Scripting language is Lua** — `.lua` files via mlua. Never reference Rhai in new code or text.
-- **Scene file extension is `.f2scene`** — do not change it.
+- **Scene file extension is `.sindri`** — do not change it.
 - **Physics→transform sync is manual** — the engine does not automatically write physics positions back to `Transform`. This is addressed in `IMPROVEMENTS.md` Task 1.
 
 ---
@@ -551,7 +551,7 @@ Do not delete anything inside `crates/sindri/`.
 5. Old editor is deleted. Nothing from it is referenced.
 6. Do not restructure or rename existing engine files.
 7. Scripting is Lua. Never reference Rhai.
-8. Scene extension stays `.f2scene`.
+8. Scene extension stays `.sindri`.
 
 ---
 

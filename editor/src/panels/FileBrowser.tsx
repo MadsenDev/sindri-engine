@@ -11,6 +11,7 @@ interface ProjectFile {
 interface Props {
   projectPath: string | null;
   onOpenScript: (path: string) => void;
+  onOpenScene: (path: string) => void;
   onFilesChange?: (files: ProjectFile[]) => void;
 }
 
@@ -31,7 +32,7 @@ const KIND_LABEL: Record<string, string> = {
   other:  "Other",
 };
 
-export default function FileBrowser({ projectPath, onOpenScript, onFilesChange }: Props) {
+export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onFilesChange }: Props) {
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -65,11 +66,16 @@ export default function FileBrowser({ projectPath, onOpenScript, onFilesChange }
   }, [newScriptOpen]);
 
   const handleOpen = (file: ProjectFile) => {
-    if (file.kind !== "script") return;
-    // file.path is project-relative ("scripts/foo.lua") but the engine's
-    // /script route resolves relative to scripts_root, so strip the prefix.
-    const scriptRelative = file.path.replace(/^scripts\//, "");
-    onOpenScript(scriptRelative);
+    if (file.kind === "script") {
+      // file.path is project-relative ("scripts/foo.lua") but the engine's
+      // /script route resolves relative to scripts_root, so strip the prefix.
+      const scriptRelative = file.path.replace(/^scripts\//, "");
+      onOpenScript(scriptRelative);
+      return;
+    }
+    if (file.kind === "scene") {
+      onOpenScene(file.path);
+    }
   };
 
   const handleDelete = async (file: ProjectFile) => {
@@ -123,7 +129,7 @@ export default function FileBrowser({ projectPath, onOpenScript, onFilesChange }
     e.preventDefault();
     e.stopPropagation();
     const items = [
-      ...(file.kind === "script" ? [{ label: "Open", icon: "↗", onClick: () => handleOpen(file) }] : []),
+      ...(file.kind === "script" || file.kind === "scene" ? [{ label: "Open", icon: "↗", onClick: () => handleOpen(file) }] : []),
       { label: "Rename", icon: "✎", onClick: () => startRename(file) },
       { divider: true as const },
       { label: "Delete", icon: "×", danger: true, onClick: () => handleDelete(file) },

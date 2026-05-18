@@ -21,12 +21,12 @@ format cannot preserve it, or the AI can generate invalid partial state.
 | Feature | Engine | Runtime | Editor | Scene Serialization | AI Read | AI Create | AI Modify | AI Debug | AI Explain | AI Scene-Aware | Status |
 | ------- | ------ | ------- | ------ | ------------------- | ------- | --------- | --------- | -------- | ---------- | -------------- | ------ |
 | Transform | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Stable |
-| Sprite | Yes | Yes | Partial | Yes | Yes | Yes | No | Partial | Yes | Partial | Active |
-| Collider | Yes | Yes | Partial | Yes | Yes | Yes | Partial | Partial | Yes | Partial | Active |
-| PhysicsBody | Yes | Yes | Partial | Partial | Yes | Yes | Partial | Partial | Yes | Partial | Active |
+| Sprite | Yes | Yes | Partial | Yes | Yes | Yes | Yes | Partial | Yes | Partial | Active |
+| Collider | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Active |
+| PhysicsBody | Yes | Yes | Yes | Partial | Yes | Yes | Yes | Partial | Yes | Partial | Active |
 | Lua ScriptComponent | Yes | Yes | Partial | Partial | Yes | Yes | Yes | Partial | Yes | Partial | Active |
-| Camera | Yes | Yes | Partial | Yes | Yes | Yes | No | Partial | Yes | Partial | Active |
-| AudioSource | Yes | Yes | Partial | Yes | Partial | Yes | No | No | Yes | Partial | Active |
+| Camera | Yes | Yes | Partial | Yes | Yes | Yes | Yes | Partial | Yes | Partial | Active |
+| AudioSource | Yes | Yes | Partial | Yes | Yes | Yes | Yes | No | Yes | Partial | Active |
 | Tilemap | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
 | Animation | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
 | Particles | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |
@@ -46,11 +46,11 @@ This matrix is grounded in the current repo state:
 
 - Engine coverage comes from crate exports and implementations in `crates/sindri/src`, including built-in components, renderer systems, physics, scripting, scene APIs, command history, grids/pathfinding, HUD, audio, and camera systems.
 - Editor/server scene JSON currently supports `Transform`, `Sprite`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource` through `sindri::component::Component`.
-- Editor hierarchy can add/remove those seven scene JSON components, but only `Transform`, `PhysicsBody`, `Collider`, and `Script.path` have server-side patch routes today. `Sprite`, `Camera`, and `AudioSource` are visible/readable but not safely field-editable through the server.
+- Editor hierarchy can add/remove those seven scene JSON components, and the server patch route can update all seven. The inspector exposes editable fields for each of them.
 - The viewport understands `Transform`, `Sprite`, and `Collider` for preview/selection. It does not visualize engine tilemaps, particles, lights, animation, audio, pathfinding, HUD, or gameplay marker components.
 - `register_builtin_metadata()` currently registers only `Transform`, so runtime reflection is not yet the source of truth for the editor's full component set.
 - Scene serialization is split: `crates/sindri/src/scene.rs` serializes the editor-facing JSON component enum, while `scene_physics.rs` captures physics snapshots and generic component payload helpers. Engine-only typed components such as `TilemapComponent`, `AnimatedSprite`, particle systems, lights, and gameplay markers are not represented in the editor scene enum today.
-- AI actions in the editor/Tauri layer can create/delete/rename entities, edit transforms, write/attach scripts, add/remove scene JSON components, and patch supported components. The standalone `sindri-ai` crate has a narrower action enum than the editor prompt/action executor.
+- AI actions in the editor/Tauri layer can create/delete/rename entities, edit transforms, write/attach scripts, add/remove scene JSON components, and patch all seven scene JSON component variants. The standalone `sindri-ai` crate has a narrower action enum than the editor prompt/action executor.
 
 ## AI Capability Definitions
 

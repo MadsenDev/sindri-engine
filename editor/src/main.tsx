@@ -26,7 +26,11 @@ class ErrorBoundary extends React.Component<
         </pre>
         <button
           onClick={() => {
-            localStorage.removeItem("sindri_chat_history");
+            for (const key of Object.keys(localStorage)) {
+              if (key === "sindri_chat_history" || key.startsWith("sindri_chat_history:")) {
+                localStorage.removeItem(key);
+              }
+            }
             this.setState({ error: null });
           }}
           style={{

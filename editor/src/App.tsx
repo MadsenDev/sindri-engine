@@ -148,6 +148,19 @@ export default function App() {
     }
   }, []);
 
+  const handleOpenScene = useCallback(async (relativePath: string) => {
+    if (!projectPath) return;
+    try {
+      await invoke("open_scene_file", { projectPath, relativePath });
+      setSelectedId(null);
+      setSelectedComponent(null);
+      setLeftTab("scene");
+      await refreshScene();
+    } catch (err) {
+      console.error("Failed to open scene:", err);
+    }
+  }, [projectPath, refreshScene]);
+
   // Delete key removes selected entity
   useEffect(() => {
     const handler = async (e: KeyboardEvent) => {
@@ -240,6 +253,7 @@ export default function App() {
             <FileBrowser
               projectPath={projectPath}
               onOpenScript={handleOpenScript}
+              onOpenScene={handleOpenScene}
               onFilesChange={setProjectFiles}
             />
           )}
@@ -280,6 +294,7 @@ export default function App() {
           />
           <AIChat
             scene={scene}
+            projectPath={projectPath}
             openScript={openScript}
             screenshotB64={screenshotB64}
             selectedModel={selectedModel}

@@ -23,13 +23,20 @@ All notable changes to this project will be documented in this file.
   - Added explicit editor `PhysicsBody` support with body type, lock rotation, damping, and collision layer/mask fields.
 - **Curated example suite** - Replaced the historical demo pile with five identity-focused examples.
   - Added `hello_sindri` for first-run onboarding.
-  - Added `editor_scene` for `.f2scene` loading, scene-driven entities, Lua script attachment, and hot reload.
+  - Added `editor_scene` for `.sindri` loading, scene-driven entities, Lua script attachment, and hot reload.
+  - Made the editor auto-build the dev `sindri-server` binary when needed before starting the engine sidecar.
+  - Scoped AI chat history per project so unrelated projects no longer share assistant logs.
+  - Made scene files in the Files tab load the selected `.sindri` scene into the running editor session.
   - Added `rendering` for particles, lighting, camera effects, animation-like motion, and large object counts.
   - Kept `platformer` as the Rust-first physics/gameplay baseline.
   - Promoted `scripted_asteroids` as the flagship Lua scripting showcase.
 - **Adoption/parity tracking** - Added a matrix for engine/runtime/editor/serialization/AI capability support.
   - Split AI support into read, create, modify, debug, explain, and scene-aware capabilities.
   - Added ownership tracking and rules for when features can be treated as editor/AI-ready.
+- **Scene component parity** - Made the editor/server/AI path consistently patch all seven editor scene components.
+  - Added server patch support for `Transform`, `Sprite`, `Camera`, and `AudioSource` alongside existing physics/collider/script patching.
+  - Made inspector fields editable for `Sprite`, `Collider`, `PhysicsBody`, `Camera`, and `AudioSource`.
+  - Updated the AI action prompt to list supported scene component patch fields and warn against unsupported engine-only components.
 - **Build hygiene** - Cleaned warning output for `cargo build -p sindri-server` without changing engine event-loop behavior.
 - **Asset system v2 (textures + fonts)** - Extended `AssetManager` to manage fonts in addition to textures
   - Fonts cached by string key and loaded via renderer font API

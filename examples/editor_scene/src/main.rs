@@ -1,6 +1,6 @@
 //! Scene/editor workflow showcase.
 //!
-//! Loads a `.f2scene` file, restores entities into `World`, attaches Lua scripts,
+//! Loads a `.sindri` scene file, restores entities into `World`, attaches Lua scripts,
 //! and renders the resulting scene with hot reload enabled.
 
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ impl EditorScene {
     fn scene_path() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("scenes")
-            .join("editor_scene.f2scene")
+            .join("editor_scene.sindri")
     }
 
     fn resolve_script(path: &str) -> String {

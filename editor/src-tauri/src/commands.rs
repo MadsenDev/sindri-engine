@@ -1,26 +1,17 @@
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 const ENGINE_BASE: &str = "http://127.0.0.1:7878";
 
 pub struct EngineProcess(pub Mutex<Option<tokio::process::Child>>);
 
-fn find_engine_binary() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("SINDRI_ENGINE_BIN") {
-        return std::path::PathBuf::from(path);
-    }
+fn find_workspace_root() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
         for _ in 0..8 {
             if dir.join("Cargo.toml").exists() && dir.join("crates").exists() {
-                let debug = dir.join("target/debug/sindri-server");
-                if debug.exists() {
-                    return debug;
-                }
-                let release = dir.join("target/release/sindri-server");
-                if release.exists() {
-                    return release;
-                }
+                return Some(dir);
             }
             match dir.parent() {
                 Some(p) => dir = p.to_path_buf(),
@@ -28,7 +19,92 @@ fn find_engine_binary() -> std::path::PathBuf {
             }
         }
     }
-    std::path::PathBuf::from("sindri-server")
+
+    std::env::current_dir().ok().and_then(|mut dir| {
+        loop {
+            if dir.join("Cargo.toml").exists() && dir.join("crates").exists() {
+                return Some(dir);
+            }
+            if !dir.pop() {
+                return None;
+            }
+        }
+    })
+}
+
+fn engine_binary_in_workspace(root: &Path) -> Option<PathBuf> {
+    let debug = root.join("target/debug/sindri-server");
+    if debug.exists() {
+        return Some(debug);
+    }
+    let release = root.join("target/release/sindri-server");
+    if release.exists() {
+        return Some(release);
+    }
+    None
+}
+
+fn find_engine_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("SINDRI_ENGINE_BIN") {
+        return PathBuf::from(path);
+    }
+    if let Some(root) = find_workspace_root() {
+        if let Some(binary) = engine_binary_in_workspace(&root) {
+            return binary;
+        }
+    }
+    PathBuf::from("sindri-server")
+}
+
+async fn ensure_engine_binary() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("SINDRI_ENGINE_BIN") {
+        let binary = PathBuf::from(path);
+        if binary.exists() {
+            return Ok(binary);
+        }
+        return Err(format!(
+            "SINDRI_ENGINE_BIN points to a missing file: {}",
+            binary.display()
+        ));
+    }
+
+    if let Some(root) = find_workspace_root() {
+        if let Some(binary) = engine_binary_in_workspace(&root) {
+            return Ok(binary);
+        }
+
+        eprintln!("[start_engine] sindri-server missing; running cargo build -p sindri-server");
+        let output = tokio::process::Command::new("cargo")
+            .args(["build", "-p", "sindri-server"])
+            .current_dir(&root)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run cargo build -p sindri-server: {e}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Failed to build sindri-server.\n\nstdout:\n{}\n\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        return engine_binary_in_workspace(&root).ok_or_else(|| {
+            format!(
+                "cargo build -p sindri-server succeeded, but no binary was found under {}",
+                root.join("target").display()
+            )
+        });
+    }
+
+    let fallback = PathBuf::from("sindri-server");
+    if fallback.exists() {
+        return Ok(fallback);
+    }
+
+    Err(
+        "Engine binary not found and the Sindri workspace root could not be located. Set SINDRI_ENGINE_BIN to a sindri-server binary.".into(),
+    )
 }
 
 #[tauri::command]
@@ -36,14 +112,8 @@ pub async fn start_engine(
     project_dir: String,
     state: tauri::State<'_, EngineProcess>,
 ) -> Result<(), String> {
-    let binary = find_engine_binary();
+    let binary = ensure_engine_binary().await?;
     eprintln!("[start_engine] binary: {}", binary.display());
-    if !binary.exists() {
-        return Err(format!(
-            "Engine binary not found at: {}\n\nBuild it with: cargo build -p sindri-server\nOr set SINDRI_ENGINE_BIN to its path.",
-            binary.display()
-        ));
-    }
 
     // Take any existing child out before awaiting so the MutexGuard is dropped.
     let old_child = state.0.lock().unwrap().take();
@@ -143,6 +213,30 @@ pub async fn put_scene(scene_json: String) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn open_scene_file(project_path: String, relative_path: String) -> Result<(), String> {
+    let root = Path::new(&project_path);
+    let full = root.join(&relative_path);
+    let canon_root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let canon_file = std::fs::canonicalize(&full).map_err(|e| e.to_string())?;
+    if !canon_file.starts_with(&canon_root) {
+        return Err("path escapes project directory".into());
+    }
+    let ext = canon_file
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+    if ext != "sindri" {
+        return Err("only .sindri scene files can be opened".into());
+    }
+
+    let scene_json = std::fs::read_to_string(&canon_file).map_err(|e| e.to_string())?;
+    // Validate that this is JSON locally; the server performs full Scene parsing.
+    serde_json::from_str::<serde_json::Value>(&scene_json).map_err(|e| e.to_string())?;
+    put_scene(scene_json).await
 }
 
 #[tauri::command]
@@ -256,12 +350,16 @@ Action block schema — use as many actions as needed in one block:
     {{ "type": "add_component", "entity_name": "Player", "component_type": "Transform" }},
     {{ "type": "add_component", "entity_name": "Player", "component_type": "PhysicsBody" }},
     {{ "type": "patch_component", "entity_name": "Player", "component_type": "PhysicsBody", "data": {{ "body_type": "Dynamic", "lock_rotation": true }} }},
+    {{ "type": "patch_component", "entity_name": "Player", "component_type": "Sprite", "data": {{ "width": 48, "height": 48, "color": [0.3, 0.6, 1.0, 1.0] }} }},
     {{ "type": "add_component", "entity_name": "Ground", "component_type": "PhysicsBody" }},
     {{ "type": "patch_component", "entity_name": "Ground", "component_type": "PhysicsBody", "data": {{ "body_type": "Fixed" }} }},
     {{ "type": "add_component", "entity_name": "Player", "component_type": "Collider" }},
+    {{ "type": "patch_component", "entity_name": "Player", "component_type": "Collider", "data": {{ "width": 32, "height": 48, "is_trigger": false }} }},
     {{ "type": "add_component", "entity_id": 1, "component_type": "Script" }},
     {{ "type": "remove_component", "entity_id": 1, "component_type": "Script" }},
     {{ "type": "patch_component", "entity_id": 1, "component_idx": 0, "data": {{ "path": "scripts/player.lua" }} }},
+    {{ "type": "patch_component", "entity_id": 1, "component_type": "Camera", "data": {{ "zoom": 1.0, "follow_entity": null }} }},
+    {{ "type": "patch_component", "entity_id": 1, "component_type": "AudioSource", "data": {{ "path": "audio/jump.ogg", "volume": 0.8, "looping": false, "play_on_start": false }} }},
 
     // Transform
     {{ "type": "edit_transform", "entity_name": "Player", "x": 400, "y": 260, "scale_x": 1.0, "scale_y": 1.0, "rotation": 0.0 }},
@@ -288,6 +386,9 @@ Rules:
 - When creating a player and a ground/platform, place the player above the ground, not beside it. Use explicit edit_transform actions for both entities.
 - Physics needs both PhysicsBody and Collider. Use PhysicsBody body_type "Dynamic" for moving players/enemies, "Fixed" for ground/walls/platforms, and "Kinematic" for scripted moving platforms. Add Collider for collision shape/trigger data.
 - For platformer-style players, set PhysicsBody lock_rotation=true.
+- Supported scene component types are exactly: Transform, Sprite, PhysicsBody, Collider, Script, Camera, AudioSource. You may add, remove, and patch these scene components.
+- Do NOT create unsupported engine-only components such as Tilemap, Animation, ParticleEmitter, PointLight, DirectionalLight, HUD, PathfindingGrid, or gameplay marker components through AI actions. If asked for one of these, explain that editor/AI scene support is not implemented yet and suggest Lua/scripted or Rust-side alternatives.
+- `patch_component` data fields: Sprite supports texture_path, width, height, flip_x, flip_y, color [r,g,b,a]; Collider supports width, height, offset_x, offset_y, is_trigger; PhysicsBody supports body_type, lock_rotation, linear_damping, angular_damping, collision_layer, collision_mask; Script supports path; Camera supports zoom and follow_entity; AudioSource supports path, volume, looping, play_on_start.
 - Scripts are Lua 5.4 with a CUSTOM engine API. Do NOT use LÖVE2D (`love.*`), Unity, Godot, or any other engine's API.
 - Sindri script API: `on_start(self)` and `on_update(self, dt)` hooks. `self` is a table with `x`, `y`, `rotation`, `scale_x`, `scale_y`, `entity_id`, `elapsed`. Globals: `key_down(key)`, `key_pressed(key)`, `print(...)`. Key names are browser KeyboardEvent.key strings: `"ArrowLeft"`, `"ArrowRight"`, `"ArrowUp"`, `"ArrowDown"`, `" "` (Space), `"a"`–`"z"`, etc.
 - Correct movement example: `if key_down("ArrowRight") then self.x = self.x + 200 * dt end`

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Entity, Component } from "../App";
 
@@ -147,12 +147,12 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
         {component.type === "Transform" && (
           <TransformFields comp={component} entityId={entity.id} onSceneChange={onSceneChange} />
         )}
-        {component.type === "Sprite"      && <SpriteFields comp={component} />}
+        {component.type === "Sprite"      && <SpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "PhysicsBody" && <PhysicsBodyFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
-        {component.type === "Collider"    && <ColliderFields comp={component} />}
+        {component.type === "Collider"    && <ColliderFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "Script"      && <ScriptField comp={component} entityId={entity.id} componentIdx={componentIdx} onOpenScript={onOpenScript} onSceneChange={onSceneChange} />}
-        {component.type === "Camera"      && <CameraFields comp={component} />}
-        {component.type === "AudioSource" && <AudioFields comp={component} />}
+        {component.type === "Camera"      && <CameraFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
+        {component.type === "AudioSource" && <AudioFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
       </div>
     </>
   );
@@ -214,13 +214,22 @@ function TransformFields({ comp, entityId, onSceneChange }: {
 
 // ─── Sprite ──────────────────────────────────────────────────────────────────
 
-function SpriteFields({ comp }: { comp: Extract<Component, { type: "Sprite" }> }) {
+function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
+  comp: Extract<Component, { type: "Sprite" }>;
+  entityId: number;
+  componentIdx: number;
+  onSceneChange: () => void;
+}) {
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+
   return (
     <>
-      <Field label="texture" value={comp.texture_path || "(none)"} />
-      <Field label="size"    value={`${comp.width} × ${comp.height}`} />
-      <Field label="flip"    value={`x:${comp.flip_x}  y:${comp.flip_y}`} />
-      <Field label="color"   value={comp.color.map(v => v.toFixed(2)).join(", ")} />
+      <TextInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} />
+      <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
+      <NumberInputField label="height" value={comp.height} onCommit={v => patch({ height: v })} />
+      <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
+      <BoolField label="flip y" value={comp.flip_y} onChange={v => patch({ flip_y: v })} />
+      <ColorField label="color" value={comp.color} onCommit={v => patch({ color: v })} />
     </>
   );
 }
@@ -233,12 +242,7 @@ function PhysicsBodyFields({ comp, entityId, componentIdx, onSceneChange }: {
   componentIdx: number;
   onSceneChange: () => void;
 }) {
-  const patch = async (data: Record<string, unknown>) => {
-    try {
-      await invoke("patch_component", { entityId, componentIdx, data });
-      onSceneChange();
-    } catch {}
-  };
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
 
   return (
     <>
@@ -259,20 +263,31 @@ function PhysicsBodyFields({ comp, entityId, componentIdx, onSceneChange }: {
         </select>
       </div>
       <BoolField label="lock rot" value={comp.lock_rotation} onChange={v => patch({ lock_rotation: v })} />
-      <Field label="damping" value={`lin ${comp.linear_damping} · ang ${comp.angular_damping}`} />
-      <Field label="collision" value={`layer ${comp.collision_layer} · mask ${comp.collision_mask}`} />
+      <NumberInputField label="lin damp" value={comp.linear_damping} onCommit={v => patch({ linear_damping: v })} />
+      <NumberInputField label="ang damp" value={comp.angular_damping} onCommit={v => patch({ angular_damping: v })} />
+      <NumberInputField label="layer" value={comp.collision_layer} decimals={0} min={0} max={255} onCommit={v => patch({ collision_layer: Math.round(v) })} />
+      <NumberInputField label="mask" value={comp.collision_mask} decimals={0} min={0} onCommit={v => patch({ collision_mask: Math.round(v) })} />
     </>
   );
 }
 
 // ─── Collider ────────────────────────────────────────────────────────────────
 
-function ColliderFields({ comp }: { comp: Extract<Component, { type: "Collider" }> }) {
+function ColliderFields({ comp, entityId, componentIdx, onSceneChange }: {
+  comp: Extract<Component, { type: "Collider" }>;
+  entityId: number;
+  componentIdx: number;
+  onSceneChange: () => void;
+}) {
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+
   return (
     <>
-      <Field label="size"    value={`${comp.width} × ${comp.height}`} />
-      <Field label="offset"  value={`${comp.offset_x}, ${comp.offset_y}`} />
-      <Field label="trigger" value={String(comp.is_trigger)} accent={comp.is_trigger ? "var(--ai)" : undefined} />
+      <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
+      <NumberInputField label="height" value={comp.height} onCommit={v => patch({ height: v })} />
+      <NumberInputField label="offset x" value={comp.offset_x} onCommit={v => patch({ offset_x: v })} />
+      <NumberInputField label="offset y" value={comp.offset_y} onCommit={v => patch({ offset_y: v })} />
+      <BoolField label="trigger" value={comp.is_trigger} onChange={v => patch({ is_trigger: v })} />
     </>
   );
 }
@@ -340,37 +355,197 @@ function ScriptField({ comp, entityId, componentIdx, onOpenScript, onSceneChange
 
 // ─── Camera ──────────────────────────────────────────────────────────────────
 
-function CameraFields({ comp }: { comp: Extract<Component, { type: "Camera" }> }) {
+function CameraFields({ comp, entityId, componentIdx, onSceneChange }: {
+  comp: Extract<Component, { type: "Camera" }>;
+  entityId: number;
+  componentIdx: number;
+  onSceneChange: () => void;
+}) {
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+
   return (
     <>
-      <Field label="zoom"   value={comp.zoom.toFixed(2)} />
-      <Field label="follow" value={comp.follow_entity !== null ? `entity #${comp.follow_entity}` : "none"} />
+      <NumberInputField label="zoom" value={comp.zoom} onCommit={v => patch({ zoom: v })} />
+      <OptionalEntityField label="follow" value={comp.follow_entity} onCommit={v => patch({ follow_entity: v })} />
     </>
   );
 }
 
 // ─── AudioSource ─────────────────────────────────────────────────────────────
 
-function AudioFields({ comp }: { comp: Extract<Component, { type: "AudioSource" }> }) {
+function AudioFields({ comp, entityId, componentIdx, onSceneChange }: {
+  comp: Extract<Component, { type: "AudioSource" }>;
+  entityId: number;
+  componentIdx: number;
+  onSceneChange: () => void;
+}) {
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+
   return (
     <>
-      <Field label="path"     value={comp.path || "(none)"} />
-      <Field label="volume"   value={comp.volume.toFixed(2)} />
-      <Field label="loop"     value={String(comp.looping)} />
-      <Field label="autoplay" value={String(comp.play_on_start)} />
+      <TextInputField label="path" value={comp.path} placeholder="(none)" onCommit={v => patch({ path: v })} />
+      <NumberInputField label="volume" value={comp.volume} min={0} onCommit={v => patch({ volume: v })} />
+      <BoolField label="loop" value={comp.looping} onChange={v => patch({ looping: v })} />
+      <BoolField label="autoplay" value={comp.play_on_start} onChange={v => patch({ play_on_start: v })} />
     </>
   );
 }
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
-function Field({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function useComponentPatch(entityId: number, componentIdx: number, onSceneChange: () => void) {
+  return async (data: Record<string, unknown>) => {
+    try {
+      await invoke("patch_component", { entityId, componentIdx, data });
+      onSceneChange();
+    } catch (err) {
+      console.error("patch_component failed:", err);
+    }
+  };
+}
+
+function TextInputField({ label, value, placeholder, onCommit }: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <EditableRow label={label}>
+      <input
+        defaultValue={value}
+        placeholder={placeholder}
+        onFocus={() => setFocused(true)}
+        onBlur={e => { setFocused(false); onCommit(e.currentTarget.value); }}
+        onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        style={inputStyle(focused)}
+      />
+    </EditableRow>
+  );
+}
+
+function NumberInputField({ label, value, decimals = 2, min, max, onCommit }: {
+  label: string;
+  value: number;
+  decimals?: number;
+  min?: number;
+  max?: number;
+  onCommit: (value: number) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  const commit = (raw: string) => {
+    let next = Number(raw);
+    if (!Number.isFinite(next)) return;
+    if (min !== undefined) next = Math.max(min, next);
+    if (max !== undefined) next = Math.min(max, next);
+    onCommit(next);
+  };
+
+  return (
+    <EditableRow label={label}>
+      <input
+        type="number"
+        defaultValue={decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals)}
+        onFocus={() => setFocused(true)}
+        onBlur={e => { setFocused(false); commit(e.currentTarget.value); }}
+        onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        style={inputStyle(focused)}
+      />
+    </EditableRow>
+  );
+}
+
+function OptionalEntityField({ label, value, onCommit }: {
+  label: string;
+  value: number | null;
+  onCommit: (value: number | null) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  const commit = (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      onCommit(null);
+      return;
+    }
+    const next = Number(trimmed);
+    if (Number.isInteger(next) && next >= 0) onCommit(next);
+  };
+
+  return (
+    <EditableRow label={label}>
+      <input
+        type="number"
+        defaultValue={value ?? ""}
+        placeholder="none"
+        onFocus={() => setFocused(true)}
+        onBlur={e => { setFocused(false); commit(e.currentTarget.value); }}
+        onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        style={inputStyle(focused)}
+      />
+    </EditableRow>
+  );
+}
+
+function ColorField({ label, value, onCommit }: {
+  label: string;
+  value: [number, number, number, number];
+  onCommit: (value: [number, number, number, number]) => void;
+}) {
+  const [focused, setFocused] = useState<number | null>(null);
+
+  const commit = (idx: number, raw: string) => {
+    const next = Number(raw);
+    if (!Number.isFinite(next)) return;
+    const color: [number, number, number, number] = [...value];
+    color[idx] = Math.max(0, Math.min(1, next));
+    onCommit(color);
+  };
+
+  return (
+    <EditableRow label={label}>
+      {value.map((channel, idx) => (
+        <input
+          key={idx}
+          type="number"
+          step="0.01"
+          min="0"
+          max="1"
+          defaultValue={channel.toFixed(2)}
+          onFocus={() => setFocused(idx)}
+          onBlur={e => { setFocused(null); commit(idx, e.currentTarget.value); }}
+          onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          style={inputStyle(focused === idx)}
+        />
+      ))}
+    </EditableRow>
+  );
+}
+
+function EditableRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "center", height: "22px", padding: "0 10px", gap: "6px" }}>
       <span style={{ width: "60px", fontSize: "10px", color: "var(--text-dim)", flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: "10px", color: accent ?? "var(--text-base)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {value}
-      </span>
+      {children}
     </div>
   );
+}
+
+function inputStyle(focused: boolean): CSSProperties {
+  return {
+    flex: 1,
+    minWidth: 0,
+    height: "18px",
+    background: "var(--bg-3)",
+    border: `1px solid ${focused ? "var(--accent)" : "var(--border-bright)"}`,
+    borderRadius: "var(--radius)",
+    color: "var(--text-bright)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "10px",
+    padding: "0 4px",
+    outline: "none",
+  };
 }
