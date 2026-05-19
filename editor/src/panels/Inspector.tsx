@@ -1,6 +1,58 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Entity, Component } from "../App";
+import { useContextMenu } from "../components/ContextMenu";
+
+interface AiSuggestion {
+  label: string;
+  prompt: string;
+  mode: "send" | "prefill";
+}
+
+function getAiSuggestions(entity: Entity): AiSuggestion[] {
+  const types = new Set(entity.components.map(c => c.type));
+  const suggestions: AiSuggestion[] = [];
+
+  const add = (label: string, prompt: string, mode: "send" | "prefill") => {
+    if (suggestions.length < 3) suggestions.push({ label, prompt, mode });
+  };
+
+  if (types.has("Script")) {
+    add(`Refactor the ${entity.name} script`, `Refactor the ${entity.name} script to be cleaner and more efficient`, "send");
+    add(`Add a new behavior to ${entity.name}`, `Add this new behavior to ${entity.name}: `, "prefill");
+  }
+  if (types.has("PhysicsBody") && types.has("Collider")) {
+    add(`Tune ${entity.name} physics`, `Review and tune the PhysicsBody and Collider settings for ${entity.name}`, "send");
+  } else if (types.has("PhysicsBody") && !types.has("Collider")) {
+    add(`Add a collider to ${entity.name}`, `Add a Collider component to ${entity.name} matching its sprite size`, "send");
+  } else if (!types.has("PhysicsBody") && !types.has("Script")) {
+    add(`Add physics to ${entity.name}`, `Add physics (PhysicsBody + Collider) to ${entity.name}: `, "prefill");
+  }
+  if (types.has("Camera")) {
+    add(`Configure ${entity.name} follow`, `Set up the ${entity.name} camera to smoothly follow the player`, "send");
+  }
+  if (types.has("Sprite") && !types.has("Script")) {
+    add(`Animate ${entity.name} with a script`, `Add a Lua script to ${entity.name} that animates it. What should it do? `, "prefill");
+  }
+  if (types.has("AudioSource")) {
+    add(`Trigger ${entity.name} audio on event`, `Set up ${entity.name} so its audio triggers on: `, "prefill");
+  }
+  if (!types.has("Sprite") && !types.has("Camera")) {
+    add(`Add a sprite to ${entity.name}`, `Add a Sprite component to ${entity.name}`, "send");
+  }
+
+  const fallbacks: AiSuggestion[] = [
+    { label: `Explain ${entity.name}'s purpose`, prompt: `Explain what ${entity.name} does in this scene`, mode: "send" },
+    { label: `Add a behavior to ${entity.name}`, prompt: `Add this behavior to ${entity.name}: `, mode: "prefill" },
+    { label: `Optimize ${entity.name}`, prompt: `Suggest optimizations for ${entity.name}`, mode: "send" },
+  ];
+  for (const f of fallbacks) {
+    if (suggestions.length >= 3) break;
+    suggestions.push(f);
+  }
+
+  return suggestions.slice(0, 3);
+}
 
 const COMPONENT_ICON: Record<string, string> = {
   Transform:   "⌖",
@@ -14,87 +66,298 @@ const COMPONENT_ICON: Record<string, string> = {
 
 interface Props {
   entity: Entity | null;
-  selectedComponent: number | null; // index in entity.components
+  selectedComponent: number | null;
   onSelectComponent: (idx: number | null) => void;
   onSceneChange: () => void;
   onOpenScript: (path: string) => void;
+  onAskAI?: (prompt: string, mode: "send" | "prefill") => void;
+  suggestionModel?: string | null;
 }
 
-export default function Inspector({ entity, selectedComponent, onSelectComponent, onSceneChange, onOpenScript }: Props) {
+export default function Inspector({ entity, selectedComponent, onSelectComponent, onSceneChange, onOpenScript, onAskAI, suggestionModel }: Props) {
+  const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[] | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [regenerateKey, setRegenerateKey] = useState(0);
+  const lastEntityRef = useRef<string | null>(null);
+  const contextMenu = useContextMenu();
+
+  const regenerate = () => {
+    lastEntityRef.current = null;
+    setAiSuggestions(null);
+    setRegenerateKey(k => k + 1);
+  };
+
+  useEffect(() => {
+    if (!entity || !suggestionModel) { setAiSuggestions(null); return; }
+
+    const cacheKey = `${entity.id}:${entity.components.map(c => c.type).join(",")}`;
+    if (cacheKey === lastEntityRef.current) return;
+    lastEntityRef.current = cacheKey;
+
+    setAiSuggestions(null);
+    setSuggestionsLoading(true);
+
+    invoke<{ label: string; prompt: string; mode: string }[]>(
+      "generate_entity_suggestions",
+      { entityName: entity.name, components: entity.components, model: suggestionModel }
+    )
+      .then(results => {
+        const valid = results
+          .filter(r => r.label && r.prompt)
+          .map(r => ({ label: r.label, prompt: r.prompt, mode: (r.mode === "prefill" ? "prefill" : "send") as "send" | "prefill" }));
+        if (valid.length > 0) setAiSuggestions(valid.slice(0, 3));
+      })
+      .catch(() => { /* fall back to rules-based */ })
+      .finally(() => setSuggestionsLoading(false));
+  }, [entity?.id, entity?.components.length, suggestionModel, regenerateKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!entity) {
     return (
-      <div style={{ padding: "10px", color: "var(--text-dim)", fontSize: "11px", borderBottom: "1px solid var(--border)" }}>
-        No entity selected
+      <div style={{
+        flex: 1, display: "flex", flexDirection: "column",
+        overflow: "hidden", fontFamily: "var(--font-ui)",
+      }}>
+        <EmptyInspector onAskAI={onAskAI} />
       </div>
     );
   }
 
-  const comp = selectedComponent !== null
-    ? entity.components[selectedComponent] ?? null
-    : null;
+  const comp = selectedComponent !== null ? entity.components[selectedComponent] ?? null : null;
 
   return (
-    <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0, maxHeight: "45%", overflow: "auto" }}>
-      {comp !== null && selectedComponent !== null
-        ? <ComponentView key={`${entity.id}:${selectedComponent}:${comp.type}`} entity={entity} component={comp} componentIdx={selectedComponent} onBack={() => onSelectComponent(null)} onSceneChange={onSceneChange} onOpenScript={onOpenScript} />
-        : <EntityOverview entity={entity} onSelectComponent={onSelectComponent} />
-      }
+    <div style={{
+      flex: 1, display: "flex", flexDirection: "column",
+      overflow: "hidden", fontFamily: "var(--font-ui)",
+    }}>
+      {/* Entity header */}
+      <div style={{
+        padding: "22px 22px 18px",
+        borderBottom: "1px solid var(--rule)",
+        flexShrink: 0,
+      }}>
+        <div style={{
+          fontSize: "11.5px", color: "var(--ink-3)",
+          display: "flex", alignItems: "center", gap: "8px",
+        }}>
+          <span style={{
+            width: "8px", height: "8px",
+            background: entity.active ? "var(--moss)" : "var(--ink-4)",
+            display: "inline-block",
+          }} />
+          <span>entity</span>
+        </div>
+        <div style={{
+          fontFamily: "var(--font-ui)", fontSize: "32px",
+          lineHeight: 1.05, marginTop: "4px", color: "var(--ink)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {entity.name}
+        </div>
+        <div style={{
+          marginTop: "10px", fontFamily: "var(--font-mono)",
+          fontSize: "11px", color: "var(--ink-4)",
+        }}>
+          #{entity.id} · {entity.components.length} component{entity.components.length !== 1 ? "s" : ""}
+        </div>
+      </div>
+
+      {/* Scrollable body */}
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {comp !== null && selectedComponent !== null ? (
+          <ComponentView
+            key={`${entity.id}:${selectedComponent}:${comp.type}`}
+            entity={entity}
+            component={comp}
+            componentIdx={selectedComponent}
+            onBack={() => onSelectComponent(null)}
+            onSceneChange={onSceneChange}
+            onOpenScript={onOpenScript}
+          />
+        ) : (
+          <>
+            {/* Component list */}
+            {entity.components.length === 0 ? (
+              <div style={{ padding: "16px 22px", color: "var(--ink-3)", fontSize: "12.5px" }}>
+                No components. Right-click entity to add one.
+              </div>
+            ) : (
+              entity.components.map((c, idx) => (
+                <div key={`${c.type}-${idx}`} style={{ borderBottom: "1px solid var(--rule)" }}>
+                  <button
+                    onClick={() => onSelectComponent(idx)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "8px",
+                      width: "100%", padding: "14px 22px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--paper-3)"}
+                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "none"}
+                  >
+                    <span style={{ fontSize: "12px", color: "var(--ink-3)", width: "16px", textAlign: "center", flexShrink: 0 }}>
+                      {COMPONENT_ICON[c.type] ?? "·"}
+                    </span>
+                    <span style={{
+                      fontFamily: "var(--font-ui)", fontSize: "12.5px",
+                      color: "var(--ink)", flex: 1,
+                    }}>
+                      {c.type === "Script" && (c as Extract<Component, { type: "Script" }>).path
+                        ? `Script · ${(c as Extract<Component, { type: "Script" }>).path.split("/").pop()}`
+                        : c.type}
+                    </span>
+                    <span style={{ color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "14px" }}>···</span>
+                  </button>
+                </div>
+              ))
+            )}
+
+            {/* Add component */}
+            <div style={{ margin: "8px 22px 14px" }}>
+              <button style={{
+                width: "100%", padding: "10px 12px",
+                fontSize: "12.5px", color: "var(--ink-3)",
+                border: "1px dashed var(--rule-2)",
+                background: "none", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: "8px",
+                fontFamily: "var(--font-ui)",
+              }}>
+                + Add component
+              </button>
+            </div>
+
+            {/* AI suggestions */}
+            {(() => {
+              const suggestions = aiSuggestions ?? getAiSuggestions(entity);
+              const previewed = hoveredIdx !== null ? suggestions[hoveredIdx] : null;
+              return (
+                <div style={{ padding: "16px 22px", borderTop: "1px solid var(--rule)" }}>
+                  <span style={{
+                    fontSize: "11.5px", color: "var(--amber)",
+                    display: "inline-flex", alignItems: "center", gap: "6px",
+                  }}>
+                    ✦ Ask about <span style={{ color: "var(--ink)" }}>{entity.name}</span>
+                    {suggestionsLoading && (
+                      <span style={{ color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "10px" }}>…</span>
+                    )}
+                  </span>
+
+                  <div style={{ marginTop: "10px", display: "flex", flexDirection: "column" }}>
+                    {suggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => onAskAI?.(s.prompt, s.mode)}
+                        onContextMenu={e => {
+                          e.preventDefault();
+                          contextMenu.show(e.clientX, e.clientY, [
+                            {
+                              label: "Send now",
+                              icon: "→",
+                              onClick: () => onAskAI?.(s.prompt, "send"),
+                            },
+                            {
+                              label: "Modify before sending",
+                              icon: "✎",
+                              onClick: () => onAskAI?.(s.prompt, "prefill"),
+                            },
+                            { divider: true },
+                            {
+                              label: "Regenerate suggestions",
+                              icon: "↻",
+                              disabled: !suggestionModel,
+                              onClick: regenerate,
+                            },
+                          ]);
+                        }}
+                        onMouseEnter={e => {
+                          (e.currentTarget as HTMLElement).style.color = "var(--ink)";
+                          setHoveredIdx(i);
+                        }}
+                        onMouseLeave={e => {
+                          (e.currentTarget as HTMLElement).style.color = "var(--ink-2)";
+                          setHoveredIdx(null);
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "8px",
+                          fontSize: "13px", color: "var(--ink-2)",
+                          padding: "6px 0",
+                          background: "none", border: "none",
+                          borderBottom: i < suggestions.length - 1 ? "1px dotted var(--paper-3)" : "none",
+                          cursor: "pointer", textAlign: "left",
+                          width: "100%",
+                          fontFamily: "var(--font-ui)",
+                        }}
+                      >
+                        <span style={{ flex: 1 }}>{s.label}</span>
+                        <span style={{
+                          color: "var(--ink-4)", fontSize: "10px",
+                          fontFamily: "var(--font-mono)",
+                          border: "1px solid var(--rule-2)", padding: "1px 4px",
+                          flexShrink: 0,
+                        }}>
+                          {s.mode === "prefill" ? "fill" : "→"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Prompt preview / hint */}
+                  <div style={{
+                    marginTop: "8px",
+                    paddingTop: "6px",
+                    borderTop: "1px dotted var(--rule)",
+                    minHeight: "32px",
+                    fontFamily: "var(--font-mono)", fontSize: "10.5px",
+                    color: "var(--ink-4)", lineHeight: 1.5,
+                    wordBreak: "break-word",
+                  }}>
+                    {previewed
+                      ? previewed.prompt
+                      : <span style={{ opacity: 0.45 }}>right-click for options</span>
+                    }
+                  </div>
+                </div>
+              );
+            })()}
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─── Entity overview ─────────────────────────────────────────────────────────
-
-function EntityOverview({ entity, onSelectComponent }: { entity: Entity; onSelectComponent: (idx: number) => void }) {
+function EmptyInspector({ onAskAI }: { onAskAI?: (prompt: string, mode: "send" | "prefill") => void }) {
   return (
-    <>
+    <div style={{ padding: "28px 22px", display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{
-        padding: "5px 10px", borderBottom: "1px solid var(--border)",
-        display: "flex", alignItems: "center", gap: "6px",
-        fontSize: "11px", color: "var(--text-white)", fontWeight: 500, flexShrink: 0,
+        fontFamily: "var(--font-ui)", fontSize: "26px",
+        lineHeight: 1.2, color: "var(--ink-2)",
       }}>
-        <span style={{ flex: 1 }}>{entity.name}</span>
-        <span style={{ color: "var(--text-dim)", fontSize: "10px" }}>#{entity.id}</span>
-        <div style={{
-          width: "7px", height: "7px", borderRadius: "50%",
-          background: entity.active ? "var(--green)" : "var(--text-dim)",
-        }} title={entity.active ? "active" : "inactive"} />
+        Nothing selected.
       </div>
-
-      {entity.components.length === 0 ? (
-        <div style={{ padding: "8px 10px", color: "var(--text-dim)", fontSize: "11px" }}>
-          No components. Right-click entity to add one.
-        </div>
-      ) : (
-        <div style={{ padding: "4px 6px", display: "flex", flexDirection: "column", gap: "2px" }}>
-          {entity.components.map((comp, idx) => (
-            <button
-              key={`${comp.type}-${idx}`}
-              onClick={() => onSelectComponent(idx)}
-              style={{
-                display: "flex", alignItems: "center", gap: "8px",
-                height: "26px", padding: "0 8px",
-                background: "var(--bg-3)", border: "1px solid var(--border-bright)",
-                borderRadius: "var(--radius)", cursor: "pointer",
-                textAlign: "left", width: "100%",
-              }}
-              onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = "var(--accent-dim)"}
-              onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = "var(--border-bright)"}
-            >
-              <span style={{ fontSize: "11px", color: "var(--text-dim)", width: "14px", textAlign: "center", flexShrink: 0 }}>
-                {COMPONENT_ICON[comp.type] ?? "·"}
-              </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-bright)", flex: 1 }}>
-                {comp.type === "Script" && comp.path
-                  ? `Script · ${comp.path.split("/").pop()}`
-                  : comp.type}
-              </span>
-              <span style={{ fontSize: "9px", color: "var(--text-dim)" }}>▸</span>
-            </button>
-          ))}
-        </div>
+      <div style={{ fontSize: "12.5px", color: "var(--ink-3)", lineHeight: 1.5 }}>
+        Pick an entity in the scene to inspect it — or press{" "}
+        <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink-4)", border: "1px solid var(--rule-2)", padding: "1px 4px" }}>Ctrl</span>
+        {" "}<span style={{ fontFamily: "var(--font-mono)", color: "var(--ink-4)", border: "1px solid var(--rule-2)", padding: "1px 4px" }}>K</span>
+        {" "}to ask the assistant.
+      </div>
+      {onAskAI && (
+        <button
+          onClick={() => onAskAI("What should I add to this scene?", "send")}
+          style={{
+            marginTop: "8px",
+            display: "inline-flex", alignItems: "center", gap: "8px",
+            fontSize: "13px", color: "var(--amber)",
+            background: "none", border: "none", cursor: "pointer",
+            fontFamily: "var(--font-ui)", padding: 0,
+          }}
+        >
+          ✦ Ask Sindri for ideas
+        </button>
       )}
-    </>
+    </div>
   );
 }
 
@@ -112,38 +375,32 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
 
   return (
     <>
-      {/* Breadcrumb header */}
       <div style={{
         display: "flex", alignItems: "center", gap: "0",
-        height: "28px", borderBottom: "1px solid var(--border)", flexShrink: 0,
+        height: "40px", borderBottom: "1px solid var(--rule)", flexShrink: 0,
+        padding: "0 22px",
       }}>
         <button
           onClick={onBack}
-          title="Back to entity"
           style={{
-            background: "none", border: "none", color: "var(--text-muted)",
-            cursor: "pointer", padding: "0 8px", height: "100%",
-            display: "flex", alignItems: "center", gap: "4px",
-            fontSize: "11px", borderRight: "1px solid var(--border)",
+            background: "none", border: "none", color: "var(--ink-3)",
+            cursor: "pointer", padding: "0 8px 0 0",
+            fontFamily: "var(--font-mono)", fontSize: "14px",
+            display: "flex", alignItems: "center",
           }}
-          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "var(--text-bright)"}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "var(--text-muted)"}
         >
           ‹
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 10px" }}>
-          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{entity.name}</span>
-          <span style={{ fontSize: "10px", color: "var(--border-bright)" }}>›</span>
-          <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>{icon}</span>
-          <span style={{
-            fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: "9px",
-            color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase",
-          }}>{component.type}</span>
-        </div>
+        <span style={{ fontSize: "11px", color: "var(--ink-3)", fontFamily: "var(--font-ui)" }}>{entity.name}</span>
+        <span style={{ fontSize: "12px", color: "var(--ink-4)", margin: "0 6px" }}>›</span>
+        <span style={{ fontSize: "11px", color: "var(--ink-4)" }}>{icon}</span>
+        <span style={{
+          fontFamily: "var(--font-ui)", fontSize: "12px",
+          color: "var(--ink)", marginLeft: "6px",
+        }}>{component.type}</span>
       </div>
 
-      {/* Component fields */}
-      <div style={{ paddingBottom: "4px" }}>
+      <div style={{ padding: "8px 0 4px" }}>
         {component.type === "Transform" && (
           <TransformFields comp={component} entityId={entity.id} onSceneChange={onSceneChange} />
         )}
@@ -173,10 +430,7 @@ function TransformFields({ comp, entityId, onSceneChange }: {
     const map: Record<string, string> = { x: "x", y: "y", scale_x: "scaleX", scale_y: "scaleY", rotation: "rotation" };
     const args: Record<string, unknown> = { entityId, x: null, y: null, scaleX: null, scaleY: null, rotation: null };
     args[map[field]] = num;
-    try {
-      await invoke("patch_transform", args);
-      onSceneChange();
-    } catch {}
+    try { await invoke("patch_transform", args); onSceneChange(); } catch {}
   };
 
   const rows: { label: string; fields: { key: string; value: number }[] }[] = [
@@ -188,8 +442,8 @@ function TransformFields({ comp, entityId, onSceneChange }: {
   return (
     <>
       {rows.map(row => (
-        <div key={row.label} style={{ display: "flex", alignItems: "center", height: "26px", padding: "0 10px", gap: "6px" }}>
-          <span style={{ width: "60px", fontSize: "10px", color: "var(--text-dim)", flexShrink: 0 }}>{row.label}</span>
+        <div key={row.label} style={{ display: "flex", alignItems: "center", height: "28px", padding: "0 22px", gap: "8px" }}>
+          <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0 }}>{row.label}</span>
           {row.fields.map(f => (
             <input
               key={f.key}
@@ -197,13 +451,7 @@ function TransformFields({ comp, entityId, onSceneChange }: {
               onFocus={() => setFocused(f.key)}
               onBlur={e => { setFocused(null); patch(f.key, e.target.value); }}
               onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-              style={{
-                flex: 1, height: "18px", background: "var(--bg-3)",
-                border: `1px solid ${focused === f.key ? "var(--accent)" : "var(--border-bright)"}`,
-                borderRadius: "var(--radius)", color: "var(--text-bright)",
-                fontFamily: "var(--font-mono)", fontSize: "11px", padding: "0 4px",
-                outline: "none", minWidth: 0,
-              }}
+              style={inputStyle(focused === f.key)}
             />
           ))}
         </div>
@@ -216,12 +464,9 @@ function TransformFields({ comp, entityId, onSceneChange }: {
 
 function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
   comp: Extract<Component, { type: "Sprite" }>;
-  entityId: number;
-  componentIdx: number;
-  onSceneChange: () => void;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
-
   return (
     <>
       <TextInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} />
@@ -238,28 +483,23 @@ function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 function PhysicsBodyFields({ comp, entityId, componentIdx, onSceneChange }: {
   comp: Extract<Component, { type: "PhysicsBody" }>;
-  entityId: number;
-  componentIdx: number;
-  onSceneChange: () => void;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
-
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", height: "26px", padding: "0 10px", gap: "6px" }}>
-        <span style={{ width: "60px", fontSize: "10px", color: "var(--text-dim)", flexShrink: 0 }}>type</span>
+      <div style={{ display: "flex", alignItems: "center", height: "28px", padding: "0 22px", gap: "8px" }}>
+        <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0 }}>type</span>
         <select
           value={comp.body_type}
           onChange={e => patch({ body_type: e.currentTarget.value })}
           style={{
-            flex: 1, height: "20px", background: "var(--bg-3)",
-            border: "1px solid var(--border-bright)", color: "var(--text-bright)",
-            fontFamily: "var(--font-mono)", fontSize: "10px",
+            flex: 1, height: "20px", background: "var(--paper-2)",
+            border: "1px solid var(--rule-2)", color: "var(--ink)",
+            fontFamily: "var(--font-mono)", fontSize: "11px",
           }}
         >
-          <option>Dynamic</option>
-          <option>Kinematic</option>
-          <option>Fixed</option>
+          <option>Dynamic</option><option>Kinematic</option><option>Fixed</option>
         </select>
       </div>
       <BoolField label="lock rot" value={comp.lock_rotation} onChange={v => patch({ lock_rotation: v })} />
@@ -275,12 +515,9 @@ function PhysicsBodyFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 function ColliderFields({ comp, entityId, componentIdx, onSceneChange }: {
   comp: Extract<Component, { type: "Collider" }>;
-  entityId: number;
-  componentIdx: number;
-  onSceneChange: () => void;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
-
   return (
     <>
       <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
@@ -292,61 +529,39 @@ function ColliderFields({ comp, entityId, componentIdx, onSceneChange }: {
   );
 }
 
-function BoolField({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label style={{ display: "flex", alignItems: "center", height: "22px", padding: "0 10px", gap: "6px", cursor: "pointer" }}>
-      <span style={{ width: "60px", fontSize: "10px", color: "var(--text-dim)", flexShrink: 0 }}>{label}</span>
-      <input type="checkbox" checked={value} onChange={e => onChange(e.currentTarget.checked)} />
-      <span style={{ fontSize: "10px", color: value ? "var(--accent)" : "var(--text-muted)" }}>{String(value)}</span>
-    </label>
-  );
-}
-
 // ─── Script ──────────────────────────────────────────────────────────────────
 
 function ScriptField({ comp, entityId, componentIdx, onOpenScript, onSceneChange }: {
   comp: Extract<Component, { type: "Script" }>;
-  entityId: number;
-  componentIdx: number;
-  onOpenScript: (path: string) => void;
-  onSceneChange: () => void;
+  entityId: number; componentIdx: number;
+  onOpenScript: (path: string) => void; onSceneChange: () => void;
 }) {
   const [focused, setFocused] = useState(false);
-
   const patchPath = async (newPath: string) => {
-    try {
-      await invoke("patch_component", { entityId, componentIdx, data: { path: newPath } });
-      onSceneChange();
-    } catch {}
+    try { await invoke("patch_component", { entityId, componentIdx, data: { path: newPath } }); onSceneChange(); } catch {}
   };
-
   return (
-    <div style={{ padding: "2px 10px 6px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "6px", height: "26px" }}>
-        <span style={{ width: "60px", fontSize: "10px", color: "var(--text-dim)", flexShrink: 0 }}>path</span>
+    <div style={{ padding: "2px 22px 8px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", height: "28px" }}>
+        <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0 }}>path</span>
         <input
           defaultValue={comp.path || ""}
           placeholder="(none)"
           onFocus={() => setFocused(true)}
           onBlur={e => { setFocused(false); patchPath(e.target.value); }}
           onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          style={{
-            flex: 1, height: "18px", background: "var(--bg-3)",
-            border: `1px solid ${focused ? "var(--accent)" : "var(--border-bright)"}`,
-            borderRadius: "var(--radius)", color: "var(--text-bright)",
-            fontFamily: "var(--font-mono)", fontSize: "10px", padding: "0 4px",
-            outline: "none", minWidth: 0,
-          }}
+          style={inputStyle(focused)}
         />
       </div>
       <button
         onClick={() => comp.path && onOpenScript(comp.path)}
         disabled={!comp.path}
         style={{
-          background: "var(--ai-glow)", border: "1px solid var(--ai-dim)",
-          borderRadius: "var(--radius)", color: comp.path ? "var(--ai)" : "var(--text-dim)",
-          fontFamily: "var(--font-mono)", fontSize: "10px",
-          padding: "3px 10px", cursor: comp.path ? "pointer" : "default", width: "100%",
+          marginTop: "6px",
+          background: "var(--paper-2)", border: "1px solid var(--rule-2)",
+          color: comp.path ? "var(--cyan)" : "var(--ink-4)",
+          fontFamily: "var(--font-ui)", fontSize: "12px",
+          padding: "5px 12px", cursor: comp.path ? "pointer" : "default", width: "100%",
         }}
       >Open in editor</button>
     </div>
@@ -357,12 +572,9 @@ function ScriptField({ comp, entityId, componentIdx, onOpenScript, onSceneChange
 
 function CameraFields({ comp, entityId, componentIdx, onSceneChange }: {
   comp: Extract<Component, { type: "Camera" }>;
-  entityId: number;
-  componentIdx: number;
-  onSceneChange: () => void;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
-
   return (
     <>
       <BoolField label="active" value={comp.active ?? true} onChange={v => patch({ active: v })} />
@@ -385,12 +597,9 @@ function CameraFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 function AudioFields({ comp, entityId, componentIdx, onSceneChange }: {
   comp: Extract<Component, { type: "AudioSource" }>;
-  entityId: number;
-  componentIdx: number;
-  onSceneChange: () => void;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
-
   return (
     <>
       <TextInputField label="path" value={comp.path} placeholder="(none)" onCommit={v => patch({ path: v })} />
@@ -401,7 +610,7 @@ function AudioFields({ comp, entityId, componentIdx, onSceneChange }: {
   );
 }
 
-// ─── Shared ───────────────────────────────────────────────────────────────────
+// ─── Shared field components ──────────────────────────────────────────────────
 
 function useComponentPatch(entityId: number, componentIdx: number, onSceneChange: () => void) {
   return async (data: Record<string, unknown>) => {
@@ -415,18 +624,13 @@ function useComponentPatch(entityId: number, componentIdx: number, onSceneChange
 }
 
 function TextInputField({ label, value, placeholder, onCommit }: {
-  label: string;
-  value: string;
-  placeholder?: string;
-  onCommit: (value: string) => void;
+  label: string; value: string; placeholder?: string; onCommit: (value: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
-
   return (
     <EditableRow label={label}>
       <input
-        defaultValue={value}
-        placeholder={placeholder}
+        defaultValue={value} placeholder={placeholder}
         onFocus={() => setFocused(true)}
         onBlur={e => { setFocused(false); onCommit(e.currentTarget.value); }}
         onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
@@ -437,15 +641,9 @@ function TextInputField({ label, value, placeholder, onCommit }: {
 }
 
 function NumberInputField({ label, value, decimals = 2, min, max, onCommit }: {
-  label: string;
-  value: number;
-  decimals?: number;
-  min?: number;
-  max?: number;
-  onCommit: (value: number) => void;
+  label: string; value: number; decimals?: number; min?: number; max?: number; onCommit: (value: number) => void;
 }) {
   const [focused, setFocused] = useState(false);
-
   const commit = (raw: string) => {
     let next = Number(raw);
     if (!Number.isFinite(next)) return;
@@ -453,7 +651,6 @@ function NumberInputField({ label, value, decimals = 2, min, max, onCommit }: {
     if (max !== undefined) next = Math.min(max, next);
     onCommit(next);
   };
-
   return (
     <EditableRow label={label}>
       <input
@@ -469,28 +666,19 @@ function NumberInputField({ label, value, decimals = 2, min, max, onCommit }: {
 }
 
 function OptionalEntityField({ label, value, onCommit }: {
-  label: string;
-  value: number | null;
-  onCommit: (value: number | null) => void;
+  label: string; value: number | null; onCommit: (value: number | null) => void;
 }) {
   const [focused, setFocused] = useState(false);
-
   const commit = (raw: string) => {
     const trimmed = raw.trim();
-    if (trimmed === "") {
-      onCommit(null);
-      return;
-    }
+    if (trimmed === "") { onCommit(null); return; }
     const next = Number(trimmed);
     if (Number.isInteger(next) && next >= 0) onCommit(next);
   };
-
   return (
     <EditableRow label={label}>
       <input
-        type="number"
-        defaultValue={value ?? ""}
-        placeholder="none"
+        type="number" defaultValue={value ?? ""} placeholder="none"
         onFocus={() => setFocused(true)}
         onBlur={e => { setFocused(false); commit(e.currentTarget.value); }}
         onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
@@ -501,28 +689,19 @@ function OptionalEntityField({ label, value, onCommit }: {
 }
 
 function OptionalNumberField({ label, value, onCommit }: {
-  label: string;
-  value: number | null;
-  onCommit: (value: number | null) => void;
+  label: string; value: number | null; onCommit: (value: number | null) => void;
 }) {
   const [focused, setFocused] = useState(false);
-
   const commit = (raw: string) => {
     const trimmed = raw.trim();
-    if (trimmed === "") {
-      onCommit(null);
-      return;
-    }
+    if (trimmed === "") { onCommit(null); return; }
     const next = Number(trimmed);
     if (Number.isFinite(next)) onCommit(next);
   };
-
   return (
     <EditableRow label={label}>
       <input
-        type="number"
-        defaultValue={value ?? ""}
-        placeholder="none"
+        type="number" defaultValue={value ?? ""} placeholder="none"
         onFocus={() => setFocused(true)}
         onBlur={e => { setFocused(false); commit(e.currentTarget.value); }}
         onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
@@ -532,13 +711,22 @@ function OptionalNumberField({ label, value, onCommit }: {
   );
 }
 
+function BoolField({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", height: "24px", padding: "0 22px", gap: "8px", cursor: "pointer" }}>
+      <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0 }}>{label}</span>
+      <input type="checkbox" checked={value} onChange={e => onChange(e.currentTarget.checked)} />
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: value ? "var(--amber)" : "var(--ink-4)" }}>
+        {String(value)}
+      </span>
+    </label>
+  );
+}
+
 function ColorField({ label, value, onCommit }: {
-  label: string;
-  value: [number, number, number, number];
-  onCommit: (value: [number, number, number, number]) => void;
+  label: string; value: [number, number, number, number]; onCommit: (value: [number, number, number, number]) => void;
 }) {
   const [focused, setFocused] = useState<number | null>(null);
-
   const commit = (idx: number, raw: string) => {
     const next = Number(raw);
     if (!Number.isFinite(next)) return;
@@ -546,16 +734,11 @@ function ColorField({ label, value, onCommit }: {
     color[idx] = Math.max(0, Math.min(1, next));
     onCommit(color);
   };
-
   return (
     <EditableRow label={label}>
       {value.map((channel, idx) => (
         <input
-          key={idx}
-          type="number"
-          step="0.01"
-          min="0"
-          max="1"
+          key={idx} type="number" step="0.01" min="0" max="1"
           defaultValue={channel.toFixed(2)}
           onFocus={() => setFocused(idx)}
           onBlur={e => { setFocused(null); commit(idx, e.currentTarget.value); }}
@@ -569,8 +752,8 @@ function ColorField({ label, value, onCommit }: {
 
 function EditableRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", height: "22px", padding: "0 10px", gap: "6px" }}>
-      <span style={{ width: "60px", fontSize: "10px", color: "var(--text-dim)", flexShrink: 0 }}>{label}</span>
+    <div style={{ display: "flex", alignItems: "center", height: "26px", padding: "0 22px", gap: "8px" }}>
+      <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0 }}>{label}</span>
       {children}
     </div>
   );
@@ -578,16 +761,14 @@ function EditableRow({ label, children }: { label: string; children: ReactNode }
 
 function inputStyle(focused: boolean): CSSProperties {
   return {
-    flex: 1,
-    minWidth: 0,
-    height: "18px",
-    background: "var(--bg-3)",
-    border: `1px solid ${focused ? "var(--accent)" : "var(--border-bright)"}`,
-    borderRadius: "var(--radius)",
-    color: "var(--text-bright)",
+    flex: 1, minWidth: 0,
+    height: "20px",
+    background: "var(--paper-2)",
+    border: `1px solid ${focused ? "var(--amber)" : "var(--rule-2)"}`,
+    color: "var(--ink)",
     fontFamily: "var(--font-mono)",
-    fontSize: "10px",
-    padding: "0 4px",
+    fontSize: "12px",
+    padding: "0 6px",
     outline: "none",
   };
 }

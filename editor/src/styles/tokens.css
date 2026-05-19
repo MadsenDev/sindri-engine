@@ -1,48 +1,54 @@
 :root {
-  /* Backgrounds */
-  --bg-0: #0a0b0d;
-  --bg-1: #0f1114;
-  --bg-2: #141619;
-  --bg-3: #1a1d21;
-  --bg-4: #20242a;
+  /* ── v3 palette ─────────────────────────────────────────── */
+  --paper:   #0d1117;   /* app background */
+  --paper-2: #161b22;   /* elevated panels, modal scrim base */
+  --paper-3: #1e2530;   /* hover / selection background */
+  --ink:     #e6e1d4;   /* primary text — warm off-white */
+  --ink-2:   #c4beae;   /* secondary text */
+  --ink-3:   #8a8580;   /* tertiary / muted labels */
+  --ink-4:   #5a554e;   /* very muted, gutter line numbers */
+  --rule:    #1f242c;   /* default hairline rule */
+  --rule-2:  #2a3038;   /* major region rule */
+  --amber:   #f0c050;   /* AI accent — used ONLY for AI affordances */
+  --cyan:    #6dbcdb;   /* entity / camera accent */
+  --moss:    #9bb070;   /* "good" state — engine ready, accepted diff */
 
-  /* Borders */
-  --border: #252930;
-  --border-bright: #2e3440;
+  /* ── compat aliases (used by existing component code) ───── */
+  --bg-0:          var(--paper);
+  --bg-1:          var(--paper);
+  --bg-2:          var(--paper-2);
+  --bg-3:          var(--paper-3);
+  --bg-4:          #242b36;
+  --border:        var(--rule);
+  --border-bright: var(--rule-2);
+  --text-dim:      var(--ink-4);
+  --text-muted:    var(--ink-3);
+  --text-base:     var(--ink-2);
+  --text-bright:   var(--ink);
+  --text-white:    var(--ink);
+  --accent:        var(--amber);
+  --accent-dim:    #b08c30;
+  --accent-glow:   rgba(240, 192, 80, 0.12);
+  --accent-glow-strong: rgba(240, 192, 80, 0.22);
+  --ai:            var(--amber);
+  --ai-dim:        #b08c30;
+  --ai-glow:       rgba(240, 192, 80, 0.10);
+  --green:         var(--moss);
+  --red:           #e05555;
 
-  /* Text */
-  --text-dim: #3d4554;
-  --text-muted: #5a6478;
-  --text-base: #8a95a8;
-  --text-bright: #c4cdd8;
-  --text-white: #e8edf2;
+  /* ── typography ─────────────────────────────────────────── */
+  --font-ui:   'Pixelify Sans', 'VT323', monospace;
+  --font-mono: 'JetBrains Mono', 'VT323', monospace;
 
-  /* Accent — amber (user) */
-  --accent: #e8a838;
-  --accent-dim: #b07820;
-  --accent-glow: rgba(232, 168, 56, 0.12);
-  --accent-glow-strong: rgba(232, 168, 56, 0.22);
+  /* ── zero radius — intentional, matches terminal aesthetic ─ */
+  --radius: 0px;
 
-  /* AI — blue */
-  --ai: #5b8aff;
-  --ai-dim: #3a5ecc;
-  --ai-glow: rgba(91, 138, 255, 0.10);
-
-  /* Semantic */
-  --green: #4ecb8a;
-  --red: #e85050;
-
-  /* Typography */
-  --font-mono: 'Geist Mono', monospace;
-  --font-ui: 'Syne', sans-serif;
-  --radius: 3px;
-
-  /* Layout */
-  --panel-w-left: 220px;
-  --panel-w-right: 300px;
-  --header-h: 38px;
-  --footer-h: 24px;
-  --script-h: 200px;
+  /* ── layout ──────────────────────────────────────────────── */
+  --panel-w-left:  260px;
+  --panel-w-right: 360px;
+  --header-h:      56px;
+  --footer-h:      28px;
+  --script-h:      280px;
 }
 
 *,
@@ -61,10 +67,10 @@ body,
 }
 
 body {
-  background: var(--bg-0);
-  color: var(--text-base);
-  font-family: var(--font-mono);
-  font-size: 12px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -77,6 +83,5 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-bright);
-  border-radius: 2px;
+  background: var(--rule-2);
 }

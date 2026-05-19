@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 32 32" fill="none">
+  <title>Sindri · Forge mark</title>
+  <desc>Two concentric hexagons containing a hex ember. Ink + amber.</desc>
+
+  
+  <polygon points="16.00,3.00 27.26,9.50 27.26,22.50 16.00,29.00 4.74,22.50 4.74,9.50" stroke="#1a1a1a" stroke-width="1.6" fill="none"></polygon>
+
+  
+  <polygon points="16.00,9.00 22.06,12.50 22.06,19.50 16.00,23.00 9.94,19.50 9.94,12.50" stroke="#1a1a1a" stroke-width="1.2" fill="none"></polygon>
+
+  
+  <polygon points="16.00,13.20 18.42,14.60 18.42,17.40 16.00,18.80 13.58,17.40 13.58,14.60" fill="#d4541e"></polygon>
+</svg>

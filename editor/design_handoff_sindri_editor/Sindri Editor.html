@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1480" />
+<title>Sindri — AI-native 2D engine · v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=VT323&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* dark + pixel palette */
+    --paper: #0d1117;
+    --paper-2: #161b22;
+    --paper-3: #1e2530;
+    --ink: #e6e1d4;
+    --ink-2: #c4beae;
+    --ink-3: #8a8580;
+    --ink-4: #5a554e;
+    --rule: #1f242c;
+    --rule-2: #2a3038;
+    --orange: #f0c050;
+    --navy: #6dbcdb;
+    --moss: #9bb070;
+
+    --f-display: "Pixelify Sans", "VT323", monospace;
+    --f-sans: "Pixelify Sans", "VT323", monospace;
+    --f-mono: "JetBrains Mono", "VT323", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #050608; color: var(--ink); font-family: var(--f-sans); }
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-x: hidden;
+  }
+  #root { width: 100%; }
+
+  /* The pixel-friendly anti-alias setting. Pixelify Sans benefits from leaving
+     subpixel rendering on, but we disable smoothing for that crisp retro feel. */
+  body, .app-shell {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  .app-shell {
+    width: 1480px;
+    height: 920px;
+    background: var(--paper);
+    color: var(--ink);
+    position: relative;
+    margin: 0 auto;
+    overflow: hidden;
+    border: 1px solid #000;
+  }
+
+  /* Selection — amber on dark */
+  ::selection { background: var(--orange); color: var(--paper); }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--rule-2); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* The Tweaks panel itself sits in a light glassy popover — let it own its
+     own colors via inline styles or starter component. */
+  .tweaks-panel { color: var(--ink); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="js/data.js"></script>
+<script type="text/babel" src="js/logo.jsx"></script>
+<script type="text/babel" src="js/icons.jsx"></script>
+<script type="text/babel" src="v3/logo-v3.jsx"></script>
+<script type="text/babel" src="v3/tokens.js"></script>
+<script type="text/babel" src="v3/scene-tree.jsx"></script>
+<script type="text/babel" src="v3/viewport.jsx"></script>
+<script type="text/babel" src="v3/inspector.jsx"></script>
+<script type="text/babel" src="v3/script-pane.jsx"></script>
+<script type="text/babel" src="v3/command-bar.jsx"></script>
+<script type="text/babel" src="v3/ai-flows.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="js/tweaks.jsx"></script>
+<script type="text/babel" src="v3/editor.jsx"></script>
+<script type="text/babel" src="v3/app.jsx"></script>
+
+<script>
+  (function fit(){
+    const shell = () => document.querySelector('.app-shell');
+    function apply(){
+      const el = shell(); if (!el) return;
+      const W = window.innerWidth, H = window.innerHeight;
+      const sw = 1480, sh = 920;
+      const s = Math.min(W / sw, H / sh, 1);
+      el.style.transform = `scale(${s})`;
+      el.style.transformOrigin = 'top left';
+      document.body.style.minHeight = (sh * s) + 'px';
+      document.body.style.width = (sw * s) + 'px';
+      document.body.style.margin = '0 auto';
+    }
+    new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', apply);
+    setTimeout(apply, 50);
+  })();
+</script>
+</body>
+</html>

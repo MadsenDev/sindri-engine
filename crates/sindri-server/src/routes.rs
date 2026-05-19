@@ -1,5 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -17,6 +18,7 @@ pub type SharedScene = Arc<RwLock<Scene>>;
 pub type SharedScenePath = Arc<RwLock<PathBuf>>;
 pub type SharedKeys = Arc<RwLock<HashSet<String>>>;
 pub type SharedPlayback = Arc<Mutex<PlaybackState>>;
+pub type SharedErrors = Arc<Mutex<Vec<String>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackMode {
@@ -60,6 +62,35 @@ pub struct AppState {
     pub model: String,
     pub keys: SharedKeys,
     pub playback: SharedPlayback,
+    pub errors: SharedErrors,
+    /// Broadcast channel for live JPEG frames from headless rendering.
+    pub frame_tx: Option<tokio::sync::broadcast::Sender<Vec<u8>>>,
+}
+
+pub async fn stream_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_stream(socket, state))
+}
+
+async fn handle_stream(mut socket: WebSocket, state: AppState) {
+    let Some(ref frame_tx) = state.frame_tx else {
+        let _ = socket.close().await;
+        return;
+    };
+    let mut rx = frame_tx.subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(frame) => {
+                if socket.send(Message::Binary(frame.into())).await.is_err() {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(_) => break,
+        }
+    }
 }
 
 fn has_active_camera(scene: &Scene) -> bool {
@@ -136,7 +167,18 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "model": state.model,
         "paused": mode != PlaybackMode::Playing,
         "playback": mode.as_str(),
+        "error_count": state.errors.lock().map(|errors| errors.len()).unwrap_or(0),
     }))
+}
+
+// GET /errors
+pub async fn get_errors(State(state): State<AppState>) -> impl IntoResponse {
+    let errors = state
+        .errors
+        .lock()
+        .map(|errors| errors.clone())
+        .unwrap_or_default();
+    Json(serde_json::json!({ "errors": errors })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -162,6 +204,9 @@ pub async fn post_control(
                     playback.edit_scene = Some(snapshot);
                 }
                 playback.mode = PlaybackMode::Playing;
+            }
+            if let Ok(mut errors) = state.errors.lock() {
+                errors.clear();
             }
         }
         Some("pause") => {

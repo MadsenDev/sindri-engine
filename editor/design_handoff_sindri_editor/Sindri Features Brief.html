@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sindri — AI features brief</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #0d1117;
+    --paper-2: #161b22;
+    --paper-3: #1e2530;
+    --ink: #e6e1d4;
+    --ink-2: #c4beae;
+    --ink-3: #8a8580;
+    --ink-4: #5a554e;
+    --rule: #1f242c;
+    --rule-2: #2a3038;
+    --amber: #f0c050;
+    --cyan: #6dbcdb;
+    --moss: #9bb070;
+    --f-sans: "Pixelify Sans", monospace;
+    --f-mono: "JetBrains Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); font-family: var(--f-sans); font-size: 17px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  main { max-width: 900px; margin: 0 auto; padding: 80px 48px 120px; }
+
+  .eyebrow {
+    color: var(--amber);
+    font-size: 14px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 18px;
+  }
+  h1 {
+    font-family: var(--f-sans);
+    font-size: 56px;
+    line-height: 1.05;
+    margin: 0 0 14px;
+    letter-spacing: 0.01em;
+  }
+  h1 .accent { color: var(--amber); }
+  .deck {
+    color: var(--ink-3);
+    font-size: 20px;
+    line-height: 1.45;
+    max-width: 64ch;
+    margin-bottom: 56px;
+  }
+
+  h2 {
+    font-family: var(--f-sans);
+    font-size: 14px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin: 64px 0 22px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule-2);
+  }
+
+  .feature {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 28px;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .feature:last-of-type { border-bottom: none; }
+  .feature .num {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--ink-4);
+    letter-spacing: 0.1em;
+  }
+  .feature .title {
+    font-size: 22px;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+  .feature .body {
+    color: var(--ink-2);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .feature .body b { color: var(--ink); font-weight: 600; }
+  .feature .body code {
+    font-family: var(--f-mono);
+    font-size: 13px;
+    color: var(--cyan);
+    background: var(--paper-2);
+    padding: 1px 6px;
+    border: 1px solid var(--rule);
+  }
+  .feature .scene {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-left: 2px solid var(--amber);
+    background: var(--paper-2);
+    color: var(--ink-3);
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+  .feature .scene .label {
+    display: block;
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 4px;
+  }
+  .feature .shot {
+    margin-top: 16px;
+    border: 1px solid var(--rule-2);
+    width: 100%;
+    display: block;
+  }
+  .feature .shot-caption {
+    margin-top: 6px;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--ink-4);
+    letter-spacing: 0.04em;
+  }
+
+  .principles {
+    margin: 32px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .principles li {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule);
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 18px;
+    align-items: baseline;
+  }
+  .principles .glyph {
+    color: var(--amber);
+    font-size: 22px;
+    line-height: 1;
+    text-align: center;
+  }
+  .principles b { color: var(--ink); display: block; margin-bottom: 4px; font-size: 17px; }
+  .principles span { color: var(--ink-3); font-size: 15.5px; }
+
+  .files {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+    margin-top: 28px;
+  }
+  .files a {
+    display: block;
+    border: 1px solid var(--rule-2);
+    background: var(--paper-2);
+    padding: 18px 20px;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .files a:hover { border-color: var(--amber); }
+  .files .name { font-size: 18px; margin-bottom: 4px; }
+  .files .meta { color: var(--ink-3); font-size: 14px; font-family: var(--f-mono); }
+
+  .footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule-2);
+    color: var(--ink-4);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Sindri · AI features brief</div>
+  <h1>An AI that can do everything the user can do <span class="accent">— and shows its work.</span></h1>
+  <p class="deck">
+    The starting premise: the local model has access to every part of the engine. It can add, edit, remove entities, components, and scripts. The whole editor is designed around that — the AI is a peer collaborator, not a chat sidebar. These are the features I imagined to make that real.
+  </p>
+
+  <img class="shot" style="border: 1px solid var(--rule-2); width: 100%; display: block; margin-bottom: 8px;" src="screens/brief-rest.png" alt="Sindri editor at rest"/>
+  <div class="shot-caption" style="font-family: var(--f-mono); font-size: 11px; color: var(--ink-4); letter-spacing: 0.04em; margin-bottom: 32px;">Sindri Editor v3 · default state with an entity selected</div>
+
+  <h2>Design principles</h2>
+  <ul class="principles">
+    <li>
+      <span class="glyph">✦</span>
+      <div>
+        <b>Natural language is a first-class input.</b>
+        <span>The Cmd-K command bar is the primary entry point. You can do anything from there — add entities, write scripts, refactor, generate assets. The menu bar exists for muscle memory only.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">✦</span>
+      <div>
+        <b>Nothing is committed without a diff.</b>
+        <span>The AI never silently mutates your project. Every action lands as a reviewable proposal — entity diffs, script diffs, asset additions. Per-change accept/reject. The history is reversible all the way back.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">✦</span>
+      <div>
+        <b>The AI's work appears in the same places as yours.</b>
+        <span>Proposed entities show up in the scene tree as italic ghost rows. Proposed components attach to entities as orange "proposed" rows. Script changes show as inline diffs in the editor. No separate "AI panel" with copy-paste round-trips.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">✦</span>
+      <div>
+        <b>Context is explicit and editable.</b>
+        <span>When you ask the assistant something, you can see (and edit) what's in its context — the scene, selected entities, files. Type <code>@</code> to attach more.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">✦</span>
+      <div>
+        <b>Local model, no cloud round-trips.</b>
+        <span>Ollama runs the model on-device. The status pill in the topbar always shows which model is loaded and whether it's busy.</span>
+      </div>
+    </li>
+  </ul>
+
+  <h2>Features I designed for</h2>
+
+  <div class="feature">
+    <div class="num">01</div>
+    <div>
+      <div class="title">Cmd-K command palette</div>
+      <div class="body">
+        A single global input that accepts both natural-language prompts ("make the drone follow the beacon and chime nearby") and traditional commands ("new entity", "open file…"). Suggestions are grouped by <b>AI · scene</b>, <b>AI · selection</b>, and <b>Editor</b>. Selecting an AI suggestion runs the model with the current context attached.
+        <div class="scene">
+          <span class="label">In the prototype</span>
+          The palette opens with three context chips already attached — the current scene, plus the two entities being acted on (@Drone, @Beacon). Press ⌘↵ to preview the diff before applying.
+        </div>
+        <img class="shot" src="screens/brief-cmdk.png" alt="⌘K palette with context chips"/>
+        <div class="shot-caption">⌘K · prompt with attached scene + entity context</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">02</div>
+    <div>
+      <div class="title">Scene composer</div>
+      <div class="body">
+        A full-screen overlay where you describe a scene and the assistant drafts entities, components, and starter scripts — with a live preview before anything lands. Presets ("top-down arena", "platformer level", "dialogue scene") seed the prompt for common starting points.
+        <div class="scene">
+          <span class="label">In the prototype</span>
+          Click <b>Compose</b> in the topbar. The model drafts six entities (Player, Wolf, three Mushrooms, Trees tilemap, AmbientLight, Main Camera) plus three scripts — all visible in the preview pane before you accept.
+        </div>
+        <img class="shot" src="screens/brief-compose.png" alt="Scene composer modal with prompt and preview"/>
+        <div class="shot-caption">The Compose modal · prompt on the left, live preview on the right</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">03</div>
+    <div>
+      <div class="title">Proposal review lane</div>
+      <div class="body">
+        When the AI has staged changes, the inspector is replaced by a <b>proposals lane</b> on the right. Each change has a kind tag (<code>script</code>, <code>component</code>, <code>asset</code>), a one-line title, the diff, and per-change accept/reject/refine buttons. "Accept all" / "Reject all" at the top. Hovering a script change highlights the affected entity in the viewport.
+        <div class="scene">
+          <span class="label">In the prototype</span>
+          The <b>Review</b> scenario stages three changes from "make the drone follow the beacon": a rewritten <code>update()</code>, a new Audio component, and a generated <code>chime.ogg</code>.
+        </div>
+        <img class="shot" src="screens/brief-review.png" alt="Three proposed changes with diff view"/>
+        <div class="shot-caption">Proposals lane · script diff, new component, generated asset — each independently accept/reject</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">04</div>
+    <div>
+      <div class="title">Ghost entities in the scene tree</div>
+      <div class="body">
+        Entities the AI wants to add show up in the scene tree under a "Proposed by AI" section in amber italic. They render in the viewport as dashed amber boxes. They behave like real entities (selectable, inspectable) but they don't exist on disk until you accept.
+        <img class="shot" src="screens/brief-result.png" alt="Ghost entities Player and Wolf in scene tree + viewport"/>
+        <div class="shot-caption">After Compose · Player + Wolf appear as dashed amber ghosts until accepted</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">05</div>
+    <div>
+      <div class="title">Per-entity AI actions</div>
+      <div class="body">
+        Every selected entity gets a contextual AI block in the inspector: "Make it chase the beacon", "Refactor as a state machine", "Generate sprite variations", "Explain what this entity does". One click runs the appropriate flow with the entity attached as context.
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">06</div>
+    <div>
+      <div class="title">Inline ghost suggestions in the script editor</div>
+      <div class="body">
+        Cursor-style ghost text. As you type a function signature, the model proposes the body in amber italic ghost lines. <code>Tab</code> accepts. <code>Esc</code> dismisses. <code>⌘↵</code> applies the change <i>and</i> writes a one-line explanation in the gutter.
+        <img class="shot" src="screens/brief-inline.png" alt="Script editor with inline diff proposal"/>
+        <div class="shot-caption">Inline diff in the script editor · amber removed / green added</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">07</div>
+    <div>
+      <div class="title">Activity history with full reversibility</div>
+      <div class="body">
+        The History tab logs every action — yours and the AI's — with timestamps and attribution. AI actions are tagged in amber. Click any row to revert to that point. Branch from history to explore alternate timelines without losing current state.
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">08</div>
+    <div>
+      <div class="title">Asset generation</div>
+      <div class="body">
+        The AI can generate placeholder assets — sprites, audio, tilemaps — when the script it's writing needs them. They appear in the project as <code>generated · placeholder</code> assets so you can replace them with real art later without breaking references.
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">09</div>
+    <div>
+      <div class="title">Context chips</div>
+      <div class="body">
+        In the command bar, every prompt carries explicit context: the scene, selected entities, open files. Each is a removable chip. Type <code>@</code> to add an entity, file, or component. You always know what the model can see.
+      </div>
+    </div>
+  </div>
+
+  <div class="feature">
+    <div class="num">10</div>
+    <div>
+      <div class="title">Quiet AI status</div>
+      <div class="body">
+        A single pill in the topbar shows current AI state: <b>ready</b> (green dot), <b>composing</b> (amber dot + text), <b>3 changes pending</b>, etc. No banner alerts, no popups. The dot is enough.
+      </div>
+    </div>
+  </div>
+
+  <h2>Stretch ideas worth considering</h2>
+  <ul class="principles">
+    <li>
+      <span class="glyph">→</span>
+      <div>
+        <b>Run-loop probes.</b>
+        <span>When the game is playing, you can ask the AI questions like "why isn't the drone moving?" — it reads the live entity state, the script, and the recent frame's update log to answer.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">→</span>
+      <div>
+        <b>Multi-turn refine on a proposal.</b>
+        <span>If a proposal is close but not right, hit "refine…" with feedback — the AI adjusts only the selected change without re-drafting the whole patch.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">→</span>
+      <div>
+        <b>Voice-while-playtesting.</b>
+        <span>Hold a hotkey and say "make the wolf faster" while watching the game run. The model pauses the loop, applies a tweak as a proposal, and resumes.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">→</span>
+      <div>
+        <b>Variation generator.</b>
+        <span>"Generate 3 variants of this level" produces forked scenes you can flip between to compare playtest feel.</span>
+      </div>
+    </li>
+    <li>
+      <span class="glyph">→</span>
+      <div>
+        <b>Explain mode.</b>
+        <span>A toggle that turns every interaction into a teachable moment — when the AI does something, it leaves an inline comment explaining the why. Great for the "kids / learning to code" audience.</span>
+      </div>
+    </li>
+  </ul>
+
+  <h2>Files</h2>
+  <div class="files">
+    <a href="Sindri Editor v3.html">
+      <div class="name">Sindri Editor · v3</div>
+      <div class="meta">dark + pixel · recommended</div>
+    </a>
+    <a href="Sindri Editor v2.html">
+      <div class="name">Sindri Editor · v2</div>
+      <div class="meta">editorial light</div>
+    </a>
+    <a href="Sindri Editor.html">
+      <div class="name">Sindri Editor · v1</div>
+      <div class="meta">editorial light · first draft</div>
+    </a>
+    <a href="Sindri Logo Options.html">
+      <div class="name">Logo options</div>
+      <div class="meta">3 marks side by side</div>
+    </a>
+  </div>
+
+  <div class="footer">
+    <span>Sindri · AI-native 2D engine</span>
+    <span>brief v0.1</span>
+  </div>
+</main>
+</body>
+</html>

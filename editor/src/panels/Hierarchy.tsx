@@ -225,25 +225,25 @@ export default function Hierarchy({ scene, selectedId, selectedComponent, onSele
       {/* Scene section header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 8px", height: "28px", borderBottom: "1px solid var(--border)", flexShrink: 0,
+        padding: "14px 16px 6px", flexShrink: 0,
       }}>
-        <span style={{
-          fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: "9px",
-          color: "var(--text-dim)", letterSpacing: "0.12em", textTransform: "uppercase",
-        }}>Scene</span>
+        <span style={{ color: "var(--ink-3)", fontSize: "12px", fontFamily: "var(--font-ui)" }}>
+          {scene?.name ?? "scene"}
+        </span>
         <button onClick={() => handleAddEntity(null)} style={{
-          background: "none", border: "none", color: "var(--text-muted)",
-          fontSize: "14px", cursor: "pointer", lineHeight: 1, padding: "0 2px",
+          background: "none", border: "none", color: "var(--ink-3)",
+          fontSize: "16px", cursor: "pointer", lineHeight: 1, padding: "0",
+          fontFamily: "var(--font-mono)",
         }}>+</button>
       </div>
 
       {/* Tree */}
       <div
-        style={{ flex: 1, overflow: "auto", padding: "4px 0" }}
+        style={{ flex: 1, overflow: "auto" }}
         onContextMenu={handleTreeContextMenu}
       >
         {roots.length === 0 && (
-          <div style={{ padding: "8px 10px", color: "var(--text-dim)", fontSize: "11px" }}>
+          <div style={{ padding: "8px 16px", color: "var(--ink-4)", fontSize: "12.5px", fontFamily: "var(--font-ui)" }}>
             No entities. Press + to add one.
           </div>
         )}
@@ -350,22 +350,19 @@ function EntityTreeItem({
         onMouseLeave={() => setHovered(false)}
         style={{
           position: "relative", display: "flex", alignItems: "center",
-          height: "24px", paddingRight: "4px", cursor: "pointer",
-          background: isSelected ? "var(--accent-glow)" : hovered ? "var(--bg-3)" : "transparent",
+          height: "28px", paddingRight: "8px",
+          paddingLeft: depth === 0 ? "16px" : undefined,
+          cursor: "pointer",
+          background: isSelected ? "var(--paper-3)" : hovered ? "rgba(30,37,48,0.5)" : "transparent",
+          borderLeft: isSelected ? "2px solid var(--ink)" : "2px solid transparent",
           userSelect: "none",
+          fontFamily: "var(--font-ui)",
         }}
       >
-        {isSelected && (
-          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "2px", background: "var(--accent)" }} />
-        )}
-
         <TreeConnectors depth={depth} isLast={isLast} parentLines={parentLines} />
 
-        <span style={{ width: "12px", fontSize: "9px", color: "var(--text-dim)", textAlign: "center", flexShrink: 0 }}>
+        <span style={{ width: "12px", fontSize: "9px", color: "var(--ink-4)", textAlign: "center", flexShrink: 0 }}>
           {hasChildren ? "▾" : ""}
-        </span>
-        <span style={{ fontSize: "11px", marginRight: "4px", flexShrink: 0 }}>
-          {hasChildren ? "📁" : "◻"}
         </span>
 
         {isRenaming ? (
@@ -380,17 +377,18 @@ function EntityTreeItem({
             }}
             onClick={e => e.stopPropagation()}
             style={{
-              flex: 1, height: "18px", fontSize: "11px", padding: "0 4px",
-              background: "var(--bg-0)", border: "1px solid var(--accent)",
-              borderRadius: "3px", color: "var(--text-white)", outline: "none",
-              fontFamily: "var(--font-mono)",
+              flex: 1, height: "20px", fontSize: "13px", padding: "0 4px",
+              background: "var(--paper-2)", border: "1px solid var(--amber)",
+              color: "var(--ink)", outline: "none",
+              fontFamily: "var(--font-ui)",
             }}
           />
         ) : (
           <span style={{
-            fontSize: "11px", flex: 1,
-            color: depth === 0 ? "var(--text-white)" : "var(--text-bright)",
+            fontSize: "13px", flex: 1,
+            color: "var(--ink)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            marginLeft: "6px",
           }}>
             {entity.name}
           </span>
@@ -401,9 +399,9 @@ function EntityTreeItem({
             onClick={e => { e.stopPropagation(); onDelete(entity.id); }}
             title="Delete entity"
             style={{
-              background: "none", border: "none", color: "var(--text-muted)",
-              fontSize: "12px", cursor: "pointer", padding: "0 4px",
-              lineHeight: 1, flexShrink: 0, opacity: 0.7,
+              background: "none", border: "none", color: "var(--ink-4)",
+              fontSize: "13px", cursor: "pointer", padding: "0 4px",
+              lineHeight: 1, flexShrink: 0,
             }}
           >×</button>
         )}
@@ -492,27 +490,24 @@ function ComponentTreeItem({ component, componentIdx, entity, isSelected, onSele
       onMouseLeave={() => setHovered(false)}
       style={{
         position: "relative", display: "flex", alignItems: "center",
-        height: "22px", paddingRight: "4px", cursor: "pointer",
-        background: isSelected ? "var(--accent-glow)" : hovered ? "var(--bg-3)" : "transparent",
+        height: "24px", paddingRight: "8px", cursor: "pointer",
+        background: isSelected ? "var(--paper-3)" : hovered ? "rgba(30,37,48,0.5)" : "transparent",
+        borderLeft: isSelected ? "2px solid var(--ink)" : "2px solid transparent",
         userSelect: "none",
+        paddingLeft: "36px",
+        fontFamily: "var(--font-ui)",
       }}
     >
-      {isSelected && (
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "2px", background: "var(--accent)" }} />
-      )}
       <TreeConnectors depth={depth} isLast={isLast} parentLines={parentLines} />
-
-      <span style={{ width: "12px", flexShrink: 0 }} />
       <span style={{
-        fontSize: "10px", marginRight: "5px", flexShrink: 0,
-        color: isSelected ? "var(--accent)" : "var(--text-dim)",
+        fontSize: "11px", marginRight: "5px", flexShrink: 0,
+        color: isSelected ? "var(--amber)" : "var(--ink-3)",
         width: "12px", textAlign: "center",
       }}>{icon}</span>
       <span style={{
-        fontSize: "10px", flex: 1,
-        color: isSelected ? "var(--text-bright)" : "var(--text-muted)",
+        fontSize: "12px", flex: 1,
+        color: isSelected ? "var(--ink)" : "var(--ink-3)",
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        fontFamily: "var(--font-mono)",
       }}>
         {label}
       </span>
@@ -526,16 +521,16 @@ function TreeConnectors({ depth, isLast, parentLines }: { depth: number; isLast:
   return (
     <div style={{ display: "flex", flexShrink: 0 }}>
       {parentLines.map((hasLine, i) => (
-        <div key={i} style={{ position: "relative", width: "16px", height: "24px", flexShrink: 0 }}>
+        <div key={i} style={{ position: "relative", width: "16px", height: "28px", flexShrink: 0 }}>
           {hasLine && (
-            <div style={{ position: "absolute", left: "7px", top: 0, bottom: 0, width: "1px", background: "var(--border-bright)" }} />
+            <div style={{ position: "absolute", left: "7px", top: 0, bottom: 0, width: "1px", background: "var(--rule-2)" }} />
           )}
         </div>
       ))}
       {depth > 0 && (
-        <div style={{ position: "relative", width: "16px", height: "24px", flexShrink: 0 }}>
-          <div style={{ position: "absolute", left: "7px", top: 0, bottom: isLast ? "50%" : 0, width: "1px", background: "var(--border-bright)" }} />
-          <div style={{ position: "absolute", left: "7px", top: "50%", width: "6px", height: "1px", background: "var(--border-bright)" }} />
+        <div style={{ position: "relative", width: "16px", height: "28px", flexShrink: 0 }}>
+          <div style={{ position: "absolute", left: "7px", top: 0, bottom: isLast ? "50%" : 0, width: "1px", background: "var(--rule-2)" }} />
+          <div style={{ position: "absolute", left: "7px", top: "50%", width: "6px", height: "1px", background: "var(--rule-2)" }} />
         </div>
       )}
     </div>

@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 
 pub use routes::{AppState, SharedScene};
+pub use tokio::sync::broadcast;
 
 pub async fn serve(state: AppState) -> anyhow::Result<()> {
     let port: u16 = std::env::var("SINDRI_PORT")
@@ -22,6 +23,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(routes::health))
+        .route("/errors", get(routes::get_errors))
         .route("/scene", get(routes::get_scene).put(routes::put_scene))
         .route("/scene/save", post(routes::save_scene))
         .route("/scene/open", post(routes::open_scene))
@@ -44,6 +46,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         )
         .route("/scene/entity", post(routes::create_entity))
         .route("/screenshot", get(routes::get_screenshot))
+        .route("/stream", get(routes::stream_handler))
         .route("/control", axum::routing::post(routes::post_control))
         .route("/input/keys", axum::routing::post(routes::post_keys))
         .route("/scripts", get(routes::list_scripts))

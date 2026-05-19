@@ -93,16 +93,16 @@ function MenuRoot({ x, y, items, onClose }: { x: number; y: number; items: MenuI
 function MenuPanel({ items, onClose }: { items: MenuItemDef[]; onClose: () => void }) {
   return (
     <div style={{
-      background: "var(--bg-2)",
-      border: "1px solid var(--border)",
-      borderRadius: "6px",
+      background: "var(--paper-2)",
+      border: "1px solid var(--rule)",
+      borderRadius: "0px",
       boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
       padding: "4px 0",
       minWidth: "160px",
     }}>
       {items.map((item, i) => (
         item.divider
-          ? <div key={i} style={{ height: "1px", background: "var(--border)", margin: "3px 0" }} />
+          ? <div key={i} style={{ height: "1px", background: "var(--rule)", margin: "3px 0" }} />
           : <MenuItem key={i} item={item} onClose={onClose} />
       ))}
     </div>
@@ -145,15 +145,15 @@ function MenuItem({ item, onClose }: { item: MenuItemDef; onClose: () => void })
         cursor: item.disabled ? "default" : "pointer",
         userSelect: "none",
         color: item.disabled
-          ? "var(--text-dim)"
+          ? "var(--ink-4)"
           : item.danger
             ? "var(--red)"
-            : "var(--text-bright)",
+            : "var(--ink)",
         fontSize: "11px",
         fontFamily: "var(--font-mono)",
       }}
       onMouseOver={e => {
-        if (!item.disabled) (e.currentTarget as HTMLElement).style.background = "var(--bg-3)";
+        if (!item.disabled) (e.currentTarget as HTMLElement).style.background = "var(--paper-3)";
       }}
       onMouseOut={e => {
         (e.currentTarget as HTMLElement).style.background = "transparent";
@@ -164,9 +164,9 @@ function MenuItem({ item, onClose }: { item: MenuItemDef; onClose: () => void })
       )}
       <span style={{ flex: 1 }}>{item.label}</span>
       {item.shortcut && (
-        <span style={{ color: "var(--text-dim)", fontSize: "10px" }}>{item.shortcut}</span>
+        <span style={{ color: "var(--ink-4)", fontSize: "10px" }}>{item.shortcut}</span>
       )}
-      {hasChildren && <span style={{ color: "var(--text-dim)", fontSize: "10px" }}>▶</span>}
+      {hasChildren && <span style={{ color: "var(--ink-4)", fontSize: "10px" }}>▶</span>}
 
       {hasChildren && subOpen && (
         <div data-context-menu="1" style={{ position: "absolute", left: "100%", top: "-4px", zIndex: 10000 }}>

@@ -187,6 +187,7 @@ pub async fn start_engine(
     let child = tokio::process::Command::new(&binary)
         .arg("--project-dir")
         .arg(&project_dir)
+        .arg("--headless")
         .spawn()
         .map_err(|e| format!("Failed to spawn engine ({}): {}", binary.display(), e))?;
     *state.0.lock().unwrap() = Some(child);
@@ -289,6 +290,25 @@ pub async fn get_scene() -> Result<String, String> {
         .await
         .map_err(|e| e.to_string())?
         .text()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EngineStatus {
+    pub status: String,
+    pub model: String,
+    pub paused: bool,
+    pub playback: Option<String>,
+    pub error_count: Option<usize>,
+}
+
+#[tauri::command]
+pub async fn get_engine_status() -> Result<EngineStatus, String> {
+    reqwest::get(engine_url("/health"))
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<EngineStatus>()
         .await
         .map_err(|e| e.to_string())
 }
@@ -399,6 +419,23 @@ pub async fn get_screenshot() -> Result<String, String> {
     Ok(resp["image"].as_str().unwrap_or("").to_string())
 }
 
+#[tauri::command]
+pub async fn get_runtime_errors() -> Result<Vec<String>, String> {
+    let resp: serde_json::Value = reqwest::get(engine_url("/errors"))
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(resp["errors"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_str().map(String::from))
+        .collect())
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextFlags {
@@ -406,6 +443,13 @@ pub struct ContextFlags {
     pub include_script: bool,
     pub include_viewport: bool,
     pub include_errors: bool,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenScriptContext {
+    pub path: String,
+    pub content: String,
 }
 
 #[derive(Serialize)]
@@ -420,6 +464,7 @@ pub async fn send_ai_message(
     context_flags: ContextFlags,
     model: Option<String>,
     history: Vec<serde_json::Value>, // [{role, content}] pairs from prior turns
+    open_script: Option<OpenScriptContext>,
 ) -> Result<AiResponse, String> {
     let client = reqwest::Client::new();
 
@@ -439,6 +484,24 @@ pub async fn send_ai_message(
             Err(_) => None,
         };
         resp.and_then(|v| v["image"].as_str().map(String::from))
+    } else {
+        None
+    };
+
+    let errors = if context_flags.include_errors {
+        let resp: Option<serde_json::Value> = match reqwest::get(engine_url("/errors")).await {
+            Ok(r) => r.json().await.ok(),
+            Err(_) => None,
+        };
+        resp.and_then(|v| {
+            v["errors"].as_array().map(|errors| {
+                errors
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+        })
     } else {
         None
     };
@@ -491,7 +554,9 @@ Action block schema — use as many actions as needed in one block:
     {{ "type": "edit_transform", "entity_name": "Player", "x": 400, "y": 260, "scale_x": 1.0, "scale_y": 1.0, "rotation": 0.0 }},
     {{ "type": "edit_transform", "entity_name": "Ground", "x": 400, "y": 340, "scale_x": 5.0, "scale_y": 1.0, "rotation": 0.0 }},
 
-    // Scripts — PREFERRED: write script + add Script component + set path in one shot
+    // Scripts
+    {{ "type": "write_script", "path": "scripts/beacon.lua", "content": "function on_update(self, dt)\n  self.rotation = self.rotation + 360 * dt\nend" }},
+    // PREFERRED for new script-driven entities: write script + add Script component + set path in one shot
     // IMPORTANT: also add a Transform if the entity doesn't have one
     {{ "type": "attach_script", "entity_name": "Player", "path": "scripts/player.lua", "content": "function on_update(self, dt)\n  ...\nend" }},
     {{ "type": "attach_script", "entity_id": 1, "path": "scripts/player.lua", "content": "..." }},
@@ -520,6 +585,7 @@ Rules:
 - Correct movement example: `if key_down("ArrowRight") then self.x = self.x + 200 * dt end`
 - WRONG (do not use): `love.keyboard.isDown`, `Input.GetKey`, `Input.GetAxis`, `$self.move_and_slide`, `self:input()`, `self:transform()`
 - When the user asks you to make an entity do something with scripting, use `attach_script` — it writes the file AND wires up the Script component in one action. Also add a Transform component if the entity doesn't have one.
+- When the user explicitly references an existing script file like `#scripts/beacon.lua`, prefer a `write_script` action that edits that file directly instead of unrelated scene actions.
 - `patch_component` requires the component index from the scene JSON's "components" array (0-based).
 - Always respond with a brief plain-text explanation first, then the action block.
 - Only include an action block when making or suggesting a concrete change.
@@ -531,6 +597,20 @@ Rules:
     let mut context_text = String::new();
     if let Some(s) = &scene {
         context_text.push_str(&format!("Scene:\n```json\n{}\n```\n\n", s));
+    }
+    if let Some(script) = &open_script {
+        if context_flags.include_script {
+            context_text.push_str(&format!(
+                "Open script ({path}):\n```lua\n{content}\n```\n\n",
+                path = script.path,
+                content = script.content
+            ));
+        }
+    }
+    if let Some(errors) = &errors {
+        if !errors.is_empty() {
+            context_text.push_str(&format!("Errors:\n```\n{}\n```\n\n", errors));
+        }
     }
     context_text.push_str(&format!("User message: {}", message));
 
@@ -589,9 +669,249 @@ Rules:
             (raw_text, vec![])
         };
 
+    normalize_script_actions(&message, open_script.as_ref(), &mut actions);
     normalize_spatial_actions(&message, scene.as_deref(), &mut actions);
 
     Ok(AiResponse { text, actions })
+}
+
+#[derive(Serialize)]
+pub struct ProposalChange {
+    pub id: String,
+    pub label: String,
+    pub detail: String,
+    pub action: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct ProposalResponse {
+    pub prompt: String,
+    pub summary: String,
+    pub changes: Vec<ProposalChange>,
+}
+
+#[tauri::command]
+pub async fn generate_proposal(
+    message: String,
+    context_flags: ContextFlags,
+    model: Option<String>,
+    history: Vec<serde_json::Value>,
+    open_script: Option<OpenScriptContext>,
+) -> Result<ProposalResponse, String> {
+    let client = reqwest::Client::new();
+
+    let scene = if context_flags.include_scene {
+        match reqwest::get(engine_url("/scene")).await {
+            Ok(r) => r.text().await.ok(),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let screenshot = if context_flags.include_viewport {
+        let resp: Option<serde_json::Value> = match reqwest::get(engine_url("/screenshot")).await {
+            Ok(r) => r.json().await.ok(),
+            Err(_) => None,
+        };
+        resp.and_then(|v| v["image"].as_str().map(String::from))
+    } else {
+        None
+    };
+
+    let errors = if context_flags.include_errors {
+        let resp: Option<serde_json::Value> = match reqwest::get(engine_url("/errors")).await {
+            Ok(r) => r.json().await.ok(),
+            Err(_) => None,
+        };
+        resp.and_then(|v| {
+            v["errors"].as_array().map(|errs| {
+                errs.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("\n")
+            })
+        })
+    } else {
+        None
+    };
+
+    let use_vision = screenshot.is_some();
+    let model = model.as_deref().unwrap_or(if use_vision { "qwen2.5-vl:7b" } else { "qwen2.5-coder:7b" });
+
+    let engine_ref = include_str!("../../../ENGINE_REFERENCE.md");
+    let system_prompt = format!(
+        r#"{engine_ref}
+
+---
+
+You are an AI assistant embedded in the Sindri editor. Respond with a SINGLE JSON object — no markdown fences, no prose outside the JSON.
+
+Format:
+{{
+  "summary": "One sentence describing the proposed changes (or your answer if no changes).",
+  "changes": [
+    {{
+      "id": "c1",
+      "label": "Short human-readable title (e.g. 'Create Player entity')",
+      "detail": "What this specific change does and why.",
+      "action": {{ ... single action object ... }}
+    }}
+  ]
+}}
+
+If the user is asking a question with no scene changes, use "changes": [].
+
+Action schema — each change.action is ONE action:
+{{ "type": "create_entity", "name": "Coin", "parent_id": null }}
+{{ "type": "delete_entity", "entity_id": 3 }}
+{{ "type": "rename_entity", "entity_id": 1, "name": "Player" }}
+{{ "type": "add_component", "entity_name": "Player", "component_type": "Transform" }}
+{{ "type": "patch_component", "entity_name": "Player", "component_type": "PhysicsBody", "data": {{ "body_type": "Dynamic", "lock_rotation": true }} }}
+{{ "type": "remove_component", "entity_id": 1, "component_type": "Script" }}
+{{ "type": "edit_transform", "entity_name": "Player", "x": 400, "y": 260, "scale_x": 1.0, "scale_y": 1.0, "rotation": 0.0 }}
+{{ "type": "write_script", "path": "scripts/player.lua", "content": "..." }}
+{{ "type": "attach_script", "entity_name": "Player", "path": "scripts/player.lua", "content": "..." }}
+
+Rules:
+- Use entity_name for entities created in the same proposal; use entity_id for existing entities.
+- Coordinate system: +X right, +Y down.
+- Physics needs both PhysicsBody and Collider components.
+- Supported component types: Transform, Sprite, PhysicsBody, Collider, Script, Camera, AudioSource.
+- Scripts use Sindri Lua API: on_start(self), on_update(self, dt). Globals: key_down(key), key_pressed(key), print(...).
+- Return ONLY the JSON object."#,
+        engine_ref = engine_ref,
+    );
+
+    let mut context_text = String::new();
+    if let Some(s) = &scene {
+        context_text.push_str(&format!("Scene:\n```json\n{}\n```\n\n", s));
+    }
+    if let Some(script) = &open_script {
+        if context_flags.include_script {
+            context_text.push_str(&format!(
+                "Open script ({path}):\n```lua\n{content}\n```\n\n",
+                path = script.path,
+                content = script.content
+            ));
+        }
+    }
+    if let Some(errors) = &errors {
+        if !errors.is_empty() {
+            context_text.push_str(&format!("Errors:\n```\n{}\n```\n\n", errors));
+        }
+    }
+    context_text.push_str(&format!("User message: {}", message));
+
+    let user_content: serde_json::Value = if use_vision {
+        serde_json::json!([
+            { "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{}", screenshot.unwrap_or_default()) } },
+            { "type": "text", "text": context_text }
+        ])
+    } else {
+        serde_json::json!(context_text)
+    };
+
+    let mut messages: Vec<serde_json::Value> =
+        vec![serde_json::json!({ "role": "system", "content": system_prompt })];
+    let recent_history = if history.len() > 10 { &history[history.len() - 10..] } else { &history[..] };
+    messages.extend_from_slice(recent_history);
+    messages.push(serde_json::json!({ "role": "user", "content": user_content }));
+
+    let req_body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false
+    });
+
+    let resp: serde_json::Value = client
+        .post("http://localhost:11434/api/chat")
+        .json(&req_body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let raw_text = resp["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    // Strip markdown fences if the model wraps the JSON
+    let stripped = raw_text.trim();
+    let stripped = stripped.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+
+    let parsed: serde_json::Value = serde_json::from_str(stripped).unwrap_or_else(|_| {
+        serde_json::json!({ "summary": raw_text, "changes": [] })
+    });
+
+    let summary = parsed["summary"].as_str().unwrap_or("").to_string();
+    let changes_raw = parsed["changes"].as_array().cloned().unwrap_or_default();
+
+    let changes = changes_raw
+        .iter()
+        .enumerate()
+        .map(|(i, c)| ProposalChange {
+            id: c["id"].as_str().unwrap_or(&format!("c{}", i + 1)).to_string(),
+            label: c["label"].as_str().unwrap_or("Change").to_string(),
+            detail: c["detail"].as_str().unwrap_or("").to_string(),
+            action: c["action"].clone(),
+        })
+        .collect();
+
+    Ok(ProposalResponse { prompt: message, summary, changes })
+}
+
+fn normalize_script_actions(
+    message: &str,
+    open_script: Option<&OpenScriptContext>,
+    actions: &mut [serde_json::Value],
+) {
+    let referenced_paths = referenced_script_paths(message);
+    if referenced_paths.is_empty() {
+        return;
+    }
+
+    for action in actions.iter_mut() {
+        if action["type"].as_str() != Some("attach_script") {
+            continue;
+        }
+
+        let Some(path) = action["path"].as_str() else {
+            continue;
+        };
+
+        if !referenced_paths.iter().any(|referenced| referenced == path) {
+            continue;
+        }
+
+        let content = action["content"].clone();
+        *action = serde_json::json!({
+            "type": "write_script",
+            "path": path,
+            "content": content,
+        });
+    }
+
+    if let Some(script) = open_script {
+        for action in actions.iter_mut() {
+            if action["type"].as_str() != Some("write_script") {
+                continue;
+            }
+            if action["path"].is_null() {
+                action["path"] = serde_json::json!(script.path);
+            }
+        }
+    }
+}
+
+fn referenced_script_paths(message: &str) -> Vec<String> {
+    message
+        .split_whitespace()
+        .filter_map(|token| token.strip_prefix('#'))
+        .map(|path| path.trim_matches(|ch: char| ",.!?;:()[]{}<>\"'`".contains(ch)))
+        .filter(|path| path.ends_with(".lua"))
+        .map(str::to_string)
+        .collect()
 }
 
 fn normalize_spatial_actions(
@@ -984,6 +1304,189 @@ pub async fn list_ollama_models() -> Result<Vec<String>, String> {
         })
         .unwrap_or_default();
     Ok(models)
+}
+
+const SUGGESTION_MODEL: &str = "qwen2.5:0.5b";
+
+fn is_small_model(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    ["0.5b", "135m", "360m", ":1b", "-1b", ":1.5b", "-1.5b", ":2b", "-2b"]
+        .iter()
+        .any(|pat| lower.contains(pat))
+}
+
+/// Finds an installed small model, or pulls qwen2.5:0.5b if none exists.
+/// Returns the model name to use for suggestions.
+#[tauri::command]
+pub async fn ensure_suggestion_model() -> Result<String, String> {
+    let client = reqwest::Client::new();
+
+    let tags: serde_json::Value = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(models) = tags["models"].as_array() {
+        for m in models {
+            if let Some(name) = m["name"].as_str() {
+                if is_small_model(name) {
+                    return Ok(name.to_string());
+                }
+            }
+        }
+    }
+
+    // No small model found — pull qwen2.5:0.5b
+    let resp = client
+        .post("http://localhost:11434/api/pull")
+        .json(&serde_json::json!({ "name": SUGGESTION_MODEL, "stream": false }))
+        .timeout(std::time::Duration::from_secs(900))
+        .send()
+        .await
+        .map_err(|e| format!("pull request failed: {}", e))?;
+
+    // Ollama may return NDJSON even with stream:false — grab the last line
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let last = body.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(last)
+        .unwrap_or(serde_json::json!({"status": "unknown"}));
+
+    match parsed["status"].as_str() {
+        Some("success") | Some("pulling manifest") => Ok(SUGGESTION_MODEL.to_string()),
+        _ => Err(format!("pull did not succeed: {}", last)),
+    }
+}
+
+#[derive(Serialize)]
+pub struct EntitySuggestion {
+    pub label: String,
+    pub prompt: String,
+    pub mode: String,
+}
+
+fn describe_component(c: &serde_json::Value) -> String {
+    match c["type"].as_str().unwrap_or("") {
+        "Transform" => format!(
+            "Transform(x={}, y={}, scale={}/{})",
+            c["x"], c["y"], c["scale_x"], c["scale_y"]
+        ),
+        "Script" => format!(
+            "Script(path={})",
+            c["path"].as_str().unwrap_or("none")
+        ),
+        "Sprite" => format!(
+            "Sprite({}x{}, texture={})",
+            c["width"], c["height"],
+            c["texture_path"].as_str().unwrap_or("none")
+        ),
+        "PhysicsBody" => format!(
+            "PhysicsBody(type={}, lock_rotation={})",
+            c["body_type"].as_str().unwrap_or("?"),
+            c["lock_rotation"].as_bool().unwrap_or(false)
+        ),
+        "Collider" => format!(
+            "Collider({}x{}, trigger={})",
+            c["width"], c["height"],
+            c["is_trigger"].as_bool().unwrap_or(false)
+        ),
+        "Camera" => format!(
+            "Camera(zoom={}, follow={:?})",
+            c["zoom"],
+            c["follow_entity"]
+        ),
+        "AudioSource" => format!(
+            "AudioSource(path={}, loop={})",
+            c["path"].as_str().unwrap_or("none"),
+            c["looping"].as_bool().unwrap_or(false)
+        ),
+        other => other.to_string(),
+    }
+}
+
+/// Asks a small local model for 3 actionable prompts specific to this entity.
+#[tauri::command]
+pub async fn generate_entity_suggestions(
+    entity_name: String,
+    components: Vec<serde_json::Value>,
+    model: String,
+) -> Result<Vec<EntitySuggestion>, String> {
+    let client = reqwest::Client::new();
+    let component_lines = if components.is_empty() {
+        "  (no components)".to_string()
+    } else {
+        components
+            .iter()
+            .map(|c| format!("  - {}", describe_component(c)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let prompt = format!(
+        r#"Game entity "{name}":
+{components}
+
+Write 3 short, specific action prompts for THIS entity based on its actual setup above.
+Reference the real component data (script filename, physics type, etc.) — do not invent generic gameplay ideas.
+JSON array only, no other text. mode "send" = complete prompt, "prefill" = needs user input (end with ": ").
+
+[
+  {{"label": "Short title", "prompt": "Specific prompt referencing actual data", "mode": "send"}},
+  {{"label": "Short title", "prompt": "Prompt needing detail: ", "mode": "prefill"}},
+  {{"label": "Short title", "prompt": "Specific prompt", "mode": "send"}}
+]"#,
+        name = entity_name,
+        components = component_lines,
+    );
+
+    let req_body = serde_json::json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": prompt }],
+        "stream": false,
+        "options": { "temperature": 0.3, "num_predict": 256 }
+    });
+
+    let resp: serde_json::Value = client
+        .post("http://localhost:11434/api/chat")
+        .json(&req_body)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let raw = resp["message"]["content"].as_str().unwrap_or("[]");
+    let stripped = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    // Find JSON array bounds to handle any leading prose from the model
+    let json_start = stripped.find('[').unwrap_or(0);
+    let json_end = stripped.rfind(']').map(|i| i + 1).unwrap_or(stripped.len());
+    let json_slice = &stripped[json_start..json_end];
+
+    let items: Vec<serde_json::Value> = serde_json::from_str(json_slice).unwrap_or_default();
+
+    let suggestions = items
+        .into_iter()
+        .filter_map(|item| {
+            let label = item["label"].as_str()?.to_string();
+            let prompt = item["prompt"].as_str()?.to_string();
+            let mode = item["mode"].as_str().unwrap_or("send").to_string();
+            Some(EntitySuggestion { label, prompt, mode })
+        })
+        .take(3)
+        .collect();
+
+    Ok(suggestions)
 }
 
 #[tauri::command]

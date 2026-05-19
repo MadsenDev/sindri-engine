@@ -38,6 +38,7 @@ format cannot preserve it, or the AI can generate invalid partial state.
 | Component metadata registry | Partial | Partial | No | N/A | Partial | No | No | No | Yes | Partial | Prototype |
 | Scene Graph / Hierarchy | Partial | Partial | Yes | Yes | Yes | Partial | Partial | Partial | Yes | Yes | Active |
 | Undo/Redo Commands | Yes | Partial | Partial | N/A | Partial | No | No | No | Yes | Partial | Active |
+| Runtime errors | Partial | Partial | Partial | N/A | Yes | No | No | Partial | Yes | Partial | Active |
 | AI Commands | Partial | Partial | Partial | N/A | Yes | Partial | Partial | Partial | Partial | Partial | Prototype |
 | Playback controls | Partial | Partial | Partial | N/A | Yes | No | Partial | Partial | Yes | Partial | Active |
 | Native play preview | Yes | Partial | Partial | N/A | Partial | No | No | Partial | Yes | Partial | Active |
@@ -57,9 +58,11 @@ This matrix is grounded in the current repo state:
 - Playback has explicit play/pause/stop control. Stop restores the edit-scene snapshot captured when playback starts, and autosave is suppressed while playback is not stopped.
 - Screenshot capture remains supported for AI/diagnostics, but it is now on-demand rather than a continuously polled editor viewport transport.
 - The server Lua runtime exposes the editor-scene subset used by live preview scripts, including direct `self.x`/`self.y` fields plus `vec2`, `self:transform()`, `self:sprite()`, and `self:camera()` helpers. This is still narrower than the core engine `ScriptRuntime`.
+- Runtime and Lua errors are now buffered server-side and exposed to the editor and AI, but they are still plain text logs rather than structured diagnostics with entity/script/source locations.
 - `register_builtin_metadata()` currently registers only `Transform`, so runtime reflection is not yet the source of truth for the editor's full component set.
 - Scene serialization is split: `crates/sindri/src/scene.rs` serializes the editor-facing JSON component enum, while `scene_physics.rs` captures physics snapshots and generic component payload helpers. Engine-only typed components such as `TilemapComponent`, `AnimatedSprite`, particle systems, lights, and gameplay markers are not represented in the editor scene enum today.
 - AI actions in the editor/Tauri layer can create/delete/rename entities, edit transforms, write/attach scripts, add/remove scene JSON components, and patch all seven scene JSON component variants. The standalone `sindri-ai` crate has a narrower action enum than the editor prompt/action executor.
+- AI script-edit requests now receive the current open Lua tab when script context is enabled, and `#scripts/foo.lua` mentions auto-load that referenced script into the request context for the current prompt.
 
 ## AI Capability Definitions
 

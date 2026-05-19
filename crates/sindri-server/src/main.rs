@@ -2,7 +2,7 @@ use sindri::component::Component;
 use sindri::math::{Camera2D, Transform2D, Vec2};
 use sindri::render::{Renderer, Sprite, TextureHandle};
 use sindri::scene::Scene;
-use sindri_server::routes::{PlaybackMode, PlaybackState, SharedPlayback};
+use sindri_server::routes::{PlaybackMode, PlaybackState, SharedErrors, SharedPlayback};
 use sindri_server::{serve, AppState, SharedScene};
 mod lua_runtime;
 use lua_runtime::LuaRuntime;
@@ -20,6 +20,18 @@ use winit::{
 
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
+
+fn push_error(errors: &SharedErrors, message: impl Into<String>) {
+    let message = message.into();
+    eprintln!("{message}");
+    if let Ok(mut errors) = errors.lock() {
+        errors.push(message);
+        if errors.len() > 50 {
+            let excess = errors.len() - 50;
+            errors.drain(0..excess);
+        }
+    }
+}
 
 fn default_scene() -> Scene {
     let mut scene = Scene::new("main");
@@ -398,6 +410,7 @@ fn run_preview_window(
     shared_scene: SharedScene,
     shared_keys: sindri_server::routes::SharedKeys,
     playback: SharedPlayback,
+    errors: SharedErrors,
 ) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     let mut window_attributes = Window::default_attributes();
@@ -409,7 +422,7 @@ fn run_preview_window(
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     println!("native play window ready");
 
-    let mut lua = LuaRuntime::new()?;
+    let mut lua = LuaRuntime::new(errors.clone())?;
     let mut camera_runtime = CameraRuntime::default();
     let mut last_tick = std::time::Instant::now();
     let mut was_stopped = true;
@@ -453,7 +466,7 @@ fn run_preview_window(
                     renderer.end_frame(frame)
                 }) {
                     Ok(()) => {}
-                    Err(e) => eprintln!("preview render error: {e}"),
+                    Err(e) => push_error(&errors, format!("preview render error: {e}")),
                 }
             }
             _ => {}
@@ -476,8 +489,59 @@ fn run_preview_window(
     Ok(())
 }
 
+const STREAM_W: u32 = 960;
+const STREAM_H: u32 = 540;
+
+fn run_headless(
+    scripts_dir: PathBuf,
+    shared_scene: SharedScene,
+    shared_keys: sindri_server::routes::SharedKeys,
+    playback: SharedPlayback,
+    errors: SharedErrors,
+    frame_tx: tokio::sync::broadcast::Sender<Vec<u8>>,
+) -> anyhow::Result<()> {
+    let mut renderer = Renderer::new_offscreen(STREAM_W, STREAM_H)?;
+    let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
+    let mut camera_runtime = CameraRuntime::default();
+    let mut lua = LuaRuntime::new(errors.clone())?;
+    let mut last_tick = std::time::Instant::now();
+    let mut was_stopped = true;
+    let frame_interval = std::time::Duration::from_millis(33);
+
+    println!("headless streaming ready (ws://127.0.0.1:7878/stream)");
+
+    loop {
+        let frame_start = std::time::Instant::now();
+
+        update_runtime(
+            &mut lua,
+            &shared_scene,
+            &scripts_dir,
+            &shared_keys,
+            &playback,
+            &mut last_tick,
+            &mut was_stopped,
+        );
+
+        if frame_tx.receiver_count() > 0 {
+            let snapshot = shared_scene.blocking_read().clone();
+            if let Ok(rgba) = renderer.render_offscreen_rgba(STREAM_W, STREAM_H, |r, frame| {
+                draw_scene_contents(r, frame, &snapshot, &mut camera_runtime, white_texture)
+            }) {
+                let _ = frame_tx.send(rgba);
+            }
+        }
+
+        let elapsed = frame_start.elapsed();
+        if elapsed < frame_interval {
+            std::thread::sleep(frame_interval - elapsed);
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    let headless = args.contains(&"--headless".to_string());
     let project_dir = args
         .iter()
         .position(|a| a == "--project-dir")
@@ -506,6 +570,14 @@ fn main() -> anyhow::Result<()> {
     let shared_keys: sindri_server::routes::SharedKeys =
         Arc::new(RwLock::new(std::collections::HashSet::new()));
     let shared_playback: SharedPlayback = Arc::new(Mutex::new(PlaybackState::default()));
+    let shared_errors: SharedErrors = Arc::new(Mutex::new(Vec::new()));
+
+    let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<Vec<u8>>(4);
+    let frame_tx_opt: Option<tokio::sync::broadcast::Sender<Vec<u8>>> = if headless {
+        Some(frame_tx.clone())
+    } else {
+        None
+    };
 
     // HTTP server runs on a background thread with its own tokio runtime.
     {
@@ -514,9 +586,13 @@ fn main() -> anyhow::Result<()> {
         let scene_path_sv = shared_scene_path.clone();
         let keys_sv = shared_keys.clone();
         let playback_sv = shared_playback.clone();
+        let errors_sv = shared_errors.clone();
+        let state_errors = shared_errors.clone();
+        let thread_errors = shared_errors.clone();
         let scripts_root = scripts_dir.clone();
         let project_root = project_dir.clone();
         let project_label = project_dir.display().to_string();
+        let frame_tx_sv = frame_tx_opt.clone();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -551,36 +627,60 @@ fn main() -> anyhow::Result<()> {
                             match ScreenshotCapture::new() {
                                 Ok(new_capture) => *capture = Some(new_capture),
                                 Err(e) => {
-                                    eprintln!("screenshot renderer error: {e}");
+                                    push_error(
+                                        &errors_sv,
+                                        format!("screenshot renderer error: {e}"),
+                                    );
                                     return None;
                                 }
                             }
                         }
-                        capture
+                        match capture
                             .as_mut()
                             .and_then(|capture| capture.capture(scene).ok())
+                        {
+                            Some(image) => Some(image),
+                            None => {
+                                push_error(&errors_sv, "screenshot capture failed".to_string());
+                                None
+                            }
+                        }
                     }),
                     scripts_root,
                     model: String::new(),
                     keys: keys_sv,
                     playback: playback_sv,
+                    errors: state_errors.clone(),
+                    frame_tx: frame_tx_sv,
                 };
 
                 println!("sindri engine | project: {project_label}");
                 println!("listening on http://127.0.0.1:7878");
 
                 if let Err(e) = serve(state).await {
-                    eprintln!("server error: {e}");
+                    push_error(&thread_errors, format!("server error: {e}"));
                 }
             });
         });
     }
 
-    run_preview_window(
-        &project_dir,
-        scripts_dir,
-        shared_scene,
-        shared_keys,
-        shared_playback,
-    )
+    if headless {
+        run_headless(
+            scripts_dir,
+            shared_scene,
+            shared_keys,
+            shared_playback,
+            shared_errors,
+            frame_tx,
+        )
+    } else {
+        run_preview_window(
+            &project_dir,
+            scripts_dir,
+            shared_scene,
+            shared_keys,
+            shared_playback,
+            shared_errors,
+        )
+    }
 }

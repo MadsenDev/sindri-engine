@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use sindri::component::Component;
 use sindri::scene::Scene;
+use sindri_server::routes::SharedErrors;
 
 enum CameraCommand {
     SetActive(bool),
@@ -260,10 +261,11 @@ pub struct LuaRuntime {
     // Key state shared into Lua globals each frame
     keys: Arc<RwLock<HashSet<String>>>,
     prev_keys: HashSet<String>,
+    errors: SharedErrors,
 }
 
 impl LuaRuntime {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(errors: SharedErrors) -> anyhow::Result<Self> {
         let lua = Lua::new();
 
         let print_fn = lua.create_function(|_, args: mlua::MultiValue| {
@@ -319,7 +321,20 @@ impl LuaRuntime {
             elapsed: 0.0,
             keys,
             prev_keys: HashSet::new(),
+            errors,
         })
+    }
+
+    fn report_error(&self, message: impl Into<String>) {
+        let message = message.into();
+        eprintln!("{message}");
+        if let Ok(mut errors) = self.errors.lock() {
+            errors.push(message);
+            if errors.len() > 50 {
+                let excess = errors.len() - 50;
+                errors.drain(0..excess);
+            }
+        }
     }
 
     fn update_key_globals(&mut self, new_keys: &HashSet<String>) {
@@ -367,7 +382,7 @@ impl LuaRuntime {
             .exec()
         {
             Ok(_) => {}
-            Err(e) => eprintln!("[lua] load error ({path}): {e}"),
+            Err(e) => self.report_error(format!("[lua] load error ({path}): {e}")),
         }
 
         let reg = self.lua.create_registry_value(env)?;
@@ -688,7 +703,7 @@ impl LuaRuntime {
                 };
 
                 if let Err(e) = self.load_env(entity_id, &script_path, &code) {
-                    eprintln!("[lua] env error: {e}");
+                    self.report_error(format!("[lua] env error: {e}"));
                     continue;
                 }
 
@@ -734,7 +749,9 @@ impl LuaRuntime {
                         Ok(transform_fn) => {
                             let _ = self_tbl.set("transform", transform_fn);
                         }
-                        Err(e) => eprintln!("[lua] transform method error ({script_path}): {e}"),
+                        Err(e) => self.report_error(format!(
+                            "[lua] transform method error ({script_path}): {e}"
+                        )),
                     }
                 } else {
                     match self.lua.create_function(|_, _: mlua::MultiValue| {
@@ -743,7 +760,9 @@ impl LuaRuntime {
                         Ok(transform_fn) => {
                             let _ = self_tbl.set("transform", transform_fn);
                         }
-                        Err(e) => eprintln!("[lua] transform method error ({script_path}): {e}"),
+                        Err(e) => self.report_error(format!(
+                            "[lua] transform method error ({script_path}): {e}"
+                        )),
                     }
                 }
                 if let Some(sprite) = sprite.clone() {
@@ -754,7 +773,9 @@ impl LuaRuntime {
                         Ok(sprite_fn) => {
                             let _ = self_tbl.set("sprite", sprite_fn);
                         }
-                        Err(e) => eprintln!("[lua] sprite method error ({script_path}): {e}"),
+                        Err(e) => self.report_error(format!(
+                            "[lua] sprite method error ({script_path}): {e}"
+                        )),
                     }
                 } else {
                     match self.lua.create_function(|_, _: mlua::MultiValue| {
@@ -763,7 +784,9 @@ impl LuaRuntime {
                         Ok(sprite_fn) => {
                             let _ = self_tbl.set("sprite", sprite_fn);
                         }
-                        Err(e) => eprintln!("[lua] sprite method error ({script_path}): {e}"),
+                        Err(e) => self.report_error(format!(
+                            "[lua] sprite method error ({script_path}): {e}"
+                        )),
                     }
                 }
                 if let Some(camera) = camera.clone() {
@@ -775,7 +798,9 @@ impl LuaRuntime {
                         Ok(camera_fn) => {
                             let _ = self_tbl.set("camera", camera_fn);
                         }
-                        Err(e) => eprintln!("[lua] camera method error ({script_path}): {e}"),
+                        Err(e) => self.report_error(format!(
+                            "[lua] camera method error ({script_path}): {e}"
+                        )),
                     }
                 } else {
                     match self.lua.create_function(|_, _: mlua::MultiValue| {
@@ -784,7 +809,9 @@ impl LuaRuntime {
                         Ok(camera_fn) => {
                             let _ = self_tbl.set("camera", camera_fn);
                         }
-                        Err(e) => eprintln!("[lua] camera method error ({script_path}): {e}"),
+                        Err(e) => self.report_error(format!(
+                            "[lua] camera method error ({script_path}): {e}"
+                        )),
                     }
                 }
 
@@ -792,7 +819,7 @@ impl LuaRuntime {
                 if !self.started.contains(&key) {
                     if let Ok(f) = env.get::<_, mlua::Function>("on_start") {
                         if let Err(e) = f.call::<_, ()>(self_tbl.clone()) {
-                            eprintln!("[lua] on_start error ({script_path}): {e}");
+                            self.report_error(format!("[lua] on_start error ({script_path}): {e}"));
                         }
                     }
                     self.started.insert(key.clone());
@@ -801,7 +828,7 @@ impl LuaRuntime {
                 // on_update
                 if let Ok(f) = env.get::<_, mlua::Function>("on_update") {
                     if let Err(e) = f.call::<_, ()>((self_tbl.clone(), dt as f64)) {
-                        eprintln!("[lua] on_update error ({script_path}): {e}");
+                        self.report_error(format!("[lua] on_update error ({script_path}): {e}"));
                     }
                 }
 

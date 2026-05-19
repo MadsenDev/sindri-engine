@@ -7,11 +7,13 @@ pub fn run() {
         .manage(commands::EngineProcess(std::sync::Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             commands::get_scene,
+            commands::get_engine_status,
             commands::put_scene,
             commands::save_scene,
             commands::open_scene_file,
             commands::patch_transform,
             commands::get_screenshot,
+            commands::get_runtime_errors,
             commands::send_ai_message,
             commands::create_entity,
             commands::apply_action,
@@ -19,6 +21,9 @@ pub fn run() {
             commands::write_script,
             commands::list_scripts,
             commands::list_ollama_models,
+            commands::generate_proposal,
+            commands::ensure_suggestion_model,
+            commands::generate_entity_suggestions,
             commands::rename_entity,
             commands::add_component,
             commands::patch_component,

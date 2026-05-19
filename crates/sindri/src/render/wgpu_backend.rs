@@ -500,6 +500,8 @@ struct WgpuBackend {
     uniform_write_offset: u64, // Current offset for writing uniforms
     bind_group_cache: HashMap<(TextureHandle, u64), wgpu::BindGroup>, // Cache bind groups per (texture, offset)
     text_renderer: TextRenderer,
+    /// Reusable staging buffer for GPU→CPU readback. Avoids per-frame allocation.
+    readback_buffer: Option<(wgpu::Buffer, u64)>,
 }
 
 #[repr(C)]
@@ -679,6 +681,7 @@ impl WgpuBackend {
             light_uniform_write_offset: 0,
             bind_group_cache: HashMap::new(),
             text_renderer: TextRenderer::new(),
+            readback_buffer: None,
         })
     }
 
@@ -734,6 +737,7 @@ impl WgpuBackend {
             light_uniform_write_offset: 0,
             bind_group_cache: HashMap::new(),
             text_renderer: TextRenderer::new(),
+            readback_buffer: None,
         })
     }
 
@@ -1663,12 +1667,23 @@ impl WgpuBackend {
         let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
         let buffer_size = padded_bytes_per_row as u64 * height as u64;
 
-        let output_buffer = self.device.create_buffer(&BufferDescriptor {
-            label: Some("offscreen-readback"),
-            size: buffer_size,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        // Reuse the staging buffer if it already has the right size.
+        let needs_new = self
+            .readback_buffer
+            .as_ref()
+            .map_or(true, |(_, sz)| *sz != buffer_size);
+        if needs_new {
+            self.readback_buffer = Some((
+                self.device.create_buffer(&BufferDescriptor {
+                    label: Some("offscreen-readback"),
+                    size: buffer_size,
+                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }),
+                buffer_size,
+            ));
+        }
+        let output_buffer = &self.readback_buffer.as_ref().unwrap().0;
 
         let encoder = frame
             .encoder
@@ -1683,7 +1698,7 @@ impl WgpuBackend {
                 aspect: TextureAspect::All,
             },
             TexelCopyBufferInfo {
-                buffer: &output_buffer,
+                buffer: output_buffer,
                 layout: TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),

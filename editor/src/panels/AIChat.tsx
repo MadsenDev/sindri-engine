@@ -24,6 +24,7 @@ interface Props {
   openScript: { path: string; content: string } | null;
   selectedModel: string | null;
   projectFiles: ProjectFile[];
+  runtimeErrors: string[];
   onSceneChange: () => void;
 }
 
@@ -33,6 +34,18 @@ interface MentionCandidate {
   label: string;
   insert: string;
   hint?: string;    // secondary info shown in the popup
+}
+
+function extractReferencedScriptPath(message: string, projectFiles: ProjectFile[]): string | null {
+  const matches = Array.from(message.matchAll(/#([^\s]+)/g), m => m[1]);
+  for (const referenced of matches) {
+    const normalized = referenced.trim();
+    const hit = projectFiles.find(
+      file => file.path === normalized && file.kind === "script"
+    );
+    if (hit) return hit.path;
+  }
+  return null;
 }
 
 function chatHistoryKey(projectPath: string) {
@@ -54,7 +67,7 @@ function loadMessages(projectPath: string): Message[] {
   } catch { return []; }
 }
 
-export default function AIChat({ scene, projectPath, openScript: _openScript, selectedModel, projectFiles, onSceneChange }: Props) {
+export default function AIChat({ scene, projectPath, openScript, selectedModel, projectFiles, runtimeErrors, onSceneChange }: Props) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(projectPath));
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
@@ -190,6 +203,19 @@ export default function AIChat({ scene, projectPath, openScript: _openScript, se
     currentMessages: Message[],
     isRetry: boolean,
   ): Promise<Message[]> => {
+    const referencedScriptPath = extractReferencedScriptPath(message, projectFiles);
+    const shouldIncludeScript = activeFlags.has("script") || referencedScriptPath !== null;
+    let scriptContext = shouldIncludeScript ? openScript : null;
+
+    if (referencedScriptPath && referencedScriptPath !== openScript?.path) {
+      try {
+        const content = await invoke<string>("get_script", { path: referencedScriptPath });
+        scriptContext = { path: referencedScriptPath, content };
+      } catch {
+        scriptContext = null;
+      }
+    }
+
     const history = currentMessages.flatMap(m => {
       if (m.role === "user" && !m.isErrorReport) return [{ role: "user", content: m.text }];
       if (m.role === "ai")                        return [{ role: "assistant", content: m.text }];
@@ -200,12 +226,13 @@ export default function AIChat({ scene, projectPath, openScript: _openScript, se
       message,
       contextFlags: {
         includeScene: activeFlags.has("scene"),
-        includeScript: activeFlags.has("script"),
+        includeScript: shouldIncludeScript,
         includeViewport: activeFlags.has("viewport"),
         includeErrors: activeFlags.has("errors"),
       },
       model: selectedModel ?? undefined,
       history,
+      openScript: scriptContext,
     });
 
     const aiMsg: Message = {
@@ -270,110 +297,87 @@ export default function AIChat({ scene, projectPath, openScript: _openScript, se
   const flags: ContextFlag[] = ["scene", "script", "viewport", "errors"];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", minHeight: 0 }}>
-      {/* AI header */}
+    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, borderTop: "1px solid var(--rule)", background: "var(--paper)" }}>
+      {/* Header */}
       <div style={{
-        height: "38px",
-        borderBottom: "1px solid var(--border)",
-        display: "flex",
-        alignItems: "center",
-        padding: "0 10px",
-        gap: "8px",
-        flexShrink: 0,
+        height: "36px",
+        borderBottom: "1px solid var(--rule)",
+        display: "flex", alignItems: "center",
+        padding: "0 16px", gap: "8px", flexShrink: 0,
       }}>
         <span style={{
-          fontFamily: "var(--font-ui)",
-          fontWeight: 700,
-          fontSize: "12px",
-          color: "var(--text-bright)",
-        }}>AI Assistant</span>
+          fontFamily: "var(--font-ui)", fontSize: "12px",
+          color: "var(--amber)", display: "flex", alignItems: "center", gap: "6px",
+        }}>
+          ✦ AI Chat
+        </span>
         <div style={{ flex: 1 }} />
-        {messages.length > 0 && (
-          <button
-            onClick={() => {
-              setMessages([]);
-              localStorage.removeItem(chatHistoryKey(projectPath));
-            }}
-            title="Clear history"
-            style={{
-              background: "none", border: "none", color: "var(--text-dim)",
-              cursor: "pointer", fontSize: "11px", padding: "2px 4px",
-              borderRadius: "var(--radius)",
-            }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "var(--text-muted)"}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "var(--text-dim)"}
-          >✕</button>
-        )}
-        {selectedModel && (
-          <div style={{
-            background: "var(--ai-glow)",
-            border: "1px solid var(--ai-dim)",
-            borderRadius: "var(--radius)",
-            padding: "2px 7px",
-            fontSize: "10px",
-            color: "var(--ai)",
-            maxWidth: "140px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}>{selectedModel}</div>
-        )}
-      </div>
-
-      {/* Context bar */}
-      <div style={{
-        height: "28px",
-        borderBottom: "1px solid var(--border)",
-        display: "flex",
-        alignItems: "center",
-        padding: "0 8px",
-        gap: "4px",
-        flexShrink: 0,
-      }}>
+        {/* Context flags */}
         {flags.map(flag => {
           const active = activeFlags.has(flag);
           return (
             <button key={flag} onClick={() => toggleFlag(flag)} style={{
-              background: active ? "var(--accent-glow)" : "var(--bg-3)",
-              border: `1px solid ${active ? "var(--accent-dim)" : "var(--border)"}`,
-              borderRadius: "var(--radius)",
-              color: active ? "var(--accent)" : "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              fontSize: "10px",
-              padding: "2px 7px",
-              cursor: "pointer",
+              background: active ? "rgba(240,192,80,0.12)" : "transparent",
+              border: `1px solid ${active ? "var(--amber)" : "var(--rule-2)"}`,
+              color: active ? "var(--amber)" : "var(--ink-4)",
+              fontFamily: "var(--font-mono)", fontSize: "10px",
+              padding: "2px 6px", cursor: "pointer",
             }}>{flag}</button>
           );
         })}
+        {messages.length > 0 && (
+          <button
+            onClick={() => { setMessages([]); localStorage.removeItem(chatHistoryKey(projectPath)); }}
+            title="Clear history"
+            style={{
+              background: "none", border: "none", color: "var(--ink-4)",
+              cursor: "pointer", fontSize: "12px", padding: "2px 4px",
+              fontFamily: "var(--font-mono)",
+            }}
+          >✕</button>
+        )}
       </div>
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflow: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
-        {messages.map((msg, i) => (
-          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
-            <span style={{
-              fontSize: "9px",
-              color: "var(--text-dim)",
-              letterSpacing: "0.05em",
-              marginBottom: "3px",
-            }}>{msg.role === "user" ? "you" : "ai"}</span>
+      {runtimeErrors.length > 0 && (
+        <div style={{
+          borderBottom: "1px solid var(--rule)",
+          background: "rgba(224,85,85,0.08)",
+          padding: "6px 16px",
+          fontSize: "11px", color: "var(--red)",
+          lineHeight: 1.4, flexShrink: 0,
+          fontFamily: "var(--font-mono)",
+        }}>
+          {runtimeErrors.length} runtime error{runtimeErrors.length !== 1 ? "s" : ""}
+        </div>
+      )}
 
+      {/* Messages */}
+      <div style={{
+        flex: 1, overflow: "auto", maxHeight: "240px",
+        padding: "8px 0",
+        display: "flex", flexDirection: "column",
+      }}>
+        {messages.map((msg, i) => (
+          <div key={i} style={{
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--rule)",
+          }}>
+            <span style={{
+              fontSize: "10px", color: "var(--ink-4)",
+              fontFamily: "var(--font-mono)", display: "block", marginBottom: "3px",
+            }}>
+              {msg.role === "user" ? "you" : "✦ sindri"}
+            </span>
             <div style={{
-              maxWidth: "92%",
-              padding: "7px 10px",
-              background: msg.role === "user" ? "var(--accent-glow)" : "var(--ai-glow)",
-              border: `1px solid ${msg.role === "user" ? "var(--accent-dim)" : "var(--ai-dim)"}`,
-              borderRadius: msg.role === "user" ? "8px 8px 8px 2px" : "2px 8px 8px 8px",
-              fontSize: "11px",
-              color: "var(--text-bright)",
-              lineHeight: 1.6,
+              fontSize: "12.5px",
+              color: msg.role === "ai" ? "var(--ink)" : "var(--ink-2)",
+              fontFamily: "var(--font-ui)", lineHeight: 1.55,
               wordBreak: "break-word",
             }}>
               {msg.role === "ai" ? <Markdown text={msg.text} /> : msg.text}
             </div>
-
             {msg.actions && msg.actions.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px", width: "92%" }}>
+              <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 {msg.actions.map((action, ai) => (
                   <ActionCard
                     key={ai}
@@ -390,48 +394,37 @@ export default function AIChat({ scene, projectPath, openScript: _openScript, se
         ))}
 
         {thinking && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "9px", color: "var(--text-dim)", letterSpacing: "0.05em" }}>ai</span>
-            <div style={{ display: "flex", gap: "3px", alignItems: "center" }}>
-              {[0, 1, 2].map(d => (
-                <span key={d} style={{
-                  width: "5px",
-                  height: "5px",
-                  borderRadius: "50%",
-                  background: "var(--ai)",
-                  display: "inline-block",
-                  animation: `bounce 0.8s ${d * 0.15}s infinite`,
-                }} />
-              ))}
-              <span style={{ fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}>analyzing…</span>
-            </div>
+          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "10px", color: "var(--ink-4)", fontFamily: "var(--font-mono)" }}>✦ sindri</span>
+            {[0, 1, 2].map(d => (
+              <span key={d} style={{
+                width: "6px", height: "6px", background: "var(--amber)", display: "inline-block",
+                animation: `v3dot 900ms ${d * 140}ms ease-in-out infinite`,
+              }} />
+            ))}
           </div>
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
       {/* Chat input */}
       <div style={{
-        background: "var(--bg-0)",
-        borderTop: "1px solid var(--border)",
-        padding: "8px",
-        flexShrink: 0,
-        position: "relative",
+        background: "var(--paper-2)",
+        borderTop: "1px solid var(--rule)",
+        padding: "8px 16px", flexShrink: 0, position: "relative",
       }}>
-        {/* Mention popup (@entities / #files) */}
+        {/* Mention popup */}
         {mentionQuery !== null && filteredCandidates.length > 0 && (
           <div style={{
-            position: "absolute", bottom: "calc(100% - 4px)", left: "8px", right: "8px",
-            background: "var(--bg-2)", border: "1px solid var(--border-bright)",
-            borderRadius: "6px", zIndex: 100, overflow: "hidden",
+            position: "absolute", bottom: "calc(100% - 4px)", left: "16px", right: "16px",
+            background: "var(--paper-2)", border: "1px solid var(--rule-2)",
+            zIndex: 100, overflow: "hidden",
             boxShadow: "0 -4px 16px rgba(0,0,0,0.4)",
-            maxHeight: "180px", overflowY: "auto",
+            maxHeight: "160px", overflowY: "auto",
           }}>
             <div style={{
-              padding: "4px 8px 2px", fontSize: "9px", letterSpacing: "0.08em",
-              color: mentionSigil === "@" ? "var(--accent)" : "var(--ai)",
-              fontFamily: "var(--font-ui)", fontWeight: 600, textTransform: "uppercase",
+              padding: "4px 10px 2px", fontSize: "10px",
+              color: "var(--amber)", fontFamily: "var(--font-mono)",
             }}>
               {mentionSigil === "@" ? "entities & components" : "project files"}
             </div>
@@ -442,100 +435,64 @@ export default function AIChat({ scene, projectPath, openScript: _openScript, se
                 onMouseEnter={() => setMentionIdx(i)}
                 style={{
                   display: "flex", alignItems: "center", gap: "8px",
-                  width: "100%", textAlign: "left",
-                  padding: "4px 10px",
-                  background: i === mentionIdx ? (mentionSigil === "@" ? "var(--accent-glow)" : "var(--ai-glow)") : "none",
+                  width: "100%", textAlign: "left", padding: "4px 10px",
+                  background: i === mentionIdx ? "rgba(240,192,80,0.10)" : "none",
                   border: "none",
-                  borderLeft: `2px solid ${i === mentionIdx ? (mentionSigil === "@" ? "var(--accent)" : "var(--ai)") : "transparent"}`,
-                  color: i === mentionIdx ? (mentionSigil === "@" ? "var(--accent)" : "var(--ai)") : "var(--text-bright)",
+                  borderLeft: `2px solid ${i === mentionIdx ? "var(--amber)" : "transparent"}`,
+                  color: i === mentionIdx ? "var(--amber)" : "var(--ink-2)",
                   fontFamily: "var(--font-mono)", fontSize: "11px", cursor: "pointer",
                 }}
               >
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {c.label}
-                </span>
-                {c.hint && (
-                  <span style={{ fontSize: "9px", color: "var(--text-dim)", flexShrink: 0 }}>
-                    {c.hint}
-                  </span>
-                )}
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.label}</span>
+                {c.hint && <span style={{ fontSize: "9px", color: "var(--ink-4)", flexShrink: 0 }}>{c.hint}</span>}
               </button>
             ))}
           </div>
         )}
 
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={handleInputChange}
+          onKeyDown={e => {
+            if (mentionQuery !== null && filteredCandidates.length > 0) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, filteredCandidates.length - 1)); return; }
+              if (e.key === "ArrowUp")   { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return; }
+              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertMention(filteredCandidates[mentionIdx]); return; }
+              if (e.key === "Escape")    { setMentionQuery(null); return; }
+            }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+          }}
+          placeholder="Ask about your scene… (@ to mention)"
+          rows={2}
+          style={{
+            width: "100%", background: "var(--paper)",
+            border: "1px solid var(--rule-2)", outline: "none", resize: "none",
+            fontFamily: "var(--font-ui)", fontSize: "12.5px",
+            color: "var(--ink)", padding: "8px 10px", lineHeight: 1.5,
+          }}
+        />
         <div style={{
-          background: "var(--bg-2)",
-          border: `1px solid var(--border-bright)`,
-          borderRadius: "6px",
-          overflow: "hidden",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginTop: "6px",
         }}>
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={e => {
-              if (mentionQuery !== null && filteredCandidates.length > 0) {
-                if (e.key === "ArrowDown") { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, filteredCandidates.length - 1)); return; }
-                if (e.key === "ArrowUp")   { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return; }
-                if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertMention(filteredCandidates[mentionIdx]); return; }
-                if (e.key === "Escape")    { setMentionQuery(null); return; }
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Ask about your scene… (type @ to mention an entity)"
-            rows={3}
+          <span style={{ fontSize: "10.5px", color: "var(--ink-4)", fontFamily: "var(--font-mono)" }}>
+            {[...activeFlags].join(" · ")} in context
+          </span>
+          <button
+            onClick={sendMessage}
+            disabled={thinking || !input.trim()}
             style={{
-              width: "100%",
-              background: "transparent",
-              border: "none",
-              outline: "none",
-              resize: "none",
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              color: "var(--text-bright)",
-              padding: "8px 8px 4px",
-              lineHeight: 1.5,
+              background: thinking || !input.trim() ? "transparent" : "var(--ink)",
+              border: "1px solid var(--rule-2)",
+              color: thinking || !input.trim() ? "var(--ink-4)" : "var(--paper)",
+              fontFamily: "var(--font-ui)", fontSize: "11.5px",
+              padding: "4px 12px",
+              cursor: thinking || !input.trim() ? "default" : "pointer",
             }}
-          />
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "4px 8px",
-          }}>
-            <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>
-              ↑ {[...activeFlags].join(" · ")} in context
-            </span>
-            <button
-              onClick={sendMessage}
-              disabled={thinking || !input.trim()}
-              style={{
-                background: thinking || !input.trim() ? "var(--bg-3)" : "var(--ai)",
-                border: "none",
-                borderRadius: "var(--radius)",
-                color: thinking || !input.trim() ? "var(--text-muted)" : "#fff",
-                fontFamily: "var(--font-ui)",
-                fontWeight: 700,
-                fontSize: "11px",
-                padding: "4px 10px",
-                cursor: thinking || !input.trim() ? "default" : "pointer",
-                letterSpacing: "0.05em",
-              }}
-            >↵ SEND</button>
-          </div>
+          >↵ send</button>
         </div>
       </div>
-
-      <style>{`
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}</style>
     </div>
   );
 }
@@ -670,28 +627,6 @@ function Markdown({ text }: { text: string }) {
 
 // ─── Action display ───────────────────────────────────────────────────────────
 
-function entityRef(a: Record<string, unknown>): string {
-  if (a.entity_name) return `"${a.entity_name}"`;
-  if (a.entity_id != null) return `#${a.entity_id}`;
-  return "?";
-}
-
-function ActionBody({ action }: { action: AiAction }) {
-  const a = action as Record<string, unknown>;
-  switch (action.type) {
-    case "suggest_fix":      return <>{String(a.description ?? "")}</>;
-    case "edit_transform":   return <>Entity {entityRef(a)}</>;
-    case "create_entity":    return <>Name: {String(a.name ?? "")}</>;
-    case "delete_entity":    return <>Entity {entityRef(a)}</>;
-    case "rename_entity":    return <>Entity {entityRef(a)} → {String(a.name ?? "")}</>;
-    case "write_script":     return <>Path: {String(a.path ?? "")}</>;
-    case "attach_script":    return <>Entity {entityRef(a)} ← {String(a.path ?? "")}</>;
-    case "add_component":    return <>Entity {entityRef(a)} + {String(a.component_type ?? "")}</>;
-    case "remove_component": return <>Entity {entityRef(a)} − {String(a.component_type ?? "")}</>;
-    case "patch_component":  return <>Entity {entityRef(a)} [{String(a.component_idx ?? "?")}]</>;
-    default: return <>{action.type}</>;
-  }
-}
 
 interface ActionCardProps {
   action: AiAction;
@@ -724,65 +659,22 @@ function ActionCard({ action, status, onApply }: ActionCardProps) {
   const ss = STATUS_STYLE[status] ?? STATUS_STYLE.pending;
 
   return (
-    <div style={{
-      background: "var(--bg-2)",
-      border: `1px solid ${status === "failed" ? "rgba(220,60,60,0.3)" : "var(--border)"}`,
-      borderRadius: "var(--radius)",
-      overflow: "hidden",
-      fontSize: "10px",
+    <span style={{
+      fontFamily: "var(--font-mono)", fontSize: "10.5px",
+      padding: "2px 8px",
+      border: `1px solid ${ss.border}`,
+      color: ss.color,
+      display: "inline-flex", alignItems: "center", gap: "6px",
     }}>
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "5px 8px",
-        borderBottom: "1px solid var(--border)",
-      }}>
-        <span style={{ color: "var(--text-bright)", fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: "11px" }}>{label}</span>
-        <div style={{ flex: 1 }} />
-        <span style={{
-          padding: "1px 6px",
-          borderRadius: "var(--radius)",
-          background: ss.bg,
-          border: `1px solid ${ss.border}`,
-          color: ss.color,
-          fontSize: "9px",
-        }}>{ss.label}</span>
-      </div>
-
-      <div style={{ padding: "6px 8px", color: "var(--text-muted)", lineHeight: 1.5 }}>
-        <ActionBody action={action} />
-      </div>
-
+      {label} · {ss.label}
       {isSuggestion && (
-        <div style={{
-          display: "flex",
-          gap: "4px",
-          padding: "4px 8px",
-          borderTop: "1px solid var(--border)",
-        }}>
-          <button onClick={onApply} style={{
-            background: "var(--ai-glow)",
-            border: "1px solid var(--ai-dim)",
-            borderRadius: "var(--radius)",
-            color: "var(--ai)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            padding: "3px 8px",
-            cursor: "pointer",
-          }}>Apply fix</button>
-          <button style={{
-            background: "none",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            padding: "3px 8px",
-            cursor: "pointer",
-          }}>Dismiss</button>
-        </div>
+        <button onClick={onApply} style={{
+          background: "none", border: "none",
+          color: "var(--amber)", cursor: "pointer",
+          fontFamily: "var(--font-mono)", fontSize: "10px",
+          padding: 0, marginLeft: "4px",
+        }}>apply</button>
       )}
-    </div>
+    </span>
   );
 }

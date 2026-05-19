@@ -36,6 +36,9 @@ All notable changes to this project will be documented in this file.
   - Added explicit Play, Pause, and Stop controls; Stop restores the edit-scene snapshot captured when playback starts.
   - Added basic Scene view Move, Scale, and Rotate transform tools with gizmo hints and Shift snapping.
   - Added transform undo/redo for scene-view edits and an explicit scene save/dirty indicator.
+  - Added buffered runtime/Lua error reporting via `sindri-server`, surfaced in the editor footer and AI context pipeline.
+  - Fixed AI script-edit context so the current Lua tab is sent to the model, and `#scripts/foo.lua` mentions auto-resolve to that script even when the script context chip is off.
+  - Normalized explicit `#scripts/foo.lua` requests so AI `attach_script` actions targeting that referenced file are rewritten to `write_script` before execution.
   - Added `rendering` for particles, lighting, camera effects, animation-like motion, and large object counts.
   - Kept `platformer` as the Rust-first physics/gameplay baseline.
   - Promoted `scripted_asteroids` as the flagship Lua scripting showcase.

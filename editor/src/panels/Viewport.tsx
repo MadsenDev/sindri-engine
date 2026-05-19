@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import type { ActiveTool, Scene, Entity } from "../App";
+import type { ActiveTool, Scene, Entity, GhostEntity } from "../App";
 
 interface Props {
   scene: Scene | null;
@@ -9,6 +9,8 @@ interface Props {
   onTransformCommit: (change: TransformChange) => void;
   engineReady: boolean;
   isPlaying: boolean;
+  ghostEntities?: GhostEntity[];
+  hoveredChangeId?: string | null;
 }
 
 interface Camera {
@@ -17,17 +19,17 @@ interface Camera {
   zoom: number; // pixels per world unit
 }
 
-const BG = "#0a0b0d";
-const GRID_MINOR = "rgba(255,255,255,0.035)";
-const GRID_MAJOR = "rgba(255,255,255,0.075)";
-const AXIS_COLOR = "rgba(255,255,255,0.15)";
-const ENTITY_COLOR = "#4da6ff";
-const SELECTED_COLOR = "#e8a838";
-const COLLIDER_COLOR = "rgba(80,230,100,0.35)";
-const CAMERA_COLOR = "#5b8aff";
-const LABEL_COLOR = "#8a9bb0";
+const BG = "#0d1117";
+const GRID_MINOR = "rgba(230,225,212,0.04)";
+const GRID_MAJOR = "rgba(230,225,212,0.08)";
+const AXIS_COLOR = "rgba(230,225,212,0.12)";
+const ENTITY_COLOR = "#6dbcdb";      // cyan
+const SELECTED_COLOR = "#f0c050";    // amber
+const COLLIDER_COLOR = "rgba(155,176,112,0.35)";  // moss
+const CAMERA_COLOR = "#6dbcdb";      // cyan
+const LABEL_COLOR = "#8a8580";       // ink-3
 
-export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, engineReady, isPlaying }: Props) {
+export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, engineReady, isPlaying, ghostEntities, hoveredChangeId }: Props) {
   const [tab, setTab] = useState<"scene" | "game">("scene");
 
   // Auto-switch to game tab when play starts, back to scene when stopped
@@ -39,28 +41,33 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
       {/* Tab bar */}
       <div style={{
-        height: "30px", background: "var(--bg-2)",
-        borderBottom: "1px solid var(--border)",
+        height: "42px", background: "var(--paper)",
+        borderBottom: "1px solid var(--rule)",
         display: "flex", alignItems: "center",
-        padding: "0 8px", gap: "2px", flexShrink: 0,
+        padding: "0 16px", gap: "20px", flexShrink: 0,
+        position: "relative", zIndex: 2,
       }}>
         {(["scene", "game"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
-            padding: "4px 10px", fontSize: "11px",
-            color: tab === t ? "var(--text-bright)" : "var(--text-muted)",
-            background: tab === t ? "var(--bg-4)" : "transparent",
-            border: "none", borderRadius: "var(--radius) var(--radius) 0 0",
+            paddingTop: "10px", paddingBottom: "10px",
+            fontSize: "12.5px", fontFamily: "var(--font-ui)",
+            color: tab === t ? "var(--ink)" : "var(--ink-3)",
+            fontWeight: tab === t ? 500 : 400,
+            borderBottom: tab === t ? "2px solid var(--ink)" : "2px solid transparent",
+            borderTop: "none", borderLeft: "none", borderRight: "none",
+            marginBottom: "-1px",
+            background: "none",
             cursor: "pointer", textTransform: "capitalize",
           }}>{t}</button>
         ))}
         <div style={{ flex: 1 }} />
-        {isPlaying && tab === "game" && (
-          <span style={{ fontSize: "9px", color: "rgb(80,210,110)", letterSpacing: "0.08em", display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "rgb(80,210,110)", animation: "pulse 1.5s infinite", display: "inline-block" }} />
-            PLAYING
+        {isPlaying && (
+          <span style={{ fontSize: "11px", color: "var(--moss)", fontFamily: "var(--font-mono)", display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ width: "6px", height: "6px", background: "var(--moss)", display: "inline-block" }} />
+            playing
           </span>
         )}
-        <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>1280×720</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>1280 × 720</span>
       </div>
 
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -71,6 +78,8 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
             onSelect={onSelect}
             activeTool={activeTool}
             onTransformCommit={onTransformCommit}
+            ghostEntities={ghostEntities}
+            hoveredChangeId={hoveredChangeId}
           />
         ) : (
           <GameView engineReady={engineReady} isPlaying={isPlaying} />
@@ -110,12 +119,16 @@ function SceneView({
   onSelect,
   activeTool,
   onTransformCommit,
+  ghostEntities,
+  hoveredChangeId,
 }: {
   scene: Scene | null;
   selectedId: number | null;
   onSelect: (id: number | null) => void;
   activeTool: ActiveTool;
   onTransformCommit: (change: TransformChange) => void;
+  ghostEntities?: GhostEntity[];
+  hoveredChangeId?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -128,10 +141,14 @@ function SceneView({
   const activeToolRef = useRef(activeTool);
   const dragRef = useRef<DragState | null>(null);
   const draftRef = useRef<Map<number, TransformDraft>>(new Map());
+  const ghostsRef = useRef<GhostEntity[]>([]);
+  const hoveredChangeRef = useRef<string | null>(null);
 
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { ghostsRef.current = ghostEntities ?? []; }, [ghostEntities]);
+  useEffect(() => { hoveredChangeRef.current = hoveredChangeId ?? null; }, [hoveredChangeId]);
 
   const worldToScreen = (wx: number, wy: number, cw: number, ch: number) => ({
     sx: (wx - cameraRef.current.x) * cameraRef.current.zoom + cw / 2,
@@ -224,6 +241,26 @@ function SceneView({
     if (sc) {
       for (const entity of Object.values(sc.entities)) {
         drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current);
+      }
+    }
+
+    // — Ghost entities (staged proposals) —
+    const hovId = hoveredChangeRef.current;
+    for (const ghost of ghostsRef.current) {
+      const isHovered = ghost.changeId === hovId;
+      drawGhostEntity(ctx, ghost, cw, ch, cam, worldToScreen, isHovered);
+
+      // Arrow from current entity position to proposed position when hovered
+      if (isHovered && sc) {
+        const existing = Object.values(sc.entities).find(e => e.name === ghost.name);
+        if (existing) {
+          const t = getTransform(existing);
+          if (t) {
+            const { sx: fromSx, sy: fromSy } = worldToScreen(t.x, t.y, cw, ch);
+            const { sx: toSx, sy: toSy } = worldToScreen(ghost.x, ghost.y, cw, ch);
+            drawGhostArrow(ctx, fromSx, fromSy, toSx, toSy);
+          }
+        }
       }
     }
 
@@ -459,6 +496,91 @@ function nextTransformForDrag(drag: DragState, wx: number, wy: number, snapping:
   return next;
 }
 
+const GHOST_COLOR = "#f0c050";
+const GHOST_FILL   = "rgba(240,192,80,0.08)";
+const GHOST_FILL_H = "rgba(240,192,80,0.18)";
+
+function drawGhostEntity(
+  ctx: CanvasRenderingContext2D,
+  ghost: GhostEntity,
+  cw: number,
+  ch: number,
+  cam: Camera,
+  worldToScreen: (wx: number, wy: number, cw: number, ch: number) => { sx: number; sy: number },
+  isHovered: boolean,
+) {
+  const { sx, sy } = worldToScreen(ghost.x, ghost.y, cw, ch);
+  const hw = ghost.w * 0.5 * cam.zoom;
+  const hh = ghost.h * 0.5 * cam.zoom;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(ghost.rotation);
+
+  ctx.fillStyle = isHovered ? GHOST_FILL_H : GHOST_FILL;
+  ctx.fillRect(-hw, -hh, hw * 2, hh * 2);
+
+  ctx.strokeStyle = isHovered ? GHOST_COLOR : "rgba(240,192,80,0.55)";
+  ctx.lineWidth = isHovered ? 2 : 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = isHovered ? GHOST_COLOR : "rgba(240,192,80,0.7)";
+  ctx.beginPath();
+  ctx.arc(0, 0, isHovered ? 4 : 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+
+  if (cam.zoom > 0.25) {
+    const labelSize = Math.min(11, Math.max(9, cam.zoom * 10));
+    ctx.font = `${labelSize}px monospace`;
+    ctx.fillStyle = isHovered ? GHOST_COLOR : "rgba(240,192,80,0.7)";
+    ctx.fillText(`${ghost.name} →`, sx + hw + 4, sy - hh + labelSize);
+  }
+}
+
+function drawGhostArrow(
+  ctx: CanvasRenderingContext2D,
+  fromSx: number, fromSy: number,
+  toSx: number, toSy: number,
+) {
+  const dx = toSx - fromSx;
+  const dy = toSy - fromSy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < 8) return;
+
+  // Perpendicular control point for the curve
+  const mx = (fromSx + toSx) / 2;
+  const my = (fromSy + toSy) / 2;
+  const perpX = -dy / dist;
+  const perpY =  dx / dist;
+  const bulge = Math.min(dist * 0.28, 50);
+  const cpX = mx + perpX * bulge;
+  const cpY = my + perpY * bulge;
+
+  ctx.strokeStyle = "rgba(240,192,80,0.5)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(fromSx, fromSy);
+  ctx.quadraticCurveTo(cpX, cpY, toSx, toSy);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Arrow head tangent at end of quadratic: direction = (to - cp)
+  const angle = Math.atan2(toSy - cpY, toSx - cpX);
+  const len = 9;
+  ctx.fillStyle = "rgba(240,192,80,0.75)";
+  ctx.beginPath();
+  ctx.moveTo(toSx, toSy);
+  ctx.lineTo(toSx - len * Math.cos(angle - 0.42), toSy - len * Math.sin(angle - 0.42));
+  ctx.lineTo(toSx - len * Math.cos(angle + 0.42), toSy - len * Math.sin(angle + 0.42));
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawEntity(
   ctx: CanvasRenderingContext2D,
   entity: Entity,
@@ -627,36 +749,71 @@ function drawCameraFrame(
 
 const ENGINE_URL = "http://127.0.0.1:7878";
 
-function GameView({ engineReady, isPlaying }: { engineReady: boolean; isPlaying: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const heldKeys = useRef<Set<string>>(new Set());
+const WS_URL = "ws://127.0.0.1:7878/stream";
+const STREAM_W = 960;
+const STREAM_H = 540;
 
-  // Capture keyboard when game view is focused and forward to engine
+function GameView({ engineReady, isPlaying }: { engineReady: boolean; isPlaying: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const heldKeys = useRef<Set<string>>(new Set());
+  const [fps, setFps] = useState(0);
+  const [connected, setConnected] = useState(false);
+
+  // WebSocket raw-RGBA frame streaming
   useEffect(() => {
     if (!engineReady) return;
 
-    const sendKeys = () => {
+    let ws: WebSocket | null = null;
+    let stopped = false;
+    const fpsState = { frames: 0, last: performance.now() };
+
+    const connect = () => {
+      if (stopped) return;
+      ws = new WebSocket(WS_URL);
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => {
+        setConnected(false);
+        if (!stopped) setTimeout(connect, 1000);
+      };
+      ws.onerror = () => ws?.close();
+      ws.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const rgba = new Uint8ClampedArray(e.data);
+        ctx.putImageData(new ImageData(rgba, STREAM_W, STREAM_H), 0, 0);
+        fpsState.frames++;
+        const now = performance.now();
+        if (now - fpsState.last >= 1000) {
+          setFps(fpsState.frames);
+          fpsState.frames = 0;
+          fpsState.last = now;
+        }
+      };
+    };
+    connect();
+
+    return () => {
+      stopped = true;
+      ws?.close();
+      ws = null;
+    };
+  }, [engineReady]);
+
+  // Forward keyboard input to engine
+  useEffect(() => {
+    if (!engineReady) return;
+    const sendKeys = () =>
       fetch(`${ENGINE_URL}/input/keys`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keys: [...heldKeys.current] }),
       }).catch(() => {});
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat) return;
-      heldKeys.current.add(e.key);
-      sendKeys();
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      heldKeys.current.delete(e.key);
-      sendKeys();
-    };
-    const onBlur = () => {
-      heldKeys.current.clear();
-      sendKeys();
-    };
-
+    const onKeyDown = (e: KeyboardEvent) => { if (!e.repeat) { heldKeys.current.add(e.key); sendKeys(); } };
+    const onKeyUp = (e: KeyboardEvent) => { heldKeys.current.delete(e.key); sendKeys(); };
+    const onBlur = () => { heldKeys.current.clear(); sendKeys(); };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
@@ -664,42 +821,47 @@ function GameView({ engineReady, isPlaying }: { engineReady: boolean; isPlaying:
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
-      // Clear keys on unmount
       heldKeys.current.clear();
       sendKeys();
     };
   }, [engineReady]);
 
   return (
-    <div
-      ref={containerRef}
-      tabIndex={0}
-      style={{ width: "100%", height: "100%", position: "relative", background: "#000", outline: "none", display: "flex", alignItems: "center", justifyContent: "center" }}
-    >
-      <span style={{ fontSize: "11px", color: engineReady ? "var(--text-muted)" : "var(--text-dim)" }}>
-        {engineReady ? "native play window" : "waiting for engine…"}
-      </span>
+    <div style={{ width: "100%", height: "100%", position: "relative", background: "#000" }}>
+      {engineReady ? (
+        <canvas
+          ref={canvasRef}
+          width={STREAM_W}
+          height={STREAM_H}
+          style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }}
+        />
+      ) : (
+        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: "11px", color: "var(--ink-4)", fontFamily: "var(--font-mono)" }}>waiting for engine…</span>
+        </div>
+      )}
 
-      {/* Play state indicator */}
-      <div style={{
-        position: "absolute", top: "8px", right: "8px",
-        display: "flex", alignItems: "center", gap: "5px",
-        background: isPlaying ? "rgba(60,200,100,0.1)" : "var(--bg-2)",
-        border: `1px solid ${isPlaying ? "rgba(60,200,100,0.3)" : "var(--border)"}`,
-        borderRadius: "var(--radius)", padding: "3px 8px",
-        fontSize: "10px",
-        color: isPlaying ? "rgb(80,210,110)" : "var(--text-dim)",
-        transition: "all 0.2s",
-      }}>
-        <span style={{
-          width: "5px", height: "5px", borderRadius: "50%",
-          background: isPlaying ? "rgb(80,210,110)" : "var(--text-dim)",
-          animation: isPlaying ? "pulse 1.5s infinite" : "none",
-          display: "inline-block",
-          flexShrink: 0,
-        }} />
-        {isPlaying ? "LIVE" : "PAUSED"}
-      </div>
+      {/* Status strip */}
+      {engineReady && (
+        <div style={{
+          position: "absolute", bottom: "10px", right: "12px",
+          display: "flex", alignItems: "center", gap: "10px",
+          fontFamily: "var(--font-mono)", fontSize: "10px",
+        }}>
+          <span style={{ color: "var(--ink-4)" }}>{fps} fps</span>
+          <span style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            color: isPlaying ? "var(--moss)" : "var(--ink-4)",
+          }}>
+            <span style={{
+              width: "5px", height: "5px",
+              background: connected ? (isPlaying ? "var(--moss)" : "var(--ink-4)") : "var(--amber)",
+              display: "inline-block", flexShrink: 0,
+            }} />
+            {!connected ? "reconnecting…" : isPlaying ? "live" : "paused"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
