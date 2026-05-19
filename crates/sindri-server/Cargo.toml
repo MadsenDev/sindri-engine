@@ -14,3 +14,4 @@ tower-http.workspace = true
 sindri = { path = "../sindri" }
 image = { workspace = true }
 mlua = { workspace = true }
+winit = { workspace = true }

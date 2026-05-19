@@ -1,6 +1,6 @@
 use mlua::{Lua, Table};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use sindri::component::Component;
@@ -28,6 +28,100 @@ enum CameraCommand {
         intensity: f32,
         duration: f32,
     },
+}
+
+enum SceneCommand {
+    SetTransformPosition { x: f32, y: f32 },
+    SetTransformRotation(f32),
+    SetTransformScale { x: f32, y: f32 },
+    SetSpriteTint([f32; 4]),
+}
+
+fn resolve_script_path(scripts_root: &Path, script_path: &str) -> PathBuf {
+    let path = Path::new(script_path);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+
+    if let Ok(stripped) = path.strip_prefix("scripts") {
+        scripts_root.join(stripped)
+    } else {
+        scripts_root.join(path)
+    }
+}
+
+fn read_vec2(table: &Table) -> mlua::Result<(f32, f32)> {
+    let x = table.get::<_, f64>("x").or_else(|_| table.get(1))?;
+    let y = table.get::<_, f64>("y").or_else(|_| table.get(2))?;
+    Ok((x as f32, y as f32))
+}
+
+fn read_color(table: &Table) -> mlua::Result<[f32; 4]> {
+    let r = table.get::<_, f64>("r").or_else(|_| table.get(1))?;
+    let g = table.get::<_, f64>("g").or_else(|_| table.get(2))?;
+    let b = table.get::<_, f64>("b").or_else(|_| table.get(3))?;
+    let a = table
+        .get::<_, f64>("a")
+        .or_else(|_| table.get(4))
+        .unwrap_or(1.0);
+    Ok([r as f32, g as f32, b as f32, a as f32])
+}
+
+fn apply_scene_commands(scene: &mut Scene, entity_id: u64, commands: Vec<SceneCommand>) {
+    let Some(entity) = scene.entities.get_mut(&entity_id) else {
+        return;
+    };
+
+    for command in commands {
+        match command {
+            SceneCommand::SetTransformPosition { x, y } => {
+                if let Some(transform) = entity.components.iter_mut().find_map(|component| {
+                    if let Component::Transform(transform) = component {
+                        Some(transform)
+                    } else {
+                        None
+                    }
+                }) {
+                    transform.x = x;
+                    transform.y = y;
+                }
+            }
+            SceneCommand::SetTransformRotation(rotation) => {
+                if let Some(transform) = entity.components.iter_mut().find_map(|component| {
+                    if let Component::Transform(transform) = component {
+                        Some(transform)
+                    } else {
+                        None
+                    }
+                }) {
+                    transform.rotation = rotation;
+                }
+            }
+            SceneCommand::SetTransformScale { x, y } => {
+                if let Some(transform) = entity.components.iter_mut().find_map(|component| {
+                    if let Component::Transform(transform) = component {
+                        Some(transform)
+                    } else {
+                        None
+                    }
+                }) {
+                    transform.scale_x = x;
+                    transform.scale_y = y;
+                }
+            }
+            SceneCommand::SetSpriteTint(color) => {
+                if let Some(sprite) = entity.components.iter_mut().find_map(|component| {
+                    if let Component::Sprite(sprite) = component {
+                        Some(sprite)
+                    } else {
+                        None
+                    }
+                }) {
+                    sprite.color = color;
+                }
+            }
+        }
+    }
 }
 
 fn apply_camera_commands(scene: &mut Scene, entity_id: u64, commands: Vec<CameraCommand>) {
@@ -161,6 +255,7 @@ pub struct LuaRuntime {
     lua: Lua,
     envs: HashMap<(u64, String), mlua::RegistryKey>,
     started: HashSet<(u64, String)>,
+    missing_scripts: HashSet<(u64, String)>,
     pub elapsed: f64,
     // Key state shared into Lua globals each frame
     keys: Arc<RwLock<HashSet<String>>>,
@@ -204,10 +299,23 @@ impl LuaRuntime {
             lua.create_function(|_, _key: String| Ok(false))?,
         )?;
 
+        lua.globals().set(
+            "vec2",
+            lua.create_function(|lua, (x, y): (f64, f64)| {
+                let table = lua.create_table()?;
+                table.set("x", x)?;
+                table.set("y", y)?;
+                table.set(1, x)?;
+                table.set(2, y)?;
+                Ok(table)
+            })?,
+        )?;
+
         Ok(Self {
             lua,
             envs: HashMap::new(),
             started: HashSet::new(),
+            missing_scripts: HashSet::new(),
             elapsed: 0.0,
             keys,
             prev_keys: HashSet::new(),
@@ -379,10 +487,119 @@ impl LuaRuntime {
         Ok(table)
     }
 
+    fn create_transform_table<'lua>(
+        lua: &'lua Lua,
+        transform: &sindri::component::Transform,
+        commands: Arc<std::sync::Mutex<Vec<SceneCommand>>>,
+    ) -> mlua::Result<Table<'lua>> {
+        let table = lua.create_table()?;
+        table.set("x", transform.x)?;
+        table.set("y", transform.y)?;
+        table.set("rotation_value", transform.rotation)?;
+        table.set("scale_x", transform.scale_x)?;
+        table.set("scale_y", transform.scale_y)?;
+        table.set("position", {
+            let x = transform.x;
+            let y = transform.y;
+            lua.create_function(move |lua, _: Table| {
+                let position = lua.create_table()?;
+                position.set("x", x)?;
+                position.set("y", y)?;
+                position.set(1, x)?;
+                position.set(2, y)?;
+                Ok(position)
+            })?
+        })?;
+        table.set("set_position", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, position): (Table, Table)| {
+                let (x, y) = read_vec2(&position)?;
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(SceneCommand::SetTransformPosition { x, y });
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("rotation", {
+            let rotation = transform.rotation;
+            lua.create_function(move |_, _: Table| Ok(rotation))?
+        })?;
+        table.set("set_rotation", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, rotation): (Table, f64)| {
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(SceneCommand::SetTransformRotation(rotation as f32));
+                }
+                Ok(())
+            })?
+        })?;
+        table.set("scale", {
+            let x = transform.scale_x;
+            let y = transform.scale_y;
+            lua.create_function(move |lua, _: Table| {
+                let scale = lua.create_table()?;
+                scale.set("x", x)?;
+                scale.set("y", y)?;
+                scale.set(1, x)?;
+                scale.set(2, y)?;
+                Ok(scale)
+            })?
+        })?;
+        table.set("set_scale", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, scale): (Table, Table)| {
+                let (x, y) = read_vec2(&scale)?;
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(SceneCommand::SetTransformScale { x, y });
+                }
+                Ok(())
+            })?
+        })?;
+        Ok(table)
+    }
+
+    fn create_sprite_table<'lua>(
+        lua: &'lua Lua,
+        sprite: &sindri::component::Sprite,
+        commands: Arc<std::sync::Mutex<Vec<SceneCommand>>>,
+    ) -> mlua::Result<Table<'lua>> {
+        let table = lua.create_table()?;
+        table.set("texture_path", sprite.texture_path.clone())?;
+        table.set("width", sprite.width)?;
+        table.set("height", sprite.height)?;
+        table.set("tint", {
+            let color = sprite.color;
+            lua.create_function(move |lua, _: Table| {
+                let tint = lua.create_table()?;
+                tint.set("r", color[0])?;
+                tint.set("g", color[1])?;
+                tint.set("b", color[2])?;
+                tint.set("a", color[3])?;
+                tint.set(1, color[0])?;
+                tint.set(2, color[1])?;
+                tint.set(3, color[2])?;
+                tint.set(4, color[3])?;
+                Ok(tint)
+            })?
+        })?;
+        table.set("set_tint", {
+            let commands = commands.clone();
+            lua.create_function(move |_, (_this, tint): (Table, Table)| {
+                let color = read_color(&tint)?;
+                if let Ok(mut commands) = commands.lock() {
+                    commands.push(SceneCommand::SetSpriteTint(color));
+                }
+                Ok(())
+            })?
+        })?;
+        Ok(table)
+    }
+
     /// Called when play starts — clears cached envs and started set so scripts restart cleanly.
     pub fn reset(&mut self) {
         self.envs.clear();
         self.started.clear();
+        self.missing_scripts.clear();
         self.elapsed = 0.0;
         self.prev_keys.clear();
         if let Ok(mut k) = self.keys.write() {
@@ -440,14 +657,28 @@ impl LuaRuntime {
                     None
                 }
             });
+            let sprite = entity.components.iter().find_map(|c| {
+                if let Component::Sprite(sprite) = c {
+                    Some(sprite.clone())
+                } else {
+                    None
+                }
+            });
 
             for script_path in script_paths {
                 if script_path.is_empty() {
                     continue;
                 }
 
-                let full_path = scripts_root.join(&script_path);
+                let full_path = resolve_script_path(scripts_root, &script_path);
                 if !full_path.exists() {
+                    let missing_key = (entity_id, script_path.clone());
+                    if self.missing_scripts.insert(missing_key) {
+                        eprintln!(
+                            "[lua] script not found ({script_path}): {}",
+                            full_path.display()
+                        );
+                    }
                     continue;
                 }
 
@@ -493,6 +724,48 @@ impl LuaRuntime {
                 }
                 let camera_commands: Arc<std::sync::Mutex<Vec<CameraCommand>>> =
                     Arc::new(std::sync::Mutex::new(Vec::new()));
+                let scene_commands: Arc<std::sync::Mutex<Vec<SceneCommand>>> =
+                    Arc::new(std::sync::Mutex::new(Vec::new()));
+                if let Some(transform) = transform.clone() {
+                    let commands = scene_commands.clone();
+                    match self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                        Self::create_transform_table(lua, &transform, commands.clone()).map(Some)
+                    }) {
+                        Ok(transform_fn) => {
+                            let _ = self_tbl.set("transform", transform_fn);
+                        }
+                        Err(e) => eprintln!("[lua] transform method error ({script_path}): {e}"),
+                    }
+                } else {
+                    match self.lua.create_function(|_, _: mlua::MultiValue| {
+                        Ok::<Option<Table>, mlua::Error>(None)
+                    }) {
+                        Ok(transform_fn) => {
+                            let _ = self_tbl.set("transform", transform_fn);
+                        }
+                        Err(e) => eprintln!("[lua] transform method error ({script_path}): {e}"),
+                    }
+                }
+                if let Some(sprite) = sprite.clone() {
+                    let commands = scene_commands.clone();
+                    match self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                        Self::create_sprite_table(lua, &sprite, commands.clone()).map(Some)
+                    }) {
+                        Ok(sprite_fn) => {
+                            let _ = self_tbl.set("sprite", sprite_fn);
+                        }
+                        Err(e) => eprintln!("[lua] sprite method error ({script_path}): {e}"),
+                    }
+                } else {
+                    match self.lua.create_function(|_, _: mlua::MultiValue| {
+                        Ok::<Option<Table>, mlua::Error>(None)
+                    }) {
+                        Ok(sprite_fn) => {
+                            let _ = self_tbl.set("sprite", sprite_fn);
+                        }
+                        Err(e) => eprintln!("[lua] sprite method error ({script_path}): {e}"),
+                    }
+                }
                 if let Some(camera) = camera.clone() {
                     let commands = camera_commands.clone();
                     match self.lua.create_function(move |lua, _: mlua::MultiValue| {
@@ -570,6 +843,14 @@ impl LuaRuntime {
                 if !camera_commands.is_empty() {
                     apply_camera_commands(scene, entity_id, camera_commands);
                 }
+
+                let scene_commands = scene_commands
+                    .lock()
+                    .map(|mut commands| std::mem::take(&mut *commands))
+                    .unwrap_or_default();
+                if !scene_commands.is_empty() {
+                    apply_scene_commands(scene, entity_id, scene_commands);
+                }
             }
         }
     }
@@ -579,5 +860,6 @@ impl LuaRuntime {
     pub fn evict(&mut self, entity_id: u64) {
         self.envs.retain(|(id, _), _| *id != entity_id);
         self.started.retain(|(id, _)| *id != entity_id);
+        self.missing_scripts.retain(|(id, _)| *id != entity_id);
     }
 }

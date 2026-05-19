@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Hierarchy from "./panels/Hierarchy";
 import Inspector from "./panels/Inspector";
 import AIChat from "./panels/AIChat";
-import Viewport from "./panels/Viewport";
+import Viewport, { type TransformChange } from "./panels/Viewport";
 import ScriptEditor from "./panels/ScriptEditor";
 import FileBrowser from "./panels/FileBrowser";
 import WelcomeScreen from "./screens/WelcomeScreen";
@@ -39,6 +39,8 @@ export interface AiAction {
 }
 
 export type ActiveTool = "select" | "move" | "scale" | "rotate";
+type PlaybackState = "stopped" | "playing" | "paused";
+type TransformSnapshot = TransformChange["before"];
 
 export default function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -54,11 +56,14 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string | null>(
     () => localStorage.getItem("sindri_selected_model")
   );
-  const [screenshotB64, setScreenshotB64] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackState, setPlaybackState] = useState<PlaybackState>("stopped");
   const [leftTab, setLeftTab] = useState<"scene" | "files">("scene");
   const [projectFiles, setProjectFiles] = useState<{ path: string; kind: string; name: string }[]>([]);
-  const screenshotInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sceneDirty, setSceneDirty] = useState(false);
+  const [undoDepth, setUndoDepth] = useState(0);
+  const [redoDepth, setRedoDepth] = useState(0);
+  const undoStack = useRef<TransformChange[]>([]);
+  const redoStack = useRef<TransformChange[]>([]);
 
   const refreshScene = useCallback(async () => {
     try {
@@ -69,7 +74,7 @@ export default function App() {
     }
   }, []);
 
-  // Poll engine health then start viewport polling
+  // Poll engine health until the sidecar is ready.
   useEffect(() => {
     let healthInterval: ReturnType<typeof setInterval>;
 
@@ -79,16 +84,6 @@ export default function App() {
         setEngineReady(true);
         clearInterval(healthInterval);
         await refreshScene();
-
-        // Start viewport polling at 15fps
-        screenshotInterval.current = setInterval(async () => {
-          try {
-            const b64 = await invoke<string>("get_screenshot");
-            if (b64) setScreenshotB64(b64);
-          } catch {
-            // ignore
-          }
-        }, 67);
       } catch {
         // still waiting
       }
@@ -99,9 +94,28 @@ export default function App() {
 
     return () => {
       clearInterval(healthInterval);
-      if (screenshotInterval.current) clearInterval(screenshotInterval.current);
     };
   }, [refreshScene]);
+
+  // Keep scene data fresh for the canvas preview. This avoids continuous screenshot readbacks.
+  useEffect(() => {
+    if (!engineReady) return;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = async () => {
+      await refreshScene();
+      if (!cancelled) {
+        timeout = setTimeout(tick, playbackState === "playing" ? 33 : 500);
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [engineReady, playbackState, refreshScene]);
 
   // Persist selected model
   useEffect(() => {
@@ -125,19 +139,92 @@ export default function App() {
 
   const selectedEntity = selectedId !== null && scene ? scene.entities[String(selectedId)] ?? null : null;
 
+  const syncHistoryDepths = useCallback(() => {
+    setUndoDepth(undoStack.current.length);
+    setRedoDepth(redoStack.current.length);
+  }, []);
+
   const handleSceneChange = useCallback(() => {
+    setSceneDirty(true);
     refreshScene();
   }, [refreshScene]);
 
-  const handleTogglePlay = useCallback(async () => {
-    const next = !isPlaying;
+  const patchTransformSnapshot = useCallback(async (entityId: number, transform: TransformSnapshot) => {
+    await invoke("patch_transform", {
+      entityId,
+      x: transform.x,
+      y: transform.y,
+      scaleX: transform.scale_x,
+      scaleY: transform.scale_y,
+      rotation: transform.rotation,
+    });
+  }, []);
+
+  const handleTransformCommit = useCallback(async (change: TransformChange) => {
     try {
-      await invoke("set_engine_paused", { paused: !next });
-      setIsPlaying(next);
+      await patchTransformSnapshot(change.entityId, change.after);
+      undoStack.current.push(change);
+      redoStack.current = [];
+      syncHistoryDepths();
+      setSceneDirty(true);
+      await refreshScene();
     } catch (err) {
-      console.error("Failed to set play state:", err);
+      console.error("Failed to patch transform:", err);
     }
-  }, [isPlaying]);
+  }, [patchTransformSnapshot, refreshScene, syncHistoryDepths]);
+
+  const undoTransform = useCallback(async () => {
+    const change = undoStack.current.pop();
+    if (!change) return;
+    try {
+      await patchTransformSnapshot(change.entityId, change.before);
+      redoStack.current.push(change);
+      syncHistoryDepths();
+      setSceneDirty(true);
+      await refreshScene();
+    } catch (err) {
+      undoStack.current.push(change);
+      syncHistoryDepths();
+      console.error("Failed to undo transform:", err);
+    }
+  }, [patchTransformSnapshot, refreshScene, syncHistoryDepths]);
+
+  const redoTransform = useCallback(async () => {
+    const change = redoStack.current.pop();
+    if (!change) return;
+    try {
+      await patchTransformSnapshot(change.entityId, change.after);
+      undoStack.current.push(change);
+      syncHistoryDepths();
+      setSceneDirty(true);
+      await refreshScene();
+    } catch (err) {
+      redoStack.current.push(change);
+      syncHistoryDepths();
+      console.error("Failed to redo transform:", err);
+    }
+  }, [patchTransformSnapshot, refreshScene, syncHistoryDepths]);
+
+  const saveScene = useCallback(async () => {
+    try {
+      await invoke("save_scene");
+      setSceneDirty(false);
+    } catch (err) {
+      console.error("Failed to save scene:", err);
+    }
+  }, []);
+
+  const handlePlayback = useCallback(async (action: "play" | "pause" | "stop") => {
+    try {
+      await invoke("set_engine_playback", { action });
+      setPlaybackState(action === "play" ? "playing" : action === "pause" ? "paused" : "stopped");
+      if (action === "stop") {
+        await refreshScene();
+      }
+    } catch (err) {
+      console.error("Failed to set playback state:", err);
+    }
+  }, [refreshScene]);
 
   const handleOpenScript = useCallback(async (path: string) => {
     try {
@@ -155,15 +242,40 @@ export default function App() {
       setSelectedId(null);
       setSelectedComponent(null);
       setLeftTab("scene");
+      undoStack.current = [];
+      redoStack.current = [];
+      syncHistoryDepths();
+      setSceneDirty(false);
       await refreshScene();
     } catch (err) {
       console.error("Failed to open scene:", err);
     }
-  }, [projectPath, refreshScene]);
+  }, [projectPath, refreshScene, syncHistoryDepths]);
 
   // Delete key removes selected entity
   useEffect(() => {
     const handler = async (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTextInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.getAttribute("contenteditable") === "true";
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        await saveScene();
+        return;
+      }
+      if (!isTextInput && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          await redoTransform();
+        } else {
+          await undoTransform();
+        }
+        return;
+      }
+      if (!isTextInput && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        await redoTransform();
+        return;
+      }
       if (e.key === "Delete" && selectedId !== null && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
         try {
           await invoke("apply_action", { action: { type: "delete_entity", entity_id: selectedId } });
@@ -176,7 +288,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedId, handleSceneChange]);
+  }, [selectedId, handleSceneChange, redoTransform, saveScene, undoTransform]);
 
   if (!projectPath) {
     return (
@@ -198,8 +310,14 @@ export default function App() {
         ollamaModels={ollamaModels}
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
-        isPlaying={isPlaying}
-        onTogglePlay={handleTogglePlay}
+        playbackState={playbackState}
+        onPlayback={handlePlayback}
+        canUndo={undoDepth > 0}
+        canRedo={redoDepth > 0}
+        onUndo={undoTransform}
+        onRedo={redoTransform}
+        sceneDirty={sceneDirty}
+        onSaveScene={saveScene}
         engineReady={engineReady}
       />
 
@@ -265,9 +383,10 @@ export default function App() {
             scene={scene}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            screenshotB64={screenshotB64}
+            activeTool={activeTool}
+            onTransformCommit={handleTransformCommit}
             engineReady={engineReady}
-            isPlaying={isPlaying}
+            isPlaying={playbackState === "playing"}
           />
           <ScriptEditor
             openScript={openScript}
@@ -296,7 +415,6 @@ export default function App() {
             scene={scene}
             projectPath={projectPath}
             openScript={openScript}
-            screenshotB64={screenshotB64}
             selectedModel={selectedModel}
             projectFiles={projectFiles}
             onSceneChange={handleSceneChange}
@@ -324,12 +442,33 @@ interface HeaderProps {
   ollamaModels: string[];
   selectedModel: string | null;
   onSelectModel: (model: string) => void;
-  isPlaying: boolean;
-  onTogglePlay: () => void;
+  playbackState: PlaybackState;
+  onPlayback: (action: "play" | "pause" | "stop") => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  sceneDirty: boolean;
+  onSaveScene: () => void;
   engineReady: boolean;
 }
 
-function Header({ activeTool, setActiveTool, ollamaReady, ollamaModels, selectedModel, onSelectModel, isPlaying, onTogglePlay, engineReady }: HeaderProps) {
+function headerIconButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    height: "26px",
+    minWidth: "28px",
+    background: enabled ? "var(--accent-glow)" : "none",
+    border: "none",
+    borderRadius: "var(--radius)",
+    color: enabled ? "var(--accent)" : "var(--text-muted)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "11px",
+    padding: "0 7px",
+    cursor: enabled ? "pointer" : "default",
+  };
+}
+
+function Header({ activeTool, setActiveTool, ollamaReady, ollamaModels, selectedModel, onSelectModel, playbackState, onPlayback, canUndo, canRedo, onUndo, onRedo, sceneDirty, onSaveScene, engineReady }: HeaderProps) {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -460,53 +599,50 @@ function Header({ activeTool, setActiveTool, ollamaReady, ollamaModels, selected
       {/* Separator */}
       <div style={{ width: "1px", height: "18px", background: "var(--border)" }} />
 
-      {/* Play / Pause button */}
-      <button
-        onClick={engineReady ? onTogglePlay : undefined}
-        title={!engineReady ? "Waiting for engine…" : isPlaying ? "Pause" : "Play"}
-        style={{
-          background: !engineReady
-            ? "var(--bg-3)"
-            : isPlaying
-              ? "rgba(230,100,60,0.15)"
-              : "var(--accent)",
-          border: isPlaying ? "1px solid rgba(230,100,60,0.5)" : "none",
-          borderRadius: "var(--radius)",
-          color: !engineReady ? "var(--text-muted)" : isPlaying ? "rgb(230,120,80)" : "var(--bg-0)",
-          fontFamily: "var(--font-ui)",
-          fontWeight: 700,
-          fontSize: "11px",
-          padding: "4px 12px",
-          cursor: engineReady ? "pointer" : "default",
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          letterSpacing: "0.05em",
-          minWidth: "70px",
-          justifyContent: "center",
-        }}
-      >
-        {isPlaying ? (
-          <>
-            <span style={{ display: "flex", gap: "2px", alignItems: "center" }}>
-              <span style={{ width: "3px", height: "10px", background: "currentColor", borderRadius: "1px", display: "inline-block" }} />
-              <span style={{ width: "3px", height: "10px", background: "currentColor", borderRadius: "1px", display: "inline-block" }} />
-            </span>
-            PAUSE
-          </>
-        ) : (
-          <>
-            <span style={{
-              width: 0, height: 0,
-              borderTop: "5px solid transparent",
-              borderBottom: "5px solid transparent",
-              borderLeft: `8px solid ${engineReady ? "var(--bg-0)" : "var(--text-muted)"}`,
-              display: "inline-block",
-            }} />
-            PLAY
-          </>
-        )}
+      <button title="Undo transform" onClick={canUndo ? onUndo : undefined} style={headerIconButtonStyle(canUndo)}>
+        ↶
       </button>
+      <button title="Redo transform" onClick={canRedo ? onRedo : undefined} style={headerIconButtonStyle(canRedo)}>
+        ↷
+      </button>
+      <button title="Save scene" onClick={sceneDirty ? onSaveScene : undefined} style={{
+        ...headerIconButtonStyle(sceneDirty),
+        color: sceneDirty ? "var(--accent)" : "var(--text-muted)",
+        border: `1px solid ${sceneDirty ? "var(--accent-dim)" : "transparent"}`,
+      }}>
+        save{sceneDirty ? " *" : ""}
+      </button>
+
+      {/* Separator */}
+      <div style={{ width: "1px", height: "18px", background: "var(--border)" }} />
+
+      {/* Playback controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: "3px" }}>
+        <PlaybackButton
+          label="PLAY"
+          title={playbackState === "paused" ? "Resume" : "Play"}
+          disabled={!engineReady || playbackState === "playing"}
+          active={playbackState === "playing"}
+          variant="play"
+          onClick={() => onPlayback("play")}
+        />
+        <PlaybackButton
+          label="PAUSE"
+          title="Pause"
+          disabled={!engineReady || playbackState !== "playing"}
+          active={playbackState === "paused"}
+          variant="pause"
+          onClick={() => onPlayback("pause")}
+        />
+        <PlaybackButton
+          label="STOP"
+          title="Stop and restore edit scene"
+          disabled={!engineReady || playbackState === "stopped"}
+          active={false}
+          variant="stop"
+          onClick={() => onPlayback("stop")}
+        />
+      </div>
 
       <div style={{ flex: 1 }} />
 
@@ -591,6 +727,83 @@ function Header({ activeTool, setActiveTool, ollamaReady, ollamaModels, selected
         }
       `}</style>
     </div>
+  );
+}
+
+function PlaybackButton({
+  label,
+  title,
+  disabled,
+  active,
+  variant,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  disabled: boolean;
+  active: boolean;
+  variant: "play" | "pause" | "stop";
+  onClick: () => void;
+}) {
+  const isPlay = variant === "play";
+  const isStop = variant === "stop";
+  const color = disabled
+    ? "var(--text-muted)"
+    : isPlay
+      ? "var(--bg-0)"
+      : isStop
+        ? "rgb(230,120,80)"
+        : "var(--accent)";
+
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      title={title}
+      style={{
+        background: disabled
+          ? "var(--bg-3)"
+          : isPlay
+            ? "var(--accent)"
+            : active
+              ? "rgba(232,168,56,0.14)"
+              : "var(--bg-3)",
+        border: `1px solid ${disabled ? "var(--border)" : isStop ? "rgba(230,100,60,0.5)" : "var(--accent-dim)"}`,
+        borderRadius: "var(--radius)",
+        color,
+        fontFamily: "var(--font-ui)",
+        fontWeight: 700,
+        fontSize: "10px",
+        padding: "4px 8px",
+        cursor: disabled ? "default" : "pointer",
+        display: "flex",
+        alignItems: "center",
+        gap: "5px",
+        letterSpacing: "0.05em",
+        minWidth: isPlay ? "58px" : "28px",
+        height: "26px",
+        justifyContent: "center",
+      }}
+    >
+      {variant === "play" && (
+        <span style={{
+          width: 0, height: 0,
+          borderTop: "5px solid transparent",
+          borderBottom: "5px solid transparent",
+          borderLeft: `8px solid ${color}`,
+          display: "inline-block",
+        }} />
+      )}
+      {variant === "pause" && (
+        <span style={{ display: "flex", gap: "2px", alignItems: "center" }}>
+          <span style={{ width: "3px", height: "10px", background: "currentColor", borderRadius: "1px", display: "inline-block" }} />
+          <span style={{ width: "3px", height: "10px", background: "currentColor", borderRadius: "1px", display: "inline-block" }} />
+        </span>
+      )}
+      {variant === "stop" && (
+        <span style={{ width: "9px", height: "9px", background: "currentColor", borderRadius: "1px", display: "inline-block" }} />
+      )}
+      {isPlay ? label : null}
+    </button>
   );
 }
 

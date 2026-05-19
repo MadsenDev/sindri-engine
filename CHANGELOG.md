@@ -31,6 +31,11 @@ All notable changes to this project will be documented in this file.
   - Added hierarchy context-menu creation presets for cameras, sprites, physics bodies, platforms, triggers, scripts, and audio sources.
   - Made play-mode rendering use the active scene camera entity and stop drawing camera-only transform entities as game objects.
   - Expanded editor scene cameras with active-camera selection, offsets, bounds, smoothing, dead zones, Scene view camera frames, and Lua camera helpers.
+  - Added a native `wgpu` play preview window owned by `sindri-server`, replacing continuous screenshot polling for the live game view.
+  - Changed screenshots to on-demand capture for AI viewport context and diagnostics.
+  - Added explicit Play, Pause, and Stop controls; Stop restores the edit-scene snapshot captured when playback starts.
+  - Added basic Scene view Move, Scale, and Rotate transform tools with gizmo hints and Shift snapping.
+  - Added transform undo/redo for scene-view edits and an explicit scene save/dirty indicator.
   - Added `rendering` for particles, lighting, camera effects, animation-like motion, and large object counts.
   - Kept `platformer` as the Rust-first physics/gameplay baseline.
   - Promoted `scripted_asteroids` as the flagship Lua scripting showcase.

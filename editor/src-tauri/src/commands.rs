@@ -309,6 +309,20 @@ pub async fn put_scene(scene_json: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn save_scene() -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(engine_url("/scene/save"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_else(|e| e.to_string()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn open_scene_file(project_path: String, relative_path: String) -> Result<(), String> {
     let root = Path::new(&project_path);
     let full = root.join(&relative_path);
@@ -1076,6 +1090,26 @@ pub async fn set_engine_paused(paused: bool) -> Result<(), String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_engine_playback(action: String) -> Result<(), String> {
+    match action.as_str() {
+        "play" | "pause" | "stop" => {}
+        _ => return Err("playback action must be play, pause, or stop".into()),
+    }
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(engine_url("/control"))
+        .json(&serde_json::json!({ "action": action }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_else(|e| e.to_string()));
+    }
     Ok(())
 }
 

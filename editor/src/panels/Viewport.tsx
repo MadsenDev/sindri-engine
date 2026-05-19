@@ -1,11 +1,12 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import type { Scene, Entity } from "../App";
+import type { ActiveTool, Scene, Entity } from "../App";
 
 interface Props {
   scene: Scene | null;
   selectedId: number | null;
   onSelect: (id: number | null) => void;
-  screenshotB64: string | null;
+  activeTool: ActiveTool;
+  onTransformCommit: (change: TransformChange) => void;
   engineReady: boolean;
   isPlaying: boolean;
 }
@@ -26,7 +27,7 @@ const COLLIDER_COLOR = "rgba(80,230,100,0.35)";
 const CAMERA_COLOR = "#5b8aff";
 const LABEL_COLOR = "#8a9bb0";
 
-export default function Viewport({ scene, selectedId, onSelect, screenshotB64, engineReady, isPlaying }: Props) {
+export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, engineReady, isPlaying }: Props) {
   const [tab, setTab] = useState<"scene" | "game">("scene");
 
   // Auto-switch to game tab when play starts, back to scene when stopped
@@ -64,9 +65,15 @@ export default function Viewport({ scene, selectedId, onSelect, screenshotB64, e
 
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         {tab === "scene" ? (
-          <SceneView scene={scene} selectedId={selectedId} onSelect={onSelect} />
+          <SceneView
+            scene={scene}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            activeTool={activeTool}
+            onTransformCommit={onTransformCommit}
+          />
         ) : (
-          <GameView screenshotB64={screenshotB64} engineReady={engineReady} isPlaying={isPlaying} />
+          <GameView engineReady={engineReady} isPlaying={isPlaying} />
         )}
       </div>
     </div>
@@ -75,7 +82,41 @@ export default function Viewport({ scene, selectedId, onSelect, screenshotB64, e
 
 // ─── Scene canvas view ──────────────────────────────────────────────────────
 
-function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selectedId: number | null; onSelect: (id: number | null) => void }) {
+interface TransformDraft {
+  x: number;
+  y: number;
+  scale_x: number;
+  scale_y: number;
+  rotation: number;
+}
+
+export interface TransformChange {
+  entityId: number;
+  before: TransformDraft;
+  after: TransformDraft;
+}
+
+interface DragState {
+  entityId: number;
+  tool: Exclude<ActiveTool, "select">;
+  startMouse: { x: number; y: number };
+  startTransform: TransformDraft;
+  startAngle: number;
+}
+
+function SceneView({
+  scene,
+  selectedId,
+  onSelect,
+  activeTool,
+  onTransformCommit,
+}: {
+  scene: Scene | null;
+  selectedId: number | null;
+  onSelect: (id: number | null) => void;
+  activeTool: ActiveTool;
+  onTransformCommit: (change: TransformChange) => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
@@ -84,9 +125,13 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
   const sceneRef = useRef(scene);
   const selectedRef = useRef(selectedId);
   const rafRef = useRef<number>(0);
+  const activeToolRef = useRef(activeTool);
+  const dragRef = useRef<DragState | null>(null);
+  const draftRef = useRef<Map<number, TransformDraft>>(new Map());
 
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
+  useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
 
   const worldToScreen = (wx: number, wy: number, cw: number, ch: number) => ({
     sx: (wx - cameraRef.current.x) * cameraRef.current.zoom + cw / 2,
@@ -178,7 +223,7 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
     // — Entities —
     if (sc) {
       for (const entity of Object.values(sc.entities)) {
-        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen);
+        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current);
       }
     }
 
@@ -238,10 +283,65 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
       isPanning.current = true;
       lastMouse.current = { x: e.clientX, y: e.clientY };
       e.preventDefault();
+      return;
     }
+
+    if (e.button !== 0) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const sc = sceneRef.current;
+    if (!canvas || !sc) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
+    const hit = hitTest(sc, wx, wy);
+
+    if (hit !== null && hit !== selectedRef.current) {
+      onSelect(hit);
+    }
+
+    const tool = activeToolRef.current;
+    const targetId = hit ?? selectedRef.current;
+    if (tool === "select" || targetId === null) {
+      return;
+    }
+
+    const entity = sc.entities[String(targetId)];
+    const transform = entity ? getTransform(entity) : null;
+    if (!transform) {
+      return;
+    }
+
+    dragRef.current = {
+      entityId: targetId,
+      tool,
+      startMouse: { x: wx, y: wy },
+      startTransform: { ...transform },
+      startAngle: Math.atan2(wy - transform.y, wx - transform.x),
+    };
+    draftRef.current.set(targetId, { ...transform });
+    e.preventDefault();
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    const drag = dragRef.current;
+    if (drag) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
+      const next = nextTransformForDrag(drag, wx, wy, e.shiftKey);
+      draftRef.current.set(drag.entityId, next);
+      return;
+    }
+
     if (isPanning.current) {
       const dx = e.clientX - lastMouse.current.x;
       const dy = e.clientY - lastMouse.current.y;
@@ -252,6 +352,21 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    const drag = dragRef.current;
+    if (drag) {
+      dragRef.current = null;
+      const next = draftRef.current.get(drag.entityId);
+      draftRef.current.delete(drag.entityId);
+      if (next) {
+        onTransformCommit({
+          entityId: drag.entityId,
+          before: drag.startTransform,
+          after: next,
+        });
+      }
+      return;
+    }
+
     if (isPanning.current) { isPanning.current = false; return; }
     if (e.button !== 0) return;
 
@@ -264,24 +379,11 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
 
     if (!scene) { onSelect(null); return; }
 
-    let hit: number | null = null;
-    for (const entity of Object.values(scene.entities)) {
-      const transform = entity.components.find(c => c.type === "Transform") as { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number } | undefined;
-      const sprite = entity.components.find(c => c.type === "Sprite") as { type: "Sprite"; width: number; height: number } | undefined;
-      const camera = entity.components.find(c => c.type === "Camera") as { type: "Camera"; zoom: number } | undefined;
-      if (!transform) continue;
-      const hw = sprite ? sprite.width * 0.5 : camera ? 12 : Math.max(transform.scale_x * 16, 12);
-      const hh = sprite ? sprite.height * 0.5 : camera ? 12 : Math.max(transform.scale_y * 16, 12);
-      if (wx >= transform.x - hw && wx <= transform.x + hw && wy >= transform.y - hh && wy <= transform.y + hh) {
-        hit = entity.id;
-        break;
-      }
-    }
-    onSelect(hit);
+    onSelect(hitTest(scene, wx, wy));
   };
 
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", cursor: "crosshair" }}
+    <div ref={containerRef} style={{ width: "100%", height: "100%", cursor: activeTool === "select" ? "crosshair" : "grab" }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -293,6 +395,70 @@ function SceneView({ scene, selectedId, onSelect }: { scene: Scene | null; selec
   );
 }
 
+function getTransform(entity: Entity): TransformDraft | null {
+  const transform = entity.components.find(c => c.type === "Transform") as
+    | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
+    | undefined;
+  return transform ? {
+    x: transform.x,
+    y: transform.y,
+    scale_x: transform.scale_x,
+    scale_y: transform.scale_y,
+    rotation: transform.rotation,
+  } : null;
+}
+
+function hitTest(scene: Scene, wx: number, wy: number): number | null {
+  let hit: number | null = null;
+  for (const entity of Object.values(scene.entities)) {
+    const transform = getTransform(entity);
+    const sprite = entity.components.find(c => c.type === "Sprite") as { type: "Sprite"; width: number; height: number } | undefined;
+    const camera = entity.components.find(c => c.type === "Camera") as { type: "Camera"; zoom: number } | undefined;
+    if (!transform) continue;
+    const hw = sprite ? Math.abs(sprite.width * transform.scale_x) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_x) * 16, 12);
+    const hh = sprite ? Math.abs(sprite.height * transform.scale_y) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_y) * 16, 12);
+    if (wx >= transform.x - hw && wx <= transform.x + hw && wy >= transform.y - hh && wy <= transform.y + hh) {
+      hit = entity.id;
+    }
+  }
+  return hit;
+}
+
+function snap(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+function nextTransformForDrag(drag: DragState, wx: number, wy: number, snapping: boolean): TransformDraft {
+  const dx = wx - drag.startMouse.x;
+  const dy = wy - drag.startMouse.y;
+  const next = { ...drag.startTransform };
+
+  if (drag.tool === "move") {
+    next.x = drag.startTransform.x + dx;
+    next.y = drag.startTransform.y + dy;
+    if (snapping) {
+      next.x = snap(next.x, 16);
+      next.y = snap(next.y, 16);
+    }
+  } else if (drag.tool === "scale") {
+    const factor = Math.max(0.05, 1 + (dx + dy) * 0.01);
+    next.scale_x = drag.startTransform.scale_x * factor;
+    next.scale_y = drag.startTransform.scale_y * factor;
+    if (snapping) {
+      next.scale_x = snap(next.scale_x, 0.1);
+      next.scale_y = snap(next.scale_y, 0.1);
+    }
+  } else if (drag.tool === "rotate") {
+    const angle = Math.atan2(wy - drag.startTransform.y, wx - drag.startTransform.x);
+    next.rotation = drag.startTransform.rotation + angle - drag.startAngle;
+    if (snapping) {
+      next.rotation = snap(next.rotation, Math.PI / 12);
+    }
+  }
+
+  return next;
+}
+
 function drawEntity(
   ctx: CanvasRenderingContext2D,
   entity: Entity,
@@ -301,6 +467,8 @@ function drawEntity(
   ch: number,
   cam: Camera,
   worldToScreen: (wx: number, wy: number, cw: number, ch: number) => { sx: number; sy: number },
+  draft?: TransformDraft,
+  activeTool?: ActiveTool,
 ) {
   const transform = entity.components.find(c => c.type === "Transform") as
     | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
@@ -316,11 +484,12 @@ function drawEntity(
     | undefined;
 
   const isSelected = entity.id === selectedId;
-  const tx = transform?.x ?? 0;
-  const ty = transform?.y ?? 0;
+  const activeTransform = draft ?? transform;
+  const tx = activeTransform?.x ?? 0;
+  const ty = activeTransform?.y ?? 0;
   const { sx, sy } = worldToScreen(tx, ty, cw, ch);
 
-  if (!transform) {
+  if (!activeTransform) {
     // No transform — show a small indicator at origin
     const { sx: ox, sy: oy } = worldToScreen(0, 0, cw, ch);
     ctx.strokeStyle = isSelected ? SELECTED_COLOR : "rgba(160,160,160,0.5)";
@@ -332,27 +501,34 @@ function drawEntity(
   }
 
   if (cameraComp) {
-    drawCameraFrame(ctx, entity.name, sx, sy, transform.rotation, cameraComp.zoom, cam.zoom, cameraComp.active ?? true, isSelected);
+    drawCameraFrame(ctx, entity.name, sx, sy, activeTransform.rotation, cameraComp.zoom, cam.zoom, cameraComp.active ?? true, isSelected);
     if (!sprite && !collider) return;
   }
 
-  const hw = sprite ? sprite.width * 0.5 : Math.max(transform.scale_x * 16, 1);
-  const hh = sprite ? sprite.height * 0.5 : Math.max(transform.scale_y * 16, 1);
+  const hw = sprite ? sprite.width * activeTransform.scale_x * 0.5 : Math.max(activeTransform.scale_x * 16, 1);
+  const hh = sprite ? sprite.height * activeTransform.scale_y * 0.5 : Math.max(activeTransform.scale_y * 16, 1);
 
   const screenW = hw * 2 * cam.zoom;
   const screenH = hh * 2 * cam.zoom;
-  const screenX = sx - screenW / 2;
-  const screenY = sy - screenH / 2;
+
+  const color = sprite ? `rgba(${Math.round(sprite.color[0] * 255)},${Math.round(sprite.color[1] * 255)},${Math.round(sprite.color[2] * 255)},${(sprite.color[3] * 0.5).toFixed(2)})` : "rgba(77,166,255,0.25)";
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(activeTransform.rotation);
 
   // Entity fill
-  const color = sprite ? `rgba(${Math.round(sprite.color[0] * 255)},${Math.round(sprite.color[1] * 255)},${Math.round(sprite.color[2] * 255)},${(sprite.color[3] * 0.5).toFixed(2)})` : "rgba(77,166,255,0.25)";
   ctx.fillStyle = color;
-  ctx.fillRect(screenX, screenY, screenW, screenH);
+  ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
 
   // Entity outline
   ctx.strokeStyle = isSelected ? SELECTED_COLOR : (sprite ? `rgba(${Math.round(sprite.color[0] * 255)},${Math.round(sprite.color[1] * 255)},${Math.round(sprite.color[2] * 255)},0.9)` : ENTITY_COLOR);
   ctx.lineWidth = isSelected ? 2 : 1;
-  ctx.strokeRect(screenX, screenY, screenW, screenH);
+  ctx.strokeRect(-screenW / 2, -screenH / 2, screenW, screenH);
+  ctx.restore();
+
+  if (isSelected && activeTool && activeTool !== "select") {
+    drawToolGizmo(ctx, sx, sy, activeTool, cam.zoom);
+  }
 
   // Collider outline
   if (collider) {
@@ -378,6 +554,33 @@ function drawEntity(
     ctx.fillStyle = isSelected ? SELECTED_COLOR : LABEL_COLOR;
     ctx.fillText(entity.name, sx + screenW / 2 + 4, sy - screenH / 2 + 10);
   }
+}
+
+function drawToolGizmo(ctx: CanvasRenderingContext2D, sx: number, sy: number, tool: ActiveTool, zoom: number) {
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.lineWidth = 2;
+  if (tool === "move") {
+    const len = Math.max(30, Math.min(80, 48 * Math.sqrt(zoom)));
+    ctx.strokeStyle = "rgba(232,80,80,0.95)";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(len, 0); ctx.lineTo(len - 7, -5); ctx.lineTo(len - 7, 5); ctx.closePath(); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+    ctx.strokeStyle = "rgba(80,210,110,0.95)";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, len); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, len); ctx.lineTo(-5, len - 7); ctx.lineTo(5, len - 7); ctx.closePath(); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+  } else if (tool === "scale") {
+    ctx.strokeStyle = SELECTED_COLOR;
+    ctx.strokeRect(-8, -8, 16, 16);
+    ctx.beginPath(); ctx.moveTo(10, 10); ctx.lineTo(34, 34); ctx.stroke();
+    ctx.fillStyle = SELECTED_COLOR;
+    ctx.fillRect(30, 30, 8, 8);
+  } else if (tool === "rotate") {
+    ctx.strokeStyle = SELECTED_COLOR;
+    ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 1.65); ctx.stroke();
+    ctx.fillStyle = SELECTED_COLOR;
+    ctx.beginPath(); ctx.moveTo(-7, -28); ctx.lineTo(4, -33); ctx.lineTo(2, -21); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawCameraFrame(
@@ -424,7 +627,7 @@ function drawCameraFrame(
 
 const ENGINE_URL = "http://127.0.0.1:7878";
 
-function GameView({ screenshotB64, engineReady, isPlaying }: { screenshotB64: string | null; engineReady: boolean; isPlaying: boolean }) {
+function GameView({ engineReady, isPlaying }: { engineReady: boolean; isPlaying: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const heldKeys = useRef<Set<string>>(new Set());
 
@@ -471,26 +674,11 @@ function GameView({ screenshotB64, engineReady, isPlaying }: { screenshotB64: st
     <div
       ref={containerRef}
       tabIndex={0}
-      style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#000", outline: "none" }}
+      style={{ width: "100%", height: "100%", position: "relative", background: "#000", outline: "none", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
-      {screenshotB64 ? (
-        <img
-          src={`data:image/png;base64,${screenshotB64}`}
-          alt="game viewport"
-          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
-        />
-      ) : (
-        <>
-          <span style={{ fontSize: "11px", color: engineReady ? "var(--text-muted)" : "var(--text-dim)" }}>
-            {engineReady ? "no renderer output" : "waiting for engine…"}
-          </span>
-          {engineReady && (
-            <span style={{ fontSize: "10px", color: "var(--text-dim)", marginTop: "4px" }}>
-              connect a game binary with sindri-server to see live output
-            </span>
-          )}
-        </>
-      )}
+      <span style={{ fontSize: "11px", color: engineReady ? "var(--text-muted)" : "var(--text-dim)" }}>
+        {engineReady ? "native play window" : "waiting for engine…"}
+      </span>
 
       {/* Play state indicator */}
       <div style={{

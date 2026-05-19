@@ -39,6 +39,9 @@ format cannot preserve it, or the AI can generate invalid partial state.
 | Scene Graph / Hierarchy | Partial | Partial | Yes | Yes | Yes | Partial | Partial | Partial | Yes | Yes | Active |
 | Undo/Redo Commands | Yes | Partial | Partial | N/A | Partial | No | No | No | Yes | Partial | Active |
 | AI Commands | Partial | Partial | Partial | N/A | Yes | Partial | Partial | Partial | Partial | Partial | Prototype |
+| Playback controls | Partial | Partial | Partial | N/A | Yes | No | Partial | Partial | Yes | Partial | Active |
+| Native play preview | Yes | Partial | Partial | N/A | Partial | No | No | Partial | Yes | Partial | Active |
+| Screenshot capture | Yes | Yes | Partial | N/A | Yes | No | No | Partial | Yes | Partial | Active |
 
 ## Evidence Notes
 
@@ -48,6 +51,12 @@ This matrix is grounded in the current repo state:
 - Editor/server scene JSON currently supports `Transform`, `Sprite`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource` through `sindri::component::Component`.
 - Editor hierarchy can add/remove those seven scene JSON components, and the server patch route can update all seven. The inspector exposes editable fields for each of them.
 - The viewport understands `Transform`, `Sprite`, and `Collider` for preview/selection. It does not visualize engine tilemaps, particles, lights, animation, audio, pathfinding, HUD, or gameplay marker components.
+- The Scene view now supports basic direct manipulation for `Transform` through Move, Scale, and Rotate tools, including simple gizmo hints, Shift snapping, and transform undo/redo. It does not yet have full axis-handle hit testing, multi-select, or prefab-style editing.
+- Scene editing has an explicit save command and dirty indicator in the editor shell, alongside server autosave while playback is stopped.
+- Play mode currently uses a separate native `wgpu` preview window owned by `sindri-server`. The editor Game tab is a status surface, not an embedded render surface.
+- Playback has explicit play/pause/stop control. Stop restores the edit-scene snapshot captured when playback starts, and autosave is suppressed while playback is not stopped.
+- Screenshot capture remains supported for AI/diagnostics, but it is now on-demand rather than a continuously polled editor viewport transport.
+- The server Lua runtime exposes the editor-scene subset used by live preview scripts, including direct `self.x`/`self.y` fields plus `vec2`, `self:transform()`, `self:sprite()`, and `self:camera()` helpers. This is still narrower than the core engine `ScriptRuntime`.
 - `register_builtin_metadata()` currently registers only `Transform`, so runtime reflection is not yet the source of truth for the editor's full component set.
 - Scene serialization is split: `crates/sindri/src/scene.rs` serializes the editor-facing JSON component enum, while `scene_physics.rs` captures physics snapshots and generic component payload helpers. Engine-only typed components such as `TilemapComponent`, `AnimatedSprite`, particle systems, lights, and gameplay markers are not represented in the editor scene enum today.
 - AI actions in the editor/Tauri layer can create/delete/rename entities, edit transforms, write/attach scripts, add/remove scene JSON components, and patch all seven scene JSON component variants. The standalone `sindri-ai` crate has a narrower action enum than the editor prompt/action executor.

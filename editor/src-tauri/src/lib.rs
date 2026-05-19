@@ -8,6 +8,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_scene,
             commands::put_scene,
+            commands::save_scene,
             commands::open_scene_file,
             commands::patch_transform,
             commands::get_screenshot,
@@ -27,6 +28,7 @@ pub fn run() {
             commands::get_engine_binary_path,
             commands::create_project,
             commands::set_engine_paused,
+            commands::set_engine_playback,
             commands::list_project_files,
             commands::new_script,
             commands::delete_project_file,

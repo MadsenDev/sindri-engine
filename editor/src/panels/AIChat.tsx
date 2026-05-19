@@ -22,7 +22,6 @@ interface Props {
   scene: Scene | null;
   projectPath: string;
   openScript: { path: string; content: string } | null;
-  screenshotB64: string | null;
   selectedModel: string | null;
   projectFiles: ProjectFile[];
   onSceneChange: () => void;
@@ -55,7 +54,7 @@ function loadMessages(projectPath: string): Message[] {
   } catch { return []; }
 }
 
-export default function AIChat({ scene, projectPath, openScript: _openScript, screenshotB64: _screenshotB64, selectedModel, projectFiles, onSceneChange }: Props) {
+export default function AIChat({ scene, projectPath, openScript: _openScript, selectedModel, projectFiles, onSceneChange }: Props) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(projectPath));
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);

@@ -3052,6 +3052,7 @@ dependencies = [
  "sindri",
  "tokio",
  "tower-http 0.5.2",
+ "winit",
 ]
 
 [[package]]

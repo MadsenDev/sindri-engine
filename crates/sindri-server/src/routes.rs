@@ -7,10 +7,7 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path as FsPath, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 use sindri::component::Transform;
@@ -19,17 +16,50 @@ use sindri::scene::Scene;
 pub type SharedScene = Arc<RwLock<Scene>>;
 pub type SharedScenePath = Arc<RwLock<PathBuf>>;
 pub type SharedKeys = Arc<RwLock<HashSet<String>>>;
+pub type SharedPlayback = Arc<Mutex<PlaybackState>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackMode {
+    Stopped,
+    Playing,
+    Paused,
+}
+
+impl PlaybackMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlaybackMode::Stopped => "stopped",
+            PlaybackMode::Playing => "playing",
+            PlaybackMode::Paused => "paused",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlaybackState {
+    pub mode: PlaybackMode,
+    pub edit_scene: Option<Scene>,
+}
+
+impl Default for PlaybackState {
+    fn default() -> Self {
+        Self {
+            mode: PlaybackMode::Stopped,
+            edit_scene: None,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub scene: SharedScene,
     pub scene_path: SharedScenePath,
     pub project_root: PathBuf,
-    pub screenshot_fn: Arc<dyn Fn() -> Option<Vec<u8>> + Send + Sync>,
+    pub screenshot_fn: Arc<dyn Fn(&Scene) -> Option<Vec<u8>> + Send + Sync>,
     pub scripts_root: std::path::PathBuf,
     pub model: String,
     pub keys: SharedKeys,
-    pub paused: Arc<AtomicBool>,
+    pub playback: SharedPlayback,
 }
 
 fn has_active_camera(scene: &Scene) -> bool {
@@ -96,16 +126,23 @@ pub fn normalize_scene_cameras(scene: &mut Scene) {
 
 // GET /health
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    let mode = state
+        .playback
+        .lock()
+        .map(|playback| playback.mode)
+        .unwrap_or(PlaybackMode::Stopped);
     Json(serde_json::json!({
         "status": "ok",
         "model": state.model,
-        "paused": state.paused.load(Ordering::Relaxed),
+        "paused": mode != PlaybackMode::Playing,
+        "playback": mode.as_str(),
     }))
 }
 
 #[derive(Deserialize)]
 pub struct ControlBody {
-    pub paused: bool,
+    pub paused: Option<bool>,
+    pub action: Option<String>,
 }
 
 // POST /control
@@ -113,7 +150,67 @@ pub async fn post_control(
     State(state): State<AppState>,
     Json(body): Json<ControlBody>,
 ) -> impl IntoResponse {
-    state.paused.store(body.paused, Ordering::Relaxed);
+    let action = body.action.as_deref();
+    match action {
+        Some("play") => {
+            let snapshot = {
+                let scene = state.scene.read().await;
+                scene.clone()
+            };
+            if let Ok(mut playback) = state.playback.lock() {
+                if playback.mode == PlaybackMode::Stopped {
+                    playback.edit_scene = Some(snapshot);
+                }
+                playback.mode = PlaybackMode::Playing;
+            }
+        }
+        Some("pause") => {
+            if let Ok(mut playback) = state.playback.lock() {
+                if playback.mode == PlaybackMode::Playing {
+                    playback.mode = PlaybackMode::Paused;
+                }
+            }
+        }
+        Some("stop") => {
+            let restore = if let Ok(mut playback) = state.playback.lock() {
+                playback.mode = PlaybackMode::Stopped;
+                playback.edit_scene.take()
+            } else {
+                None
+            };
+            if let Some(scene) = restore {
+                let mut current = state.scene.write().await;
+                *current = scene;
+            }
+            if let Ok(mut keys) = state.keys.try_write() {
+                keys.clear();
+            }
+        }
+        Some(_) => return StatusCode::BAD_REQUEST,
+        None => {
+            let Some(paused) = body.paused else {
+                return StatusCode::BAD_REQUEST;
+            };
+            let snapshot = if paused {
+                None
+            } else {
+                let scene = state.scene.read().await;
+                Some(scene.clone())
+            };
+            if let Ok(mut playback) = state.playback.lock() {
+                if paused {
+                    if playback.mode == PlaybackMode::Playing {
+                        playback.mode = PlaybackMode::Paused;
+                    }
+                } else {
+                    if playback.mode == PlaybackMode::Stopped {
+                        playback.edit_scene = snapshot;
+                    }
+                    playback.mode = PlaybackMode::Playing;
+                }
+            }
+        }
+    }
     StatusCode::OK
 }
 
@@ -135,6 +232,16 @@ pub async fn put_scene(State(state): State<AppState>, body: String) -> impl Into
             StatusCode::OK.into_response()
         }
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+// POST /scene/save
+pub async fn save_scene(State(state): State<AppState>) -> impl IntoResponse {
+    let scene = state.scene.read().await;
+    let path = state.scene_path.read().await.clone();
+    match scene.save(&path) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -693,7 +800,8 @@ pub async fn delete_entity(
 
 // GET /screenshot
 pub async fn get_screenshot(State(state): State<AppState>) -> impl IntoResponse {
-    match (state.screenshot_fn)() {
+    let scene = state.scene.read().await;
+    match (state.screenshot_fn)(&scene) {
         Some(png_bytes) => {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);

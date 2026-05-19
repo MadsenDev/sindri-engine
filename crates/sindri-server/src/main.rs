@@ -1,7 +1,8 @@
 use sindri::component::Component;
-use sindri::math::{Camera2D, Vec2};
-use sindri::render::Renderer;
+use sindri::math::{Camera2D, Transform2D, Vec2};
+use sindri::render::{Renderer, Sprite, TextureHandle};
 use sindri::scene::Scene;
+use sindri_server::routes::{PlaybackMode, PlaybackState, SharedPlayback};
 use sindri_server::{serve, AppState, SharedScene};
 mod lua_runtime;
 use lua_runtime::LuaRuntime;
@@ -9,6 +10,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
+use winit::{
+    dpi::LogicalSize,
+    event::{ElementState, Event, KeyEvent, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{Key, NamedKey},
+    window::Window,
+};
 
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
@@ -52,11 +60,12 @@ fn default_scene() -> Scene {
 }
 
 fn encode_png(rgba: &[u8]) -> Vec<u8> {
-    use image::{ImageBuffer, Rgba};
-    let img = ImageBuffer::<Rgba<u8>, _>::from_raw(WIDTH, HEIGHT, rgba.to_vec())
-        .expect("invalid dimensions");
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::{ColorType, ImageEncoder};
+
     let mut buf = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+    PngEncoder::new_with_quality(&mut buf, CompressionType::Fast, FilterType::NoFilter)
+        .write_image(rgba, WIDTH, HEIGHT, ColorType::Rgba8.into())
         .expect("png encode failed");
     buf
 }
@@ -195,57 +204,92 @@ fn scene_camera(scene: &Scene, runtime: &mut CameraRuntime) -> Camera2D {
     camera_2d
 }
 
-fn render_scene(
-    renderer: &mut Renderer,
+struct ScreenshotCapture {
+    renderer: Renderer,
+    camera_runtime: CameraRuntime,
+    white_texture: TextureHandle,
+}
+
+impl ScreenshotCapture {
+    fn new() -> anyhow::Result<Self> {
+        let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT)?;
+        let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
+        Ok(Self {
+            renderer,
+            camera_runtime: CameraRuntime::default(),
+            white_texture,
+        })
+    }
+
+    fn capture(&mut self, scene: &Scene) -> anyhow::Result<Vec<u8>> {
+        render_scene_png(
+            &mut self.renderer,
+            scene,
+            &mut self.camera_runtime,
+            self.white_texture,
+        )
+    }
+}
+
+fn draw_scene_contents(
+    r: &mut Renderer,
+    frame: &mut sindri::render::Frame,
     scene: &Scene,
     camera_runtime: &mut CameraRuntime,
-) -> anyhow::Result<Vec<u8>> {
-    let rgba = renderer.render_offscreen_rgba(WIDTH, HEIGHT, |r, frame| {
-        r.clear(frame, [0.039, 0.043, 0.051, 1.0])?; // editor bg-0
+    white_texture: TextureHandle,
+) -> anyhow::Result<()> {
+    r.clear(frame, [0.039, 0.043, 0.051, 1.0])?; // editor bg-0
 
-        let camera = scene_camera(scene, camera_runtime);
+    let camera = scene_camera(scene, camera_runtime);
 
-        for entity in scene.entities.values() {
-            let transform = entity.components.iter().find_map(|c| {
-                if let Component::Transform(t) = c {
-                    Some(t)
-                } else {
-                    None
-                }
-            });
-            let sprite = entity.components.iter().find_map(|c| {
-                if let Component::Sprite(s) = c {
-                    Some(s)
-                } else {
-                    None
-                }
-            });
-            let collider = entity.components.iter().find_map(|c| {
-                if let Component::Collider(col) = c {
-                    Some(col)
-                } else {
-                    None
-                }
-            });
-            let physics_body = entity.components.iter().find_map(|c| {
-                if let Component::PhysicsBody(body) = c {
-                    Some(body)
-                } else {
-                    None
-                }
-            });
-
-            let Some(t) = transform else { continue };
-            if sprite.is_none() && collider.is_none() && physics_body.is_none() {
-                continue;
+    for entity in scene.entities.values() {
+        let transform = entity.components.iter().find_map(|c| {
+            if let Component::Transform(t) = c {
+                Some(t)
+            } else {
+                None
             }
+        });
+        let sprite = entity.components.iter().find_map(|c| {
+            if let Component::Sprite(s) = c {
+                Some(s)
+            } else {
+                None
+            }
+        });
+        let collider = entity.components.iter().find_map(|c| {
+            if let Component::Collider(col) = c {
+                Some(col)
+            } else {
+                None
+            }
+        });
+        let physics_body = entity.components.iter().find_map(|c| {
+            if let Component::PhysicsBody(body) = c {
+                Some(body)
+            } else {
+                None
+            }
+        });
 
-            let pos = Vec2::new(t.x, t.y);
+        let Some(t) = transform else { continue };
+        if sprite.is_none() && collider.is_none() && physics_body.is_none() {
+            continue;
+        }
 
-            // Body rect
-            let (hw, hh, color) = if let Some(s) = sprite {
-                (s.width * 0.5, s.height * 0.5, s.color)
-            } else if let Some(body) = physics_body {
+        let pos = Vec2::new(t.x, t.y);
+
+        if let Some(s) = sprite {
+            let mut sprite = Sprite::new(white_texture);
+            sprite.transform = Transform2D {
+                position: pos,
+                rotation: t.rotation,
+                scale: Vec2::new(s.width * t.scale_x, s.height * t.scale_y),
+            };
+            sprite.tint = s.color;
+            r.draw_sprite(frame, &sprite, &camera)?;
+        } else {
+            let (hw, hh, color) = if let Some(body) = physics_body {
                 let color = match body.body_type {
                     sindri::component::BodyType::Dynamic => [0.0, 1.0, 0.9, 0.85],
                     sindri::component::BodyType::Kinematic => [1.0, 0.9, 0.0, 0.85],
@@ -263,27 +307,173 @@ fn render_scene(
                 Vec2::new(pos.x - hw, pos.y + hh),
             ];
             r.draw_polygon(frame, &rect, color, &camera)?;
-
-            // Collider outline
-            if let Some(col) = collider {
-                let cx = pos.x + col.offset_x;
-                let cy = pos.y + col.offset_y;
-                let chw = col.width * 0.5;
-                let chh = col.height * 0.5;
-                let col_rect = [
-                    Vec2::new(cx - chw, cy - chh),
-                    Vec2::new(cx + chw, cy - chh),
-                    Vec2::new(cx + chw, cy + chh),
-                    Vec2::new(cx - chw, cy + chh),
-                ];
-                r.draw_polygon(frame, &col_rect, [0.30, 0.90, 0.40, 0.25], &camera)?;
-            }
         }
 
-        Ok(())
+        // Collider outline
+        if let Some(col) = collider {
+            let cx = pos.x + col.offset_x;
+            let cy = pos.y + col.offset_y;
+            let chw = col.width * 0.5;
+            let chh = col.height * 0.5;
+            let col_rect = [
+                Vec2::new(cx - chw, cy - chh),
+                Vec2::new(cx + chw, cy - chh),
+                Vec2::new(cx + chw, cy + chh),
+                Vec2::new(cx - chw, cy + chh),
+            ];
+            r.draw_polygon(frame, &col_rect, [0.30, 0.90, 0.40, 0.25], &camera)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn render_scene_png(
+    renderer: &mut Renderer,
+    scene: &Scene,
+    camera_runtime: &mut CameraRuntime,
+    white_texture: TextureHandle,
+) -> anyhow::Result<Vec<u8>> {
+    let rgba = renderer.render_offscreen_rgba(WIDTH, HEIGHT, |r, frame| {
+        draw_scene_contents(r, frame, scene, camera_runtime, white_texture)
+    })?;
+    Ok(encode_png(&rgba))
+}
+
+fn key_name(event: &KeyEvent) -> Option<String> {
+    match &event.logical_key {
+        Key::Named(NamedKey::ArrowLeft) => Some("ArrowLeft".into()),
+        Key::Named(NamedKey::ArrowRight) => Some("ArrowRight".into()),
+        Key::Named(NamedKey::ArrowUp) => Some("ArrowUp".into()),
+        Key::Named(NamedKey::ArrowDown) => Some("ArrowDown".into()),
+        Key::Named(NamedKey::Space) => Some(" ".into()),
+        Key::Named(NamedKey::Enter) => Some("Enter".into()),
+        Key::Named(NamedKey::Tab) => Some("Tab".into()),
+        Key::Named(NamedKey::Shift) => Some("Shift".into()),
+        Key::Named(NamedKey::Control) => Some("Control".into()),
+        Key::Named(NamedKey::Alt) => Some("Alt".into()),
+        Key::Named(NamedKey::Escape) => Some("Escape".into()),
+        Key::Character(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn update_runtime(
+    lua: &mut LuaRuntime,
+    shared_scene: &SharedScene,
+    scripts_dir: &std::path::Path,
+    shared_keys: &sindri_server::routes::SharedKeys,
+    playback: &SharedPlayback,
+    last_tick: &mut std::time::Instant,
+    was_stopped: &mut bool,
+) {
+    let now = std::time::Instant::now();
+    let dt = now.duration_since(*last_tick).as_secs_f32().min(0.1);
+    *last_tick = now;
+
+    let mode = playback
+        .lock()
+        .map(|playback| playback.mode)
+        .unwrap_or(PlaybackMode::Stopped);
+    if *was_stopped && mode == PlaybackMode::Playing {
+        lua.reset();
+    }
+    *was_stopped = mode == PlaybackMode::Stopped;
+
+    if mode == PlaybackMode::Playing {
+        let keys = shared_keys.blocking_read().clone();
+        let mut scene = shared_scene.blocking_write();
+        lua.update(&mut scene, scripts_dir, dt, &keys);
+    }
+    {
+        let mut scene = shared_scene.blocking_write();
+        update_scene_camera_runtime(&mut scene, dt);
+    }
+}
+
+#[allow(deprecated)]
+fn run_preview_window(
+    project_dir: &std::path::Path,
+    scripts_dir: PathBuf,
+    shared_scene: SharedScene,
+    shared_keys: sindri_server::routes::SharedKeys,
+    playback: SharedPlayback,
+) -> anyhow::Result<()> {
+    let event_loop = EventLoop::new()?;
+    let mut window_attributes = Window::default_attributes();
+    window_attributes.title = format!("Sindri Play - {}", project_dir.display());
+    window_attributes.inner_size = Some(LogicalSize::new(WIDTH, HEIGHT).into());
+    let window = event_loop.create_window(window_attributes)?;
+
+    let mut renderer = Renderer::new(&window, true)?;
+    let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
+    println!("native play window ready");
+
+    let mut lua = LuaRuntime::new()?;
+    let mut camera_runtime = CameraRuntime::default();
+    let mut last_tick = std::time::Instant::now();
+    let mut was_stopped = true;
+
+    event_loop.run(move |event, elwt| match event {
+        Event::WindowEvent { event, .. } => match event {
+            WindowEvent::CloseRequested => {
+                elwt.exit();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(key) = key_name(&event) {
+                    if key == "Escape" && event.state == ElementState::Pressed {
+                        elwt.exit();
+                        return;
+                    }
+                    if let Ok(mut keys) = shared_keys.try_write() {
+                        match event.state {
+                            ElementState::Pressed => {
+                                keys.insert(key);
+                            }
+                            ElementState::Released => {
+                                keys.remove(&key);
+                            }
+                        }
+                    }
+                }
+            }
+            WindowEvent::Resized(new_size) => {
+                renderer.resize(new_size);
+            }
+            WindowEvent::RedrawRequested => {
+                let snapshot = shared_scene.blocking_read().clone();
+                match renderer.begin_frame().and_then(|mut frame| {
+                    draw_scene_contents(
+                        &mut renderer,
+                        &mut frame,
+                        &snapshot,
+                        &mut camera_runtime,
+                        white_texture,
+                    )?;
+                    renderer.end_frame(frame)
+                }) {
+                    Ok(()) => {}
+                    Err(e) => eprintln!("preview render error: {e}"),
+                }
+            }
+            _ => {}
+        },
+        Event::AboutToWait => {
+            update_runtime(
+                &mut lua,
+                &shared_scene,
+                &scripts_dir,
+                &shared_keys,
+                &playback,
+                &mut last_tick,
+                &mut was_stopped,
+            );
+            window.request_redraw();
+        }
+        _ => {}
     })?;
 
-    Ok(encode_png(&rgba))
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -312,19 +502,18 @@ fn main() -> anyhow::Result<()> {
 
     let shared_scene: SharedScene = Arc::new(RwLock::new(scene));
     let shared_scene_path = Arc::new(RwLock::new(scene_path));
-    let shared_png: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let screenshot_capture: Arc<Mutex<Option<ScreenshotCapture>>> = Arc::new(Mutex::new(None));
     let shared_keys: sindri_server::routes::SharedKeys =
         Arc::new(RwLock::new(std::collections::HashSet::new()));
-    let shared_paused: Arc<std::sync::atomic::AtomicBool> =
-        Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let shared_playback: SharedPlayback = Arc::new(Mutex::new(PlaybackState::default()));
 
     // HTTP server runs on a background thread with its own tokio runtime.
     {
         let scene_sv = shared_scene.clone();
-        let png_sv = shared_png.clone();
+        let screenshot_capture = screenshot_capture.clone();
         let scene_path_sv = shared_scene_path.clone();
         let keys_sv = shared_keys.clone();
-        let paused_sv = shared_paused.clone();
+        let playback_sv = shared_playback.clone();
         let scripts_root = scripts_dir.clone();
         let project_root = project_dir.clone();
         let project_label = project_dir.display().to_string();
@@ -335,9 +524,17 @@ fn main() -> anyhow::Result<()> {
                 // Auto-save every 5 seconds
                 let save_scene = scene_sv.clone();
                 let save_path = scene_path_sv.clone();
+                let save_playback = playback_sv.clone();
                 tokio::spawn(async move {
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        let should_save = save_playback
+                            .lock()
+                            .map(|playback| playback.mode == PlaybackMode::Stopped)
+                            .unwrap_or(false);
+                        if !should_save {
+                            continue;
+                        }
                         let s = save_scene.read().await;
                         let path = save_path.read().await.clone();
                         let _ = s.save(&path);
@@ -348,11 +545,25 @@ fn main() -> anyhow::Result<()> {
                     scene: scene_sv,
                     scene_path: scene_path_sv,
                     project_root,
-                    screenshot_fn: Arc::new(move || png_sv.lock().unwrap().clone()),
+                    screenshot_fn: Arc::new(move |scene| {
+                        let mut capture = screenshot_capture.lock().ok()?;
+                        if capture.is_none() {
+                            match ScreenshotCapture::new() {
+                                Ok(new_capture) => *capture = Some(new_capture),
+                                Err(e) => {
+                                    eprintln!("screenshot renderer error: {e}");
+                                    return None;
+                                }
+                            }
+                        }
+                        capture
+                            .as_mut()
+                            .and_then(|capture| capture.capture(scene).ok())
+                    }),
                     scripts_root,
                     model: String::new(),
                     keys: keys_sv,
-                    paused: paused_sv,
+                    playback: playback_sv,
                 };
 
                 println!("sindri engine | project: {project_label}");
@@ -365,46 +576,11 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Offscreen renderer + render loop on main thread.
-    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT)?;
-    println!("renderer ready");
-
-    let mut lua = LuaRuntime::new()?;
-    let mut camera_runtime = CameraRuntime::default();
-    let mut last_tick = std::time::Instant::now();
-    let mut was_paused = true;
-
-    loop {
-        let now = std::time::Instant::now();
-        let dt = now.duration_since(last_tick).as_secs_f32().min(0.1);
-        last_tick = now;
-
-        let paused = shared_paused.load(std::sync::atomic::Ordering::Relaxed);
-
-        // Reset script state when transitioning from paused → playing
-        // so on_start fires fresh each time play is pressed
-        if was_paused && !paused {
-            lua.reset();
-        }
-        was_paused = paused;
-
-        // Run scripts only while playing
-        if !paused {
-            let keys = shared_keys.blocking_read().clone();
-            let mut scene = shared_scene.blocking_write();
-            lua.update(&mut scene, &scripts_dir, dt, &keys);
-        }
-        {
-            let mut scene = shared_scene.blocking_write();
-            update_scene_camera_runtime(&mut scene, dt);
-        }
-
-        let snapshot = shared_scene.blocking_read().clone();
-        match render_scene(&mut renderer, &snapshot, &mut camera_runtime) {
-            Ok(png) => *shared_png.lock().unwrap() = Some(png),
-            Err(e) => eprintln!("render error: {e}"),
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(67)); // ~15 fps
-    }
+    run_preview_window(
+        &project_dir,
+        scripts_dir,
+        shared_scene,
+        shared_keys,
+        shared_playback,
+    )
 }
