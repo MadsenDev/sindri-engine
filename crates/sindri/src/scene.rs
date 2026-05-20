@@ -3,11 +3,17 @@ use crate::entity::{Entity, EntityId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+fn default_gravity_y() -> f32 { 980.0 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Scene {
     pub name: String,
     pub entities: HashMap<EntityId, Entity>,
     pub next_id: EntityId,
+    #[serde(default = "default_gravity_y")]
+    pub gravity_y: f32,
+    #[serde(default)]
+    pub gravity_x: f32,
 }
 
 impl Scene {
@@ -19,6 +25,10 @@ impl Scene {
     }
 
     pub fn spawn(&mut self, name: &str) -> EntityId {
+        self.spawn_staged(name, false)
+    }
+
+    pub fn spawn_staged(&mut self, name: &str, staged: bool) -> EntityId {
         let id = self.next_id;
         self.next_id += 1;
         self.entities.insert(
@@ -30,6 +40,7 @@ impl Scene {
                 children: vec![],
                 components: vec![],
                 active: true,
+                staged,
             },
         );
         id

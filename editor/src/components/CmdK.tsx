@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Scene, Entity, ProposalData } from "../App";
+import type { Scene, Entity, ProposalData, AiModelConfig, AiModelRole } from "../App";
 import { KbdKey } from "../App";
 
 interface Message {
@@ -19,7 +19,8 @@ interface Props {
   scene: Scene | null;
   projectPath: string;
   openScript: { path: string; content: string } | null;
-  selectedModel: string | null;
+  modelConfig: AiModelConfig;
+  selectedProvider: "ollama" | "openai" | "anthropic";
   projectFiles: ProjectFile[];
   runtimeErrors: string[];
   onSceneChange: () => void;
@@ -45,8 +46,7 @@ function loadMessages(projectPath: string): Message[] {
 }
 
 export default function CmdK({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  scene, projectPath, openScript, selectedModel,
+  scene, projectPath, openScript, modelConfig, selectedProvider,
   projectFiles: _projectFiles, runtimeErrors: _runtimeErrors,
   onSceneChange: _onSceneChange, onClose, selectedEntity,
   onProposalReady, initialMessage, initialInput,
@@ -73,6 +73,10 @@ export default function CmdK({
   }, [messages, thinking]);
 
   const callAI = async (message: string, currentMessages: Message[]): Promise<Message[]> => {
+    const scriptContext = await resolveScriptContext(message, scene, selectedEntity, openScript, activeFlags);
+    const includeScript = activeFlags.has("script") || scriptContext !== null;
+    const selectedRole = selectModelRole(message, activeFlags, scriptContext !== null);
+    const selectedModel = modelConfig[selectedRole] ?? modelConfig.assistant ?? undefined;
     const history = currentMessages.flatMap(m => {
       if (m.role === "user") return [{ role: "user", content: m.text }];
       if (m.role === "ai") return [{ role: "assistant", content: m.text }];
@@ -83,17 +87,21 @@ export default function CmdK({
       message,
       contextFlags: {
         includeScene: activeFlags.has("scene"),
-        includeScript: activeFlags.has("script"),
+        includeScript,
         includeViewport: activeFlags.has("viewport"),
         includeErrors: activeFlags.has("errors"),
       },
+      provider: selectedProvider,
       model: selectedModel ?? undefined,
       history,
-      openScript: activeFlags.has("script") ? openScript : null,
+      openScript: scriptContext,
     });
 
-    const displayText = proposal.summary || "(no summary)";
     const hadChanges = proposal.changes.length > 0;
+    const displayText = proposal.summary?.trim()
+      || (hadChanges
+        ? `Staged ${proposal.changes.length} proposed change${proposal.changes.length === 1 ? "" : "s"}. Review in inspector.`
+        : "No changes proposed.");
     const aiMsg: Message = { role: "ai", text: displayText, hadChanges };
     const withAI = [...currentMessages, aiMsg];
     setMessages(withAI);
@@ -290,11 +298,76 @@ export default function CmdK({
             )}
           </div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ width: "6px", height: "6px", background: selectedModel ? "var(--moss)" : "var(--ink-4)", display: "inline-block" }} />
-            <span>{selectedModel ?? "no model"} · local</span>
+            <span style={{ width: "6px", height: "6px", background: modelConfig.assistant ? "var(--moss)" : "var(--ink-4)", display: "inline-block" }} />
+            <span>{modelConfig.assistant ?? "default model"} · {selectedProvider}</span>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function selectModelRole(
+  message: string,
+  activeFlags: Set<ContextFlag>,
+  hasScriptContext: boolean,
+): AiModelRole {
+  const lower = message.toLowerCase();
+  if (activeFlags.has("viewport")) return "vision";
+  if (
+    hasScriptContext
+    || lower.includes("jump")
+    || lower.includes("movement")
+    || activeFlags.has("script")
+    || lower.includes(".lua")
+    || lower.includes("script")
+    || lower.includes("code")
+    || lower.includes("function")
+    || lower.includes("api")
+  ) {
+    return "code";
+  }
+  return "assistant";
+}
+
+async function resolveScriptContext(
+  message: string,
+  scene: Scene | null,
+  selectedEntity: Entity | null,
+  openScript: { path: string; content: string } | null,
+  activeFlags: Set<ContextFlag>,
+): Promise<{ path: string; content: string } | null> {
+  if (activeFlags.has("script") && openScript) return openScript;
+
+  const path = findRelevantScriptPath(message, scene, selectedEntity);
+  if (!path) return openScript && message.toLowerCase().includes("script") ? openScript : null;
+
+  if (openScript?.path === path) return openScript;
+
+  try {
+    const content = await invoke<string>("get_script", { path });
+    return { path, content };
+  } catch {
+    return { path, content: "" };
+  }
+}
+
+function findRelevantScriptPath(
+  message: string,
+  scene: Scene | null,
+  selectedEntity: Entity | null,
+): string | null {
+  const direct = message.match(/#([^\s]+\.lua)\b/);
+  if (direct) return direct[1];
+
+  const lower = message.toLowerCase();
+  const entities = scene ? Object.values(scene.entities) : [];
+  const referenced = entities.find(entity => lower.includes(entity.name.toLowerCase()));
+  const target = referenced ?? selectedEntity;
+  const script = target?.components.find(component => component.type === "Script");
+  if (script && "path" in script && typeof script.path === "string" && script.path) {
+    return script.path;
+  }
+
+  return null;
 }

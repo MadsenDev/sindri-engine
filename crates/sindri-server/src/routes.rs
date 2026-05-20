@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -52,6 +52,8 @@ impl Default for PlaybackState {
     }
 }
 
+pub type SharedGizmos = Arc<std::sync::atomic::AtomicBool>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub scene: SharedScene,
@@ -63,6 +65,7 @@ pub struct AppState {
     pub keys: SharedKeys,
     pub playback: SharedPlayback,
     pub errors: SharedErrors,
+    pub gizmos: SharedGizmos,
     /// Broadcast channel for live JPEG frames from headless rendering.
     pub frame_tx: Option<tokio::sync::broadcast::Sender<Vec<u8>>>,
 }
@@ -259,6 +262,20 @@ pub async fn post_control(
     StatusCode::OK
 }
 
+#[derive(Deserialize)]
+pub struct GizmosBody {
+    pub enabled: bool,
+}
+
+// POST /gizmos
+pub async fn post_gizmos(
+    State(state): State<AppState>,
+    Json(body): Json<GizmosBody>,
+) -> impl IntoResponse {
+    state.gizmos.store(body.enabled, std::sync::atomic::Ordering::Relaxed);
+    StatusCode::OK
+}
+
 // GET /scene
 pub async fn get_scene(State(state): State<AppState>) -> impl IntoResponse {
     let scene = state.scene.read().await;
@@ -266,6 +283,12 @@ pub async fn get_scene(State(state): State<AppState>) -> impl IntoResponse {
         Ok(json) => (StatusCode::OK, json).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+// GET /scene/path — return the current scene file path as a JSON string
+pub async fn get_scene_path(State(state): State<AppState>) -> impl IntoResponse {
+    let path = state.scene_path.read().await;
+    Json(path.to_string_lossy().to_string()).into_response()
 }
 
 // PUT /scene
@@ -288,6 +311,33 @@ pub async fn save_scene(State(state): State<AppState>) -> impl IntoResponse {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+#[derive(Serialize)]
+pub struct WorldSettings {
+    pub gravity_x: f32,
+    pub gravity_y: f32,
+}
+
+pub async fn get_world_settings(State(state): State<AppState>) -> impl IntoResponse {
+    let scene = state.scene.read().await;
+    Json(WorldSettings { gravity_x: scene.gravity_x, gravity_y: scene.gravity_y }).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct PatchWorldSettings {
+    pub gravity_x: Option<f32>,
+    pub gravity_y: Option<f32>,
+}
+
+pub async fn patch_world_settings(
+    State(state): State<AppState>,
+    Json(body): Json<PatchWorldSettings>,
+) -> impl IntoResponse {
+    let mut scene = state.scene.write().await;
+    if let Some(v) = body.gravity_x { scene.gravity_x = v; }
+    if let Some(v) = body.gravity_y { scene.gravity_y = v; }
+    StatusCode::OK.into_response()
 }
 
 #[derive(Deserialize)]
@@ -425,6 +475,8 @@ pub async fn patch_transform(
 pub struct CreateEntityBody {
     pub name: String,
     pub parent_id: Option<u64>,
+    #[serde(default)]
+    pub staged: bool,
 }
 
 // POST /scene/entity
@@ -433,11 +485,60 @@ pub async fn create_entity(
     Json(body): Json<CreateEntityBody>,
 ) -> impl IntoResponse {
     let mut scene = state.scene.write().await;
-    let id = scene.spawn(&body.name);
+    let id = scene.spawn_staged(&body.name, body.staged);
     if let Some(parent_id) = body.parent_id {
         scene.set_parent(id, parent_id);
     }
     Json(serde_json::json!({ "id": id })).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct SetStagedBody {
+    pub staged: bool,
+}
+
+// PATCH /scene/entity/:id/staged
+pub async fn set_entity_staged(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(body): Json<SetStagedBody>,
+) -> impl IntoResponse {
+    let mut scene = state.scene.write().await;
+    match scene.entities.get_mut(&id) {
+        Some(e) => { e.staged = body.staged; StatusCode::OK.into_response() }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct BatchStagedBody {
+    pub entity_ids: Vec<u64>,
+}
+
+// POST /scene/staged/commit  — clear staged flag on given entity IDs
+pub async fn commit_staged(
+    State(state): State<AppState>,
+    Json(body): Json<BatchStagedBody>,
+) -> impl IntoResponse {
+    let mut scene = state.scene.write().await;
+    for id in &body.entity_ids {
+        if let Some(e) = scene.entities.get_mut(id) {
+            e.staged = false;
+        }
+    }
+    StatusCode::OK.into_response()
+}
+
+// POST /scene/staged/revert  — delete staged entities from given IDs
+pub async fn revert_staged(
+    State(state): State<AppState>,
+    Json(body): Json<BatchStagedBody>,
+) -> impl IntoResponse {
+    let mut scene = state.scene.write().await;
+    for id in &body.entity_ids {
+        scene.remove_entity(*id);
+    }
+    StatusCode::OK.into_response()
 }
 
 #[derive(Deserialize)]
@@ -887,7 +988,9 @@ pub async fn get_script(
     State(state): State<AppState>,
     Query(q): Query<ScriptPathQuery>,
 ) -> impl IntoResponse {
-    let full = state.scripts_root.join(&q.path);
+    let p = std::path::Path::new(&q.path);
+    let relative = p.strip_prefix("scripts").unwrap_or(p);
+    let full = state.scripts_root.join(relative);
     match std::fs::read_to_string(&full) {
         Ok(contents) => (StatusCode::OK, contents).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -920,7 +1023,9 @@ pub async fn put_script(
     Query(q): Query<ScriptPathQuery>,
     Json(body): Json<WriteScriptBody>,
 ) -> impl IntoResponse {
-    let full = state.scripts_root.join(&q.path);
+    let p = std::path::Path::new(&q.path);
+    let relative = p.strip_prefix("scripts").unwrap_or(p);
+    let full = state.scripts_root.join(relative);
     if let Some(parent) = full.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

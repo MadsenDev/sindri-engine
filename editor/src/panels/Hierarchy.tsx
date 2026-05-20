@@ -355,6 +355,8 @@ function EntityTreeItem({
           cursor: "pointer",
           background: isSelected ? "var(--paper-3)" : hovered ? "rgba(30,37,48,0.5)" : "transparent",
           borderLeft: isSelected ? "2px solid var(--ink)" : "2px solid transparent",
+          outline: entity.staged ? "1.5px dashed #d4a017" : "none",
+          outlineOffset: "-2px",
           userSelect: "none",
           fontFamily: "var(--font-ui)",
         }}

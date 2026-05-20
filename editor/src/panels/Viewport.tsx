@@ -1,5 +1,13 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import type { ActiveTool, Scene, Entity, GhostEntity } from "../App";
+import { invoke } from "@tauri-apps/api/core";
+import type { ActiveTool, Scene, Entity } from "../App";
+
+export interface ColliderChange {
+  entityId: number;
+  componentIdx: number;
+  before: { width: number; height: number; offset_x: number; offset_y: number };
+  after: { width: number; height: number; offset_x: number; offset_y: number };
+}
 
 interface Props {
   scene: Scene | null;
@@ -7,10 +15,9 @@ interface Props {
   onSelect: (id: number | null) => void;
   activeTool: ActiveTool;
   onTransformCommit: (change: TransformChange) => void;
+  onColliderCommit: (change: ColliderChange) => void;
   engineReady: boolean;
   isPlaying: boolean;
-  ghostEntities?: GhostEntity[];
-  hoveredChangeId?: string | null;
 }
 
 interface Camera {
@@ -29,13 +36,20 @@ const COLLIDER_COLOR = "rgba(155,176,112,0.35)";  // moss
 const CAMERA_COLOR = "#6dbcdb";      // cyan
 const LABEL_COLOR = "#8a8580";       // ink-3
 
-export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, engineReady, isPlaying, ghostEntities, hoveredChangeId }: Props) {
+export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, onColliderCommit, engineReady, isPlaying }: Props) {
   const [tab, setTab] = useState<"scene" | "game">("scene");
+  const [gizmos, setGizmos] = useState(false);
 
   // Auto-switch to game tab when play starts, back to scene when stopped
   useEffect(() => {
     if (isPlaying) setTab("game");
   }, [isPlaying]);
+
+  const toggleGizmos = useCallback(async () => {
+    const next = !gizmos;
+    setGizmos(next);
+    try { await invoke("set_gizmos", { enabled: next }); } catch {}
+  }, [gizmos]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
@@ -67,6 +81,21 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
             playing
           </span>
         )}
+        <button
+          onClick={toggleGizmos}
+          title="Toggle gizmos"
+          style={{
+            height: "22px", padding: "0 8px",
+            fontFamily: "var(--font-mono)", fontSize: "10px",
+            background: gizmos ? "var(--moss)" : "transparent",
+            color: gizmos ? "var(--paper)" : "var(--ink-3)",
+            border: `1px solid ${gizmos ? "var(--moss)" : "var(--rule)"}`,
+            cursor: "pointer",
+            display: tab === "game" ? "block" : "none",
+          }}
+        >
+          gizmos
+        </button>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>1280 × 720</span>
       </div>
 
@@ -78,8 +107,7 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
             onSelect={onSelect}
             activeTool={activeTool}
             onTransformCommit={onTransformCommit}
-            ghostEntities={ghostEntities}
-            hoveredChangeId={hoveredChangeId}
+            onColliderCommit={onColliderCommit}
           />
         ) : (
           <GameView engineReady={engineReady} isPlaying={isPlaying} />
@@ -107,10 +135,28 @@ export interface TransformChange {
 
 interface DragState {
   entityId: number;
-  tool: Exclude<ActiveTool, "select">;
+  tool: Exclude<ActiveTool, "select" | "collider">;
   startMouse: { x: number; y: number };
   startTransform: TransformDraft;
   startAngle: number;
+}
+
+type ColliderHandle = "left" | "right" | "top" | "bottom";
+
+interface ColliderDragState {
+  entityId: number;
+  componentIdx: number;
+  handle: ColliderHandle;
+  startMouse: { x: number; y: number };
+  entityRotation: number;
+  startCollider: { width: number; height: number; offset_x: number; offset_y: number };
+}
+
+interface ColliderDraft {
+  width: number;
+  height: number;
+  offset_x: number;
+  offset_y: number;
 }
 
 function SceneView({
@@ -119,16 +165,14 @@ function SceneView({
   onSelect,
   activeTool,
   onTransformCommit,
-  ghostEntities,
-  hoveredChangeId,
+  onColliderCommit,
 }: {
   scene: Scene | null;
   selectedId: number | null;
   onSelect: (id: number | null) => void;
   activeTool: ActiveTool;
   onTransformCommit: (change: TransformChange) => void;
-  ghostEntities?: GhostEntity[];
-  hoveredChangeId?: string | null;
+  onColliderCommit: (change: ColliderChange) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -141,14 +185,11 @@ function SceneView({
   const activeToolRef = useRef(activeTool);
   const dragRef = useRef<DragState | null>(null);
   const draftRef = useRef<Map<number, TransformDraft>>(new Map());
-  const ghostsRef = useRef<GhostEntity[]>([]);
-  const hoveredChangeRef = useRef<string | null>(null);
-
+  const colliderDragRef = useRef<ColliderDragState | null>(null);
+  const colliderDraftRef = useRef<Map<number, ColliderDraft>>(new Map());
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
-  useEffect(() => { ghostsRef.current = ghostEntities ?? []; }, [ghostEntities]);
-  useEffect(() => { hoveredChangeRef.current = hoveredChangeId ?? null; }, [hoveredChangeId]);
 
   const worldToScreen = (wx: number, wy: number, cw: number, ch: number) => ({
     sx: (wx - cameraRef.current.x) * cameraRef.current.zoom + cw / 2,
@@ -240,27 +281,7 @@ function SceneView({
     // — Entities —
     if (sc) {
       for (const entity of Object.values(sc.entities)) {
-        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current);
-      }
-    }
-
-    // — Ghost entities (staged proposals) —
-    const hovId = hoveredChangeRef.current;
-    for (const ghost of ghostsRef.current) {
-      const isHovered = ghost.changeId === hovId;
-      drawGhostEntity(ctx, ghost, cw, ch, cam, worldToScreen, isHovered);
-
-      // Arrow from current entity position to proposed position when hovered
-      if (isHovered && sc) {
-        const existing = Object.values(sc.entities).find(e => e.name === ghost.name);
-        if (existing) {
-          const t = getTransform(existing);
-          if (t) {
-            const { sx: fromSx, sy: fromSy } = worldToScreen(t.x, t.y, cw, ch);
-            const { sx: toSx, sy: toSy } = worldToScreen(ghost.x, ghost.y, cw, ch);
-            drawGhostArrow(ctx, fromSx, fromSy, toSx, toSy);
-          }
-        }
+        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id));
       }
     }
 
@@ -349,7 +370,65 @@ function SceneView({
     }
 
     const entity = sc.entities[String(targetId)];
-    const transform = entity ? getTransform(entity) : null;
+    if (!entity) return;
+
+    // Collider edit mode: check for handle hits
+    if (tool === "collider") {
+      const collider = entity.components.find(c => c.type === "Collider") as
+        | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
+        | undefined;
+      const transform = getTransform(entity);
+      const componentIdx = entity.components.findIndex(c => c.type === "Collider");
+      if (collider && transform && componentIdx >= 0) {
+        const cx = transform.x + collider.offset_x;
+        const cy = transform.y + collider.offset_y;
+        const hw = collider.width * 0.5;
+        const hh = collider.height * 0.5;
+        // Convert click to collider-local space (inverse entity rotation)
+        const rot = transform.rotation;
+        const relX = wx - cx;
+        const relY = wy - cy;
+        const cosR = Math.cos(-rot);
+        const sinR = Math.sin(-rot);
+        const localX = relX * cosR - relY * sinR;
+        const localY = relX * sinR + relY * cosR;
+        const handles: [ColliderHandle, number, number][] = [
+          ["left",   -hw, 0],
+          ["right",  hw,  0],
+          ["top",    0,   -hh],
+          ["bottom", 0,   hh],
+        ];
+        const hitThreshold = 10 / cameraRef.current.zoom;
+        for (const [handle, hx, hy] of handles) {
+          if (Math.abs(localX - hx) <= hitThreshold && Math.abs(localY - hy) <= hitThreshold) {
+            colliderDragRef.current = {
+              entityId: targetId,
+              componentIdx,
+              handle,
+              startMouse: { x: wx, y: wy },
+              entityRotation: transform.rotation,
+              startCollider: {
+                width: collider.width,
+                height: collider.height,
+                offset_x: collider.offset_x,
+                offset_y: collider.offset_y,
+              },
+            };
+            colliderDraftRef.current.set(targetId, {
+              width: collider.width,
+              height: collider.height,
+              offset_x: collider.offset_x,
+              offset_y: collider.offset_y,
+            });
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+      return;
+    }
+
+    const transform = getTransform(entity);
     if (!transform) {
       return;
     }
@@ -366,6 +445,34 @@ function SceneView({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    const colliderDrag = colliderDragRef.current;
+    if (colliderDrag) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
+      const dx = wx - colliderDrag.startMouse.x;
+      const dy = wy - colliderDrag.startMouse.y;
+      // Project world-space delta into entity-local space
+      const rot = colliderDrag.entityRotation;
+      const cosR = Math.cos(-rot);
+      const sinR = Math.sin(-rot);
+      const ldx = dx * cosR - dy * sinR;
+      const ldy = dx * sinR + dy * cosR;
+      const s = colliderDrag.startCollider;
+      let { width, height, offset_x, offset_y } = s;
+      switch (colliderDrag.handle) {
+        case "right":  width = Math.max(1, s.width + ldx);  offset_x = s.offset_x + ldx * 0.5; break;
+        case "left":   width = Math.max(1, s.width - ldx);  offset_x = s.offset_x + ldx * 0.5; break;
+        case "bottom": height = Math.max(1, s.height + ldy); offset_y = s.offset_y + ldy * 0.5; break;
+        case "top":    height = Math.max(1, s.height - ldy); offset_y = s.offset_y + ldy * 0.5; break;
+      }
+      colliderDraftRef.current.set(colliderDrag.entityId, { width, height, offset_x, offset_y });
+      return;
+    }
+
     const drag = dragRef.current;
     if (drag) {
       const canvas = canvasRef.current;
@@ -389,6 +496,22 @@ function SceneView({
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    const colliderDrag = colliderDragRef.current;
+    if (colliderDrag) {
+      colliderDragRef.current = null;
+      const next = colliderDraftRef.current.get(colliderDrag.entityId);
+      colliderDraftRef.current.delete(colliderDrag.entityId);
+      if (next) {
+        onColliderCommit({
+          entityId: colliderDrag.entityId,
+          componentIdx: colliderDrag.componentIdx,
+          before: colliderDrag.startCollider,
+          after: next,
+        });
+      }
+      return;
+    }
+
     const drag = dragRef.current;
     if (drag) {
       dragRef.current = null;
@@ -496,91 +619,6 @@ function nextTransformForDrag(drag: DragState, wx: number, wy: number, snapping:
   return next;
 }
 
-const GHOST_COLOR = "#f0c050";
-const GHOST_FILL   = "rgba(240,192,80,0.08)";
-const GHOST_FILL_H = "rgba(240,192,80,0.18)";
-
-function drawGhostEntity(
-  ctx: CanvasRenderingContext2D,
-  ghost: GhostEntity,
-  cw: number,
-  ch: number,
-  cam: Camera,
-  worldToScreen: (wx: number, wy: number, cw: number, ch: number) => { sx: number; sy: number },
-  isHovered: boolean,
-) {
-  const { sx, sy } = worldToScreen(ghost.x, ghost.y, cw, ch);
-  const hw = ghost.w * 0.5 * cam.zoom;
-  const hh = ghost.h * 0.5 * cam.zoom;
-
-  ctx.save();
-  ctx.translate(sx, sy);
-  ctx.rotate(ghost.rotation);
-
-  ctx.fillStyle = isHovered ? GHOST_FILL_H : GHOST_FILL;
-  ctx.fillRect(-hw, -hh, hw * 2, hh * 2);
-
-  ctx.strokeStyle = isHovered ? GHOST_COLOR : "rgba(240,192,80,0.55)";
-  ctx.lineWidth = isHovered ? 2 : 1.5;
-  ctx.setLineDash([6, 4]);
-  ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
-  ctx.setLineDash([]);
-
-  ctx.fillStyle = isHovered ? GHOST_COLOR : "rgba(240,192,80,0.7)";
-  ctx.beginPath();
-  ctx.arc(0, 0, isHovered ? 4 : 3, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore();
-
-  if (cam.zoom > 0.25) {
-    const labelSize = Math.min(11, Math.max(9, cam.zoom * 10));
-    ctx.font = `${labelSize}px monospace`;
-    ctx.fillStyle = isHovered ? GHOST_COLOR : "rgba(240,192,80,0.7)";
-    ctx.fillText(`${ghost.name} →`, sx + hw + 4, sy - hh + labelSize);
-  }
-}
-
-function drawGhostArrow(
-  ctx: CanvasRenderingContext2D,
-  fromSx: number, fromSy: number,
-  toSx: number, toSy: number,
-) {
-  const dx = toSx - fromSx;
-  const dy = toSy - fromSy;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist < 8) return;
-
-  // Perpendicular control point for the curve
-  const mx = (fromSx + toSx) / 2;
-  const my = (fromSy + toSy) / 2;
-  const perpX = -dy / dist;
-  const perpY =  dx / dist;
-  const bulge = Math.min(dist * 0.28, 50);
-  const cpX = mx + perpX * bulge;
-  const cpY = my + perpY * bulge;
-
-  ctx.strokeStyle = "rgba(240,192,80,0.5)";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 3]);
-  ctx.beginPath();
-  ctx.moveTo(fromSx, fromSy);
-  ctx.quadraticCurveTo(cpX, cpY, toSx, toSy);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Arrow head tangent at end of quadratic: direction = (to - cp)
-  const angle = Math.atan2(toSy - cpY, toSx - cpX);
-  const len = 9;
-  ctx.fillStyle = "rgba(240,192,80,0.75)";
-  ctx.beginPath();
-  ctx.moveTo(toSx, toSy);
-  ctx.lineTo(toSx - len * Math.cos(angle - 0.42), toSy - len * Math.sin(angle - 0.42));
-  ctx.lineTo(toSx - len * Math.cos(angle + 0.42), toSy - len * Math.sin(angle + 0.42));
-  ctx.closePath();
-  ctx.fill();
-}
-
 function drawEntity(
   ctx: CanvasRenderingContext2D,
   entity: Entity,
@@ -591,6 +629,7 @@ function drawEntity(
   worldToScreen: (wx: number, wy: number, cw: number, ch: number) => { sx: number; sy: number },
   draft?: TransformDraft,
   activeTool?: ActiveTool,
+  colliderDraft?: ColliderDraft,
 ) {
   const transform = entity.components.find(c => c.type === "Transform") as
     | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
@@ -652,16 +691,46 @@ function drawEntity(
     drawToolGizmo(ctx, sx, sy, activeTool, cam.zoom);
   }
 
-  // Collider outline
+  // Collider outline (rotates with entity)
   if (collider) {
-    const { sx: colSx, sy: colSy } = worldToScreen(tx + collider.offset_x - collider.width * 0.5, ty + collider.offset_y - collider.height * 0.5, cw, ch);
-    const colW = collider.width * cam.zoom;
-    const colH = collider.height * cam.zoom;
-    ctx.strokeStyle = COLLIDER_COLOR;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    ctx.strokeRect(colSx, colSy, colW, colH);
+    const activeCollider = colliderDraft ?? collider;
+    const { sx: colCx, sy: colCy } = worldToScreen(
+      tx + activeCollider.offset_x,
+      ty + activeCollider.offset_y,
+      cw, ch,
+    );
+    const colW = activeCollider.width * cam.zoom;
+    const colH = activeCollider.height * cam.zoom;
+    const editingCollider = isSelected && activeTool === "collider";
+
+    ctx.save();
+    ctx.translate(colCx, colCy);
+    ctx.rotate(activeTransform.rotation);
+
+    ctx.strokeStyle = editingCollider ? SELECTED_COLOR : COLLIDER_COLOR;
+    ctx.lineWidth = editingCollider ? 1.5 : 1;
+    if (!editingCollider) ctx.setLineDash([3, 3]);
+    ctx.strokeRect(-colW / 2, -colH / 2, colW, colH);
     ctx.setLineDash([]);
+
+    // Handles at edge midpoints in local space
+    if (editingCollider) {
+      const handles: [number, number][] = [
+        [-colW / 2, 0],
+        [colW / 2, 0],
+        [0, -colH / 2],
+        [0, colH / 2],
+      ];
+      const hs = 5;
+      ctx.fillStyle = SELECTED_COLOR;
+      ctx.strokeStyle = BG;
+      ctx.lineWidth = 1.5;
+      for (const [hx, hy] of handles) {
+        ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
+        ctx.strokeRect(hx - hs, hy - hs, hs * 2, hs * 2);
+      }
+    }
+    ctx.restore();
   }
 
   // Origin dot

@@ -6,50 +6,86 @@ interface Props {
   proposal: ProposalData;
   onSceneChange: () => void;
   onClose: () => void;
-  onHoverChange?: (changeId: string | null) => void;
 }
 
-type ChangeStatus = "pending" | "applying" | "accepted" | "rejected" | "failed";
+type ChangeStatus = "staged" | "committing" | "accepted" | "reverting" | "rejected" | "failed";
 
-export default function ProposalsLane({ proposal, onSceneChange, onClose, onHoverChange }: Props) {
+export default function ProposalsLane({ proposal, onSceneChange, onClose }: Props) {
   const [statuses, setStatuses] = useState<Record<string, ChangeStatus>>(
-    () => Object.fromEntries(proposal.changes.map(c => [c.id, "pending" as ChangeStatus]))
+    () => Object.fromEntries(proposal.changes.map(c => [c.id, "staged" as ChangeStatus]))
   );
-  const [applyingAll, setApplyingAll] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const applyChange = async (changeId: string) => {
+  const acceptChange = async (changeId: string) => {
     const change = proposal.changes.find(c => c.id === changeId);
     if (!change) return;
-    setStatuses(s => ({ ...s, [changeId]: "applying" }));
+    setStatuses(s => ({ ...s, [changeId]: "committing" }));
     try {
-      await invoke("apply_action", { action: change.action });
+      await invoke("commit_staged_change", {
+        entityIds: change.staged_entity_ids,
+        modifiedEntityIds: change.modified_entity_ids,
+        scriptPaths: change.new_script_paths,
+        scriptBackups: change.script_backups ?? [],
+      });
       onSceneChange();
       setStatuses(s => ({ ...s, [changeId]: "accepted" }));
     } catch {
       setStatuses(s => ({ ...s, [changeId]: "failed" }));
     }
+    maybeCleanup({ ...statuses, [changeId]: "accepted" });
   };
 
-  const rejectChange = (changeId: string) => {
-    setStatuses(s => ({ ...s, [changeId]: "rejected" }));
+  const rejectChange = async (changeId: string) => {
+    const change = proposal.changes.find(c => c.id === changeId);
+    if (!change) return;
+    setStatuses(s => ({ ...s, [changeId]: "reverting" }));
+    try {
+      await invoke("revert_staged_change", {
+        entityIds: change.staged_entity_ids,
+        modifiedEntityIds: change.modified_entity_ids,
+        scriptPaths: change.new_script_paths,
+        scriptBackups: change.script_backups ?? [],
+      });
+      onSceneChange();
+      setStatuses(s => ({ ...s, [changeId]: "rejected" }));
+    } catch {
+      setStatuses(s => ({ ...s, [changeId]: "failed" }));
+    }
+    maybeCleanup({ ...statuses, [changeId]: "rejected" });
+  };
+
+  const maybeCleanup = (nextStatuses: Record<string, ChangeStatus>) => {
+    const allDone = proposal.changes.every(c => {
+      const s = nextStatuses[c.id];
+      return s === "accepted" || s === "rejected";
+    });
+    if (allDone) invoke("clear_staged_proposal").catch(() => {});
   };
 
   const acceptAll = async () => {
-    setApplyingAll(true);
+    setBusy(true);
     for (const change of proposal.changes) {
-      const current = statuses[change.id];
-      if (current === "pending" || current === "failed") {
-        await applyChange(change.id);
+      if (statuses[change.id] === "staged" || statuses[change.id] === "failed") {
+        await acceptChange(change.id);
       }
     }
-    setApplyingAll(false);
+    setBusy(false);
   };
 
-  const rejectAll = () => {
-    setStatuses(Object.fromEntries(proposal.changes.map(c => [c.id, "rejected" as ChangeStatus])));
+  const rejectAll = async () => {
+    setBusy(true);
+    for (const change of proposal.changes) {
+      if (statuses[change.id] === "staged" || statuses[change.id] === "failed") {
+        await rejectChange(change.id);
+      }
+    }
+    setBusy(false);
   };
 
-  const pendingCount = proposal.changes.filter(c => statuses[c.id] === "pending" || statuses[c.id] === "failed").length;
+  const pendingCount = proposal.changes.filter(c => {
+    const s = statuses[c.id];
+    return s === "staged" || s === "failed";
+  }).length;
   const acceptedCount = proposal.changes.filter(c => statuses[c.id] === "accepted").length;
 
   return (
@@ -104,6 +140,13 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose, onHove
             {proposal.summary}
           </div>
         )}
+        <div style={{
+          marginTop: "8px",
+          fontFamily: "var(--font-mono)", fontSize: "10.5px",
+          color: "var(--ink-4)",
+        }}>
+          Changes are already live in the scene — accept to keep, reject to remove.
+        </div>
       </div>
 
       {/* Changes list */}
@@ -118,12 +161,11 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose, onHove
               key={change.id}
               label={change.label}
               detail={change.detail}
-              actionType={String(change.action.type ?? "")}
-              status={statuses[change.id] ?? "pending"}
-              onAccept={() => applyChange(change.id)}
+              stagedCount={change.staged_entity_ids.length}
+              scriptCount={change.new_script_paths.length}
+              status={statuses[change.id] ?? "staged"}
+              onAccept={() => acceptChange(change.id)}
               onReject={() => rejectChange(change.id)}
-              onMouseEnter={() => onHoverChange?.(change.id)}
-              onMouseLeave={() => onHoverChange?.(null)}
             />
           ))
         )}
@@ -139,29 +181,29 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose, onHove
           <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
             <button
               onClick={acceptAll}
-              disabled={pendingCount === 0 || applyingAll}
+              disabled={pendingCount === 0 || busy}
               style={{
                 flex: 1, padding: "9px",
-                background: pendingCount > 0 && !applyingAll ? "var(--amber)" : "var(--paper-3)",
+                background: pendingCount > 0 && !busy ? "var(--amber)" : "var(--paper-3)",
                 border: "none",
-                color: pendingCount > 0 && !applyingAll ? "var(--paper)" : "var(--ink-4)",
+                color: pendingCount > 0 && !busy ? "var(--paper)" : "var(--ink-4)",
                 fontFamily: "var(--font-ui)", fontSize: "13px",
-                cursor: pendingCount > 0 && !applyingAll ? "pointer" : "default",
+                cursor: pendingCount > 0 && !busy ? "pointer" : "default",
                 fontWeight: 500,
               }}
             >
-              {applyingAll ? "Applying…" : "Accept all"}
+              {busy ? "Working…" : "Accept all"}
             </button>
             <button
               onClick={rejectAll}
-              disabled={pendingCount === 0 || applyingAll}
+              disabled={pendingCount === 0 || busy}
               style={{
                 flex: 1, padding: "9px",
                 background: "none",
                 border: "1px solid var(--rule-2)",
-                color: pendingCount > 0 && !applyingAll ? "var(--ink-3)" : "var(--ink-4)",
+                color: pendingCount > 0 && !busy ? "var(--ink-3)" : "var(--ink-4)",
                 fontFamily: "var(--font-ui)", fontSize: "13px",
-                cursor: pendingCount > 0 && !applyingAll ? "pointer" : "default",
+                cursor: pendingCount > 0 && !busy ? "pointer" : "default",
               }}
             >Reject all</button>
           </div>
@@ -170,9 +212,9 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose, onHove
             color: "var(--ink-4)", textAlign: "center",
           }}>
             {pendingCount > 0
-              ? `${pendingCount} change${pendingCount !== 1 ? "s" : ""} pending`
+              ? `${pendingCount} change${pendingCount !== 1 ? "s" : ""} staged`
               : acceptedCount > 0
-              ? `${acceptedCount} change${acceptedCount !== 1 ? "s" : ""} applied`
+              ? `${acceptedCount} change${acceptedCount !== 1 ? "s" : ""} committed`
               : "all changes reviewed"}
           </div>
         </div>
@@ -181,45 +223,46 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose, onHove
   );
 }
 
-function ChangeBlock({ label, detail, actionType, status, onAccept, onReject, onMouseEnter, onMouseLeave }: {
+function ChangeBlock({ label, detail, stagedCount, scriptCount, status, onAccept, onReject }: {
   label: string;
   detail: string;
-  actionType: string;
+  stagedCount: number;
+  scriptCount: number;
   status: ChangeStatus;
   onAccept: () => void;
   onReject: () => void;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
 }) {
-  const isPending = status === "pending" || status === "failed";
+  const isPending = status === "staged" || status === "failed";
   const isAccepted = status === "accepted";
   const isRejected = status === "rejected";
-  const isApplying = status === "applying";
+  const isBusy = status === "committing" || status === "reverting";
 
   return (
-    <div
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      style={{
-        padding: "14px 22px",
-        borderBottom: "1px solid var(--rule)",
-        opacity: isRejected ? 0.4 : 1,
-        transition: "opacity 0.15s",
-      }}
-    >
+    <div style={{
+      padding: "14px 22px",
+      borderBottom: "1px solid var(--rule)",
+      opacity: isRejected ? 0.4 : 1,
+      transition: "opacity 0.15s",
+    }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
         <span style={{
           fontFamily: "var(--font-mono)", fontSize: "10px",
-          color: isAccepted ? "var(--moss)" : isRejected ? "var(--ink-4)" : "var(--ink-4)",
-          border: `1px solid ${isAccepted ? "var(--moss)" : "var(--rule-2)"}`,
+          color: isAccepted ? "var(--moss)" : isRejected ? "var(--ink-4)" : "var(--amber)",
+          border: `1px solid ${isAccepted ? "var(--moss)" : isRejected ? "var(--rule-2)" : "var(--amber)"}`,
           padding: "1px 5px",
           whiteSpace: "nowrap",
         }}>
-          {actionType.replace(/_/g, " ")}
+          {isAccepted ? "committed" : isRejected ? "reverted" : isBusy ? (status === "committing" ? "committing…" : "reverting…") : "staged"}
         </span>
+        {(stagedCount > 0 || scriptCount > 0) && !isRejected && (
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
+            {[
+              stagedCount > 0 ? `${stagedCount} ${stagedCount === 1 ? "entity" : "entities"}` : "",
+              scriptCount > 0 ? `${scriptCount} script edit${scriptCount === 1 ? "" : "s"}` : "",
+            ].filter(Boolean).join(" · ")}
+          </span>
+        )}
         {isAccepted && <span style={{ fontSize: "11px", color: "var(--moss)" }}>✓</span>}
-        {isRejected && <span style={{ fontSize: "11px", color: "var(--ink-4)" }}>—</span>}
-        {isApplying && <span style={{ fontSize: "11px", color: "var(--amber)" }}>…</span>}
       </div>
 
       <div style={{
@@ -248,7 +291,7 @@ function ChangeBlock({ label, detail, actionType, status, onAccept, onReject, on
               fontFamily: "var(--font-mono)", fontSize: "11px",
               cursor: "pointer",
             }}
-          >✓ apply</button>
+          >✓ keep</button>
           <button
             onClick={onReject}
             style={{
@@ -257,10 +300,10 @@ function ChangeBlock({ label, detail, actionType, status, onAccept, onReject, on
               fontFamily: "var(--font-mono)", fontSize: "11px",
               cursor: "pointer",
             }}
-          >✗ skip</button>
+          >✗ remove</button>
           {status === "failed" && (
             <span style={{ fontSize: "11px", color: "var(--red)", fontFamily: "var(--font-mono)", alignSelf: "center" }}>
-              failed — retry?
+              failed
             </span>
           )}
         </div>

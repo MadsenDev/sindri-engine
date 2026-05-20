@@ -3,8 +3,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use sindri::component::Component;
+use sindri::component::{BodyType, Component};
+use sindri::math::Vec2;
+use sindri::physics::{ColliderShape, PhysicsWorld, RigidBodyType as PhysicsBodyType};
 use sindri::scene::Scene;
+use sindri::world::EntityId;
 use sindri_server::routes::SharedErrors;
 
 enum CameraCommand {
@@ -43,12 +46,9 @@ fn resolve_script_path(scripts_root: &Path, script_path: &str) -> PathBuf {
     if path.is_absolute() {
         return path.to_path_buf();
     }
-
-    if let Ok(stripped) = path.strip_prefix("scripts") {
-        scripts_root.join(stripped)
-    } else {
-        scripts_root.join(path)
-    }
+    // Strip "scripts/" prefix so both "player.lua" and "scripts/player.lua" resolve correctly
+    let relative = path.strip_prefix("scripts").unwrap_or(path);
+    scripts_root.join(relative)
 }
 
 fn read_vec2(table: &Table) -> mlua::Result<(f32, f32)> {
@@ -66,6 +66,20 @@ fn read_color(table: &Table) -> mlua::Result<[f32; 4]> {
         .or_else(|_| table.get(4))
         .unwrap_or(1.0);
     Ok([r as f32, g as f32, b as f32, a as f32])
+}
+
+/// Normalize browser/winit key names to the canonical Sindri key names.
+/// e.g. "a" → "A", " " → "Space", "ArrowLeft" → "Left"
+fn normalize_key(key: &str) -> String {
+    match key {
+        " " => "Space".to_string(),
+        "ArrowLeft" => "Left".to_string(),
+        "ArrowRight" => "Right".to_string(),
+        "ArrowUp" => "Up".to_string(),
+        "ArrowDown" => "Down".to_string(),
+        k if k.len() == 1 => k.to_uppercase(),
+        k => k.to_string(),
+    }
 }
 
 fn apply_scene_commands(scene: &mut Scene, entity_id: u64, commands: Vec<SceneCommand>) {
@@ -260,8 +274,13 @@ pub struct LuaRuntime {
     pub elapsed: f64,
     // Key state shared into Lua globals each frame
     keys: Arc<RwLock<HashSet<String>>>,
+    pressed_keys: Arc<RwLock<HashSet<String>>>,
     prev_keys: HashSet<String>,
     errors: SharedErrors,
+    // Velocity cache for script access — keyed by entity id
+    pub velocities: HashMap<u64, (f32, f32)>,
+    physics: PhysicsWorld,
+    physics_initialized: bool,
 }
 
 impl LuaRuntime {
@@ -313,6 +332,8 @@ impl LuaRuntime {
             })?,
         )?;
 
+        let pressed_keys: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
+
         Ok(Self {
             lua,
             envs: HashMap::new(),
@@ -320,8 +341,12 @@ impl LuaRuntime {
             missing_scripts: HashSet::new(),
             elapsed: 0.0,
             keys,
+            pressed_keys,
             prev_keys: HashSet::new(),
             errors,
+            velocities: HashMap::new(),
+            physics: PhysicsWorld::new(),
+            physics_initialized: false,
         })
     }
 
@@ -338,16 +363,24 @@ impl LuaRuntime {
     }
 
     fn update_key_globals(&mut self, new_keys: &HashSet<String>) {
-        // Update the shared key set
+        // Normalize raw browser/winit key names to canonical Sindri key names.
+        let normalized: HashSet<String> = new_keys.iter().map(|k| normalize_key(k)).collect();
+        let prev_normalized: HashSet<String> =
+            self.prev_keys.iter().map(|k| normalize_key(k)).collect();
+
+        // Update the shared normalized key set (used by key_down global and input facet)
         if let Ok(mut k) = self.keys.write() {
-            *k = new_keys.clone();
+            *k = normalized.clone();
         }
 
-        // Recompute key_pressed: keys that are new this frame
+        // Recompute pressed-this-frame set
         let pressed_this_frame: HashSet<String> =
-            new_keys.difference(&self.prev_keys).cloned().collect();
-        let keys_pressed = Arc::new(RwLock::new(pressed_this_frame));
-        let kp = keys_pressed.clone();
+            normalized.difference(&prev_normalized).cloned().collect();
+        if let Ok(mut pk) = self.pressed_keys.write() {
+            *pk = pressed_this_frame.clone();
+        }
+
+        let kp = self.pressed_keys.clone();
         let _ = self.lua.globals().set(
             "key_pressed",
             self.lua
@@ -617,8 +650,100 @@ impl LuaRuntime {
         self.missing_scripts.clear();
         self.elapsed = 0.0;
         self.prev_keys.clear();
+        self.velocities.clear();
+        self.physics = PhysicsWorld::new();
+        self.physics_initialized = false;
         if let Ok(mut k) = self.keys.write() {
             k.clear();
+        }
+        if let Ok(mut k) = self.pressed_keys.write() {
+            k.clear();
+        }
+    }
+
+    /// Step physics simulation and sync positions back to scene transforms.
+    /// First call after reset initialises the Rapier world from the scene.
+    pub fn step_physics(&mut self, scene: &mut Scene, gravity_x: f32, gravity_y: f32, dt: f32) {
+        if !self.physics_initialized {
+            self.physics = PhysicsWorld::with_gravity(Vec2::new(gravity_x, gravity_y));
+            self.init_physics_from_scene(scene);
+            self.physics_initialized = true;
+        }
+
+        self.physics.step(dt);
+
+        // Sync Rapier positions → scene transforms for non-fixed bodies
+        for (entity_id, entity) in scene.entities.iter_mut() {
+            let eid = EntityId(*entity_id as u32);
+            let Some(pos) = self.physics.body_position(eid) else { continue };
+            if matches!(self.physics.body_type(eid), Some(PhysicsBodyType::Fixed)) {
+                continue;
+            }
+            for comp in &mut entity.components {
+                if let Component::Transform(t) = comp {
+                    t.x = pos.x;
+                    t.y = pos.y;
+                    if let Some(rot) = self.physics.body_rotation(eid) {
+                        t.rotation = rot;
+                    }
+                    break;
+                }
+            }
+            if let Some(vel) = self.physics.linear_velocity(eid) {
+                self.velocities.insert(*entity_id, (vel.x, vel.y));
+            }
+        }
+    }
+
+    fn init_physics_from_scene(&mut self, scene: &Scene) {
+        for (entity_id, entity) in &scene.entities {
+            let Some(transform) = entity.components.iter().find_map(|c| {
+                if let Component::Transform(t) = c { Some(t) } else { None }
+            }) else { continue };
+
+            let Some(collider) = entity.components.iter().find_map(|c| {
+                if let Component::Collider(col) = c { Some(col) } else { None }
+            }) else { continue };
+
+            let physics_body = entity.components.iter().find_map(|c| {
+                if let Component::PhysicsBody(p) = c { Some(p) } else { None }
+            });
+            let has_script = entity.components.iter().any(|c| matches!(c, Component::Script(_)));
+
+            // Only register in Rapier if explicitly dynamic, or if it's a static object (no script)
+            if physics_body.is_none() && has_script { continue; }
+
+            let body_type = physics_body.map(|p| match p.body_type {
+                BodyType::Dynamic => PhysicsBodyType::Dynamic,
+                BodyType::Kinematic => PhysicsBodyType::Kinematic,
+                BodyType::Fixed => PhysicsBodyType::Fixed,
+            }).unwrap_or(PhysicsBodyType::Fixed);
+
+            let eid = EntityId(*entity_id as u32);
+            let pos = Vec2::new(transform.x, transform.y);
+            if self.physics.create_body(eid, body_type, pos, transform.rotation).is_err() {
+                continue;
+            }
+
+            if let Some(pb) = physics_body {
+                if pb.lock_rotation {
+                    self.physics.lock_rotations(eid, true);
+                }
+                self.physics.set_linear_damping(eid, pb.linear_damping);
+                self.physics.set_angular_damping(eid, pb.angular_damping);
+                self.physics.set_collision_mask(eid, pb.collision_layer, pb.collision_mask);
+            }
+
+            let shape = ColliderShape::Box {
+                hx: collider.width * 0.5,
+                hy: collider.height * 0.5,
+            };
+            let offset = Vec2::new(collider.offset_x, collider.offset_y);
+            if collider.is_trigger {
+                let _ = self.physics.add_sensor(eid, shape, offset);
+            } else {
+                let _ = self.physics.add_collider_with_material(eid, shape, offset, 1.0, 0.3, 0.0);
+            }
         }
     }
 
@@ -679,6 +804,7 @@ impl LuaRuntime {
                     None
                 }
             });
+            let has_physics = entity.components.iter().any(|c| matches!(c, Component::PhysicsBody(_)));
 
             for script_path in script_paths {
                 if script_path.is_empty() {
@@ -789,15 +915,86 @@ impl LuaRuntime {
                         )),
                     }
                 }
+                // input() facet — wraps key_down/key_pressed with normalized key names
+                {
+                    let keys_for_input = self.keys.clone();
+                    let pressed_for_input = self.pressed_keys.clone();
+                    match self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                        let tbl = lua.create_table()?;
+                        let kd = keys_for_input.clone();
+                        tbl.set("is_key_down", lua.create_function(move |_, (_this, key): (Table, String)| {
+                            Ok(kd.read().map(|k| k.contains(&key)).unwrap_or(false))
+                        })?)?;
+                        let kp = pressed_for_input.clone();
+                        tbl.set("is_key_pressed", lua.create_function(move |_, (_this, key): (Table, String)| {
+                            Ok(kp.read().map(|k| k.contains(&key)).unwrap_or(false))
+                        })?)?;
+                        let kd2 = keys_for_input.clone();
+                        tbl.set("axis", lua.create_function(move |_, (_this, neg, pos): (Table, String, String)| {
+                            let held = kd2.read().map(|k| k.clone()).unwrap_or_default();
+                            let n = if held.contains(&neg) { -1.0f64 } else { 0.0 };
+                            let p = if held.contains(&pos) { 1.0f64 } else { 0.0 };
+                            Ok((n + p).clamp(-1.0, 1.0))
+                        })?)?;
+                        Ok(tbl)
+                    }) {
+                        Ok(f) => { let _ = self_tbl.set("input", f); }
+                        Err(e) => self.report_error(format!("[lua] input method error ({script_path}): {e}")),
+                    }
+                }
+
+                // physics() facet — velocity-based movement with gravity
+                let vel_cell: Arc<std::sync::Mutex<(f32, f32)>> = Arc::new(std::sync::Mutex::new(
+                    self.velocities.get(&entity_id).copied().unwrap_or((0.0, 0.0)),
+                ));
+                {
+                    let vel_for_physics = vel_cell.clone();
+                    let phys_fn = if has_physics {
+                        self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                            let tbl = lua.create_table()?;
+                            let vc = vel_for_physics.clone();
+                            tbl.set("velocity", lua.create_function(move |lua, _: Table| {
+                                let (vx, vy) = *vc.lock().unwrap();
+                                let v = lua.create_table()?;
+                                v.set("x", vx as f64)?;
+                                v.set("y", vy as f64)?;
+                                Ok(v)
+                            })?)?;
+                            let vc = vel_for_physics.clone();
+                            tbl.set("set_velocity", lua.create_function(move |_, (_this, v): (Table, Table)| {
+                                let (vx, vy) = read_vec2(&v)?;
+                                *vc.lock().unwrap() = (vx, vy);
+                                Ok(())
+                            })?)?;
+                            let vc = vel_for_physics.clone();
+                            tbl.set("apply_impulse", lua.create_function(move |_, (_this, v): (Table, Table)| {
+                                let (ix, iy) = read_vec2(&v)?;
+                                let mut vel = vc.lock().unwrap();
+                                vel.0 += ix;
+                                vel.1 += iy;
+                                Ok(())
+                            })?)?;
+                            Ok(Some(tbl))
+                        })
+                    } else {
+                        self.lua.create_function(|_, _: mlua::MultiValue| {
+                            Ok::<Option<Table>, mlua::Error>(None)
+                        })
+                    };
+                    match phys_fn {
+                        Ok(f) => { let _ = self_tbl.set("physics", f); }
+                        Err(e) => self.report_error(format!("[lua] physics method error ({script_path}): {e}")),
+                    }
+                }
+
+                // camera() facet
                 if let Some(camera) = camera.clone() {
                     let commands = camera_commands.clone();
                     match self.lua.create_function(move |lua, _: mlua::MultiValue| {
                         Self::create_camera_table(lua, entity_id, &camera, commands.clone())
                             .map(Some)
                     }) {
-                        Ok(camera_fn) => {
-                            let _ = self_tbl.set("camera", camera_fn);
-                        }
+                        Ok(camera_fn) => { let _ = self_tbl.set("camera", camera_fn); }
                         Err(e) => self.report_error(format!(
                             "[lua] camera method error ({script_path}): {e}"
                         )),
@@ -806,16 +1003,14 @@ impl LuaRuntime {
                     match self.lua.create_function(|_, _: mlua::MultiValue| {
                         Ok::<Option<Table>, mlua::Error>(None)
                     }) {
-                        Ok(camera_fn) => {
-                            let _ = self_tbl.set("camera", camera_fn);
-                        }
+                        Ok(camera_fn) => { let _ = self_tbl.set("camera", camera_fn); }
                         Err(e) => self.report_error(format!(
                             "[lua] camera method error ({script_path}): {e}"
                         )),
                     }
                 }
 
-                // on_start (once)
+                // on_start (once per script path per play session)
                 if !self.started.contains(&key) {
                     if let Ok(f) = env.get::<_, mlua::Function>("on_start") {
                         if let Err(e) = f.call::<_, ()>(self_tbl.clone()) {
@@ -832,7 +1027,7 @@ impl LuaRuntime {
                     }
                 }
 
-                // Write transform back
+                // Write transform back (read legacy self.x/y direct-field access)
                 let read_f64 = |t: &Table, k: &str, default: f32| -> f32 {
                     t.get::<_, f64>(k).map(|v| v as f32).unwrap_or(default)
                 };
@@ -841,25 +1036,53 @@ impl LuaRuntime {
                     .map(|t| (t.x, t.y, t.rotation, t.scale_x, t.scale_y))
                     .unwrap_or((0.0, 0.0, 0.0, 1.0, 1.0));
 
-                let nx = read_f64(&self_tbl, "x", ox);
-                let ny = read_f64(&self_tbl, "y", oy);
+                let mut nx = read_f64(&self_tbl, "x", ox);
+                let mut ny = read_f64(&self_tbl, "y", oy);
                 let nr = read_f64(&self_tbl, "rotation", orot);
                 let nsx = read_f64(&self_tbl, "scale_x", osx);
                 let nsy = read_f64(&self_tbl, "scale_y", osy);
 
+                if has_physics {
+                    if let Ok(vel) = vel_cell.lock() {
+                        let (new_vx, new_vy) = *vel;
+                        let eid = EntityId(entity_id as u32);
+                        if self.physics_initialized && self.physics.has_body(eid) {
+                            // Rapier controls position; sync script velocity changes to it
+                            self.physics.set_linear_velocity(eid, Vec2::new(new_vx, new_vy));
+                        } else {
+                            // Fallback: manual velocity integration (no Rapier body)
+                            let (old_vx, old_vy) = self.velocities.get(&entity_id).copied().unwrap_or((0.0, 0.0));
+                            let dx = (new_vx - old_vx) * dt;
+                            let dy = (new_vy - old_vy) * dt;
+                            if dx != 0.0 || dy != 0.0 {
+                                nx += dx;
+                                ny += dy;
+                            }
+                        }
+                        self.velocities.insert(entity_id, (new_vx, new_vy));
+                    }
+                }
+
                 if let Some(entity_mut) = scene.entities.get_mut(&entity_id) {
                     if let Some(t) = entity_mut.components.iter_mut().find_map(|c| {
-                        if let Component::Transform(t) = c {
-                            Some(t)
-                        } else {
-                            None
-                        }
+                        if let Component::Transform(t) = c { Some(t) } else { None }
                     }) {
-                        t.x = nx;
-                        t.y = ny;
-                        t.rotation = nr;
-                        t.scale_x = nsx;
-                        t.scale_y = nsy;
+                        let eid = EntityId(entity_id as u32);
+                        let rapier_dynamic = self.physics_initialized
+                            && self.physics.has_body(eid)
+                            && !matches!(self.physics.body_type(eid), Some(PhysicsBodyType::Fixed));
+
+                        if rapier_dynamic {
+                            // Rapier already updated x/y via step_physics; only apply scale from script
+                            t.scale_x = nsx;
+                            t.scale_y = nsy;
+                        } else {
+                            t.x = nx;
+                            t.y = ny;
+                            t.rotation = nr;
+                            t.scale_x = nsx;
+                            t.scale_y = nsy;
+                        }
                     }
                 }
 

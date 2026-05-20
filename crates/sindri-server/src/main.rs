@@ -2,7 +2,7 @@ use sindri::component::Component;
 use sindri::math::{Camera2D, Transform2D, Vec2};
 use sindri::render::{Renderer, Sprite, TextureHandle};
 use sindri::scene::Scene;
-use sindri_server::routes::{PlaybackMode, PlaybackState, SharedErrors, SharedPlayback};
+use sindri_server::routes::{PlaybackMode, PlaybackState, SharedErrors, SharedGizmos, SharedPlayback};
 use sindri_server::{serve, AppState, SharedScene};
 mod lua_runtime;
 use lua_runtime::LuaRuntime;
@@ -249,6 +249,7 @@ fn draw_scene_contents(
     scene: &Scene,
     camera_runtime: &mut CameraRuntime,
     white_texture: TextureHandle,
+    gizmos: bool,
 ) -> anyhow::Result<()> {
     r.clear(frame, [0.039, 0.043, 0.051, 1.0])?; // editor bg-0
 
@@ -269,13 +270,6 @@ fn draw_scene_contents(
                 None
             }
         });
-        let collider = entity.components.iter().find_map(|c| {
-            if let Component::Collider(col) = c {
-                Some(col)
-            } else {
-                None
-            }
-        });
         let physics_body = entity.components.iter().find_map(|c| {
             if let Component::PhysicsBody(body) = c {
                 Some(body)
@@ -285,7 +279,7 @@ fn draw_scene_contents(
         });
 
         let Some(t) = transform else { continue };
-        if sprite.is_none() && collider.is_none() && physics_body.is_none() {
+        if sprite.is_none() && physics_body.is_none() {
             continue;
         }
 
@@ -321,19 +315,24 @@ fn draw_scene_contents(
             r.draw_polygon(frame, &rect, color, &camera)?;
         }
 
-        // Collider outline
-        if let Some(col) = collider {
-            let cx = pos.x + col.offset_x;
-            let cy = pos.y + col.offset_y;
-            let chw = col.width * 0.5;
-            let chh = col.height * 0.5;
-            let col_rect = [
-                Vec2::new(cx - chw, cy - chh),
-                Vec2::new(cx + chw, cy - chh),
-                Vec2::new(cx + chw, cy + chh),
-                Vec2::new(cx - chw, cy + chh),
-            ];
-            r.draw_polygon(frame, &col_rect, [0.30, 0.90, 0.40, 0.25], &camera)?;
+        // Gizmo overlays
+        if gizmos {
+            let collider = entity.components.iter().find_map(|c| {
+                if let Component::Collider(col) = c { Some(col) } else { None }
+            });
+            if let Some(col) = collider {
+                let cx = t.x + col.offset_x;
+                let cy = t.y + col.offset_y;
+                let hw = col.width * 0.5;
+                let hh = col.height * 0.5;
+                let rect = [
+                    Vec2::new(cx - hw, cy - hh),
+                    Vec2::new(cx + hw, cy - hh),
+                    Vec2::new(cx + hw, cy + hh),
+                    Vec2::new(cx - hw, cy + hh),
+                ];
+                r.draw_polygon(frame, &rect, [0.60, 0.95, 0.45, 0.30], &camera)?;
+            }
         }
     }
 
@@ -347,7 +346,7 @@ fn render_scene_png(
     white_texture: TextureHandle,
 ) -> anyhow::Result<Vec<u8>> {
     let rgba = renderer.render_offscreen_rgba(WIDTH, HEIGHT, |r, frame| {
-        draw_scene_contents(r, frame, scene, camera_runtime, white_texture)
+        draw_scene_contents(r, frame, scene, camera_runtime, white_texture, false)
     })?;
     Ok(encode_png(&rgba))
 }
@@ -395,6 +394,8 @@ fn update_runtime(
     if mode == PlaybackMode::Playing {
         let keys = shared_keys.blocking_read().clone();
         let mut scene = shared_scene.blocking_write();
+        let (gx, gy) = (scene.gravity_x, scene.gravity_y);
+        lua.step_physics(&mut scene, gx, gy, dt);
         lua.update(&mut scene, scripts_dir, dt, &keys);
     }
     {
@@ -411,6 +412,7 @@ fn run_preview_window(
     shared_keys: sindri_server::routes::SharedKeys,
     playback: SharedPlayback,
     errors: SharedErrors,
+    gizmos: SharedGizmos,
 ) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     let mut window_attributes = Window::default_attributes();
@@ -455,6 +457,7 @@ fn run_preview_window(
             }
             WindowEvent::RedrawRequested => {
                 let snapshot = shared_scene.blocking_read().clone();
+                let gz = gizmos.load(std::sync::atomic::Ordering::Relaxed);
                 match renderer.begin_frame().and_then(|mut frame| {
                     draw_scene_contents(
                         &mut renderer,
@@ -462,6 +465,7 @@ fn run_preview_window(
                         &snapshot,
                         &mut camera_runtime,
                         white_texture,
+                        gz,
                     )?;
                     renderer.end_frame(frame)
                 }) {
@@ -498,6 +502,7 @@ fn run_headless(
     shared_keys: sindri_server::routes::SharedKeys,
     playback: SharedPlayback,
     errors: SharedErrors,
+    gizmos: SharedGizmos,
     frame_tx: tokio::sync::broadcast::Sender<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let mut renderer = Renderer::new_offscreen(STREAM_W, STREAM_H)?;
@@ -525,8 +530,9 @@ fn run_headless(
 
         if frame_tx.receiver_count() > 0 {
             let snapshot = shared_scene.blocking_read().clone();
+            let gz = gizmos.load(std::sync::atomic::Ordering::Relaxed);
             if let Ok(rgba) = renderer.render_offscreen_rgba(STREAM_W, STREAM_H, |r, frame| {
-                draw_scene_contents(r, frame, &snapshot, &mut camera_runtime, white_texture)
+                draw_scene_contents(r, frame, &snapshot, &mut camera_runtime, white_texture, gz)
             }) {
                 let _ = frame_tx.send(rgba);
             }
@@ -571,6 +577,7 @@ fn main() -> anyhow::Result<()> {
         Arc::new(RwLock::new(std::collections::HashSet::new()));
     let shared_playback: SharedPlayback = Arc::new(Mutex::new(PlaybackState::default()));
     let shared_errors: SharedErrors = Arc::new(Mutex::new(Vec::new()));
+    let shared_gizmos: SharedGizmos = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<Vec<u8>>(4);
     let frame_tx_opt: Option<tokio::sync::broadcast::Sender<Vec<u8>>> = if headless {
@@ -593,6 +600,7 @@ fn main() -> anyhow::Result<()> {
         let project_root = project_dir.clone();
         let project_label = project_dir.display().to_string();
         let frame_tx_sv = frame_tx_opt.clone();
+        let gizmos_sv = shared_gizmos.clone();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -651,6 +659,7 @@ fn main() -> anyhow::Result<()> {
                     keys: keys_sv,
                     playback: playback_sv,
                     errors: state_errors.clone(),
+                    gizmos: gizmos_sv,
                     frame_tx: frame_tx_sv,
                 };
 
@@ -671,6 +680,7 @@ fn main() -> anyhow::Result<()> {
             shared_keys,
             shared_playback,
             shared_errors,
+            shared_gizmos,
             frame_tx,
         )
     } else {
@@ -681,6 +691,7 @@ fn main() -> anyhow::Result<()> {
             shared_keys,
             shared_playback,
             shared_errors,
+            shared_gizmos,
         )
     }
 }

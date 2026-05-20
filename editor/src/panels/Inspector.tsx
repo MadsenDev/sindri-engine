@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Entity, Component } from "../App";
 import { useContextMenu } from "../components/ContextMenu";
 
@@ -467,9 +468,16 @@ function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
   entityId: number; componentIdx: number; onSceneChange: () => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+  const browseTexture = async () => {
+    const file = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
+    });
+    if (file) patch({ texture_path: file as string });
+  };
   return (
     <>
-      <TextInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} />
+      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={browseTexture} />
       <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
       <NumberInputField label="height" value={comp.height} onCommit={v => patch({ height: v })} />
       <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
@@ -488,20 +496,13 @@ function PhysicsBodyFields({ comp, entityId, componentIdx, onSceneChange }: {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", height: "28px", padding: "0 22px", gap: "8px" }}>
-        <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0 }}>type</span>
-        <select
+      <EditableRow label="type">
+        <CustomSelect
           value={comp.body_type}
-          onChange={e => patch({ body_type: e.currentTarget.value })}
-          style={{
-            flex: 1, height: "20px", background: "var(--paper-2)",
-            border: "1px solid var(--rule-2)", color: "var(--ink)",
-            fontFamily: "var(--font-mono)", fontSize: "11px",
-          }}
-        >
-          <option>Dynamic</option><option>Kinematic</option><option>Fixed</option>
-        </select>
-      </div>
+          options={["Dynamic", "Kinematic", "Fixed"]}
+          onChange={v => patch({ body_type: v })}
+        />
+      </EditableRow>
       <BoolField label="lock rot" value={comp.lock_rotation} onChange={v => patch({ lock_rotation: v })} />
       <NumberInputField label="lin damp" value={comp.linear_damping} onCommit={v => patch({ linear_damping: v })} />
       <NumberInputField label="ang damp" value={comp.angular_damping} onCommit={v => patch({ angular_damping: v })} />
@@ -727,15 +728,46 @@ function ColorField({ label, value, onCommit }: {
   label: string; value: [number, number, number, number]; onCommit: (value: [number, number, number, number]) => void;
 }) {
   const [focused, setFocused] = useState<number | null>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
+
+  const toHex = (c: [number, number, number, number]) =>
+    "#" + [c[0], c[1], c[2]].map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
+
   const commit = (idx: number, raw: string) => {
     const next = Number(raw);
     if (!Number.isFinite(next)) return;
-    const color: [number, number, number, number] = [...value];
+    const color: [number, number, number, number] = [...value] as [number, number, number, number];
     color[idx] = Math.max(0, Math.min(1, next));
     onCommit(color);
   };
+
+  const handlePickerChange = (hex: string) => {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    onCommit([r, g, b, value[3]]);
+  };
+
+  const swatchBg = `rgba(${Math.round(value[0]*255)},${Math.round(value[1]*255)},${Math.round(value[2]*255)},${value[3]})`;
+
   return (
     <EditableRow label={label}>
+      <div
+        onClick={() => pickerRef.current?.click()}
+        title="Open color picker"
+        style={{
+          width: "20px", height: "20px", flexShrink: 0,
+          background: swatchBg, border: "1px solid var(--rule-2)",
+          cursor: "pointer",
+        }}
+      />
+      <input
+        ref={pickerRef}
+        type="color"
+        value={toHex(value)}
+        onChange={e => handlePickerChange(e.target.value)}
+        style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
+      />
       {value.map((channel, idx) => (
         <input
           key={idx} type="number" step="0.01" min="0" max="1"
@@ -747,6 +779,96 @@ function ColorField({ label, value, onCommit }: {
         />
       ))}
     </EditableRow>
+  );
+}
+
+function BrowseInputField({ label, value, placeholder, onCommit, onBrowse }: {
+  label: string; value: string; placeholder?: string; onCommit: (value: string) => void; onBrowse: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <EditableRow label={label}>
+      <input
+        defaultValue={value} placeholder={placeholder}
+        onFocus={() => setFocused(true)}
+        onBlur={e => { setFocused(false); onCommit(e.currentTarget.value); }}
+        onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        style={{ ...inputStyle(focused), flex: 1 }}
+      />
+      <button
+        onClick={onBrowse}
+        title="Browse"
+        style={{
+          flexShrink: 0, height: "20px", padding: "0 6px",
+          background: "var(--paper-2)", border: "1px solid var(--rule-2)",
+          color: "var(--ink-3)", fontFamily: "var(--font-ui)", fontSize: "11px",
+          cursor: "pointer",
+        }}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "var(--ink)"}
+        onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "var(--ink-3)"}
+      >
+        ···
+      </button>
+    </EditableRow>
+  );
+}
+
+function CustomSelect({ value, options, onChange }: {
+  value: string; options: string[]; onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ flex: 1, position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", height: "20px",
+          background: "var(--paper-2)", border: "1px solid var(--rule-2)",
+          color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px",
+          padding: "0 6px", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}
+      >
+        <span>{value}</span>
+        <span style={{ color: "var(--ink-4)", fontSize: "9px", marginLeft: "4px" }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 200,
+          background: "var(--paper)", border: "1px solid var(--rule-2)",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}>
+          {options.map(opt => (
+            <button
+              key={opt}
+              onClick={() => { onChange(opt); setOpen(false); }}
+              style={{
+                display: "block", width: "100%", padding: "6px 8px",
+                background: opt === value ? "var(--paper-3)" : "none",
+                border: "none", color: "var(--ink)",
+                fontFamily: "var(--font-mono)", fontSize: "11px",
+                cursor: "pointer", textAlign: "left",
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--paper-3)"}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = opt === value ? "var(--paper-3)" : "none"}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

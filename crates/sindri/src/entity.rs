@@ -11,4 +11,6 @@ pub struct Entity {
     pub children: Vec<EntityId>,
     pub components: Vec<Component>,
     pub active: bool,
+    #[serde(default)]
+    pub staged: bool,
 }

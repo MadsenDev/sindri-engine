@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from "react";
+import React, { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import Hierarchy from "./panels/Hierarchy";
 import Inspector from "./panels/Inspector";
 import ProposalsLane from "./panels/ProposalsLane";
 
-import Viewport, { type TransformChange } from "./panels/Viewport";
+import Viewport, { type TransformChange, type ColliderChange } from "./panels/Viewport";
 import ScriptEditor from "./panels/ScriptEditor";
 import FileBrowser from "./panels/FileBrowser";
 import WelcomeScreen from "./screens/WelcomeScreen";
@@ -13,12 +14,54 @@ import CmdK from "./components/CmdK";
 
 const SUGGESTION_MODEL_LABEL = "qwen2.5:0.5b";
 
+export type AiModelRole = "assistant" | "code" | "fast" | "vision";
+export type AiModelConfig = Record<AiModelRole, string | null>;
+
+const AI_MODEL_ROLES: { role: AiModelRole; title: string; detail: string }[] = [
+  { role: "assistant", title: "Assistant", detail: "General reasoning, scene planning, entity/component changes." },
+  { role: "code", title: "Code", detail: "Lua scripts, engine API usage, structured code edits." },
+  { role: "fast", title: "Fast", detail: "Small local model for hints, summaries, and cheap checks." },
+  { role: "vision", title: "Vision", detail: "Viewport screenshots and visual debugging." },
+];
+
+function preferredOllamaModel(models: string[], role: AiModelRole = "assistant") {
+  const lower = (needle: string) => models.find(m => m.toLowerCase().includes(needle));
+  if (role === "code") return lower("coder") ?? lower("qwen3") ?? models[0] ?? null;
+  if (role === "fast") return lower("1.5b") ?? lower("3b") ?? lower("4b") ?? models[0] ?? null;
+  if (role === "vision") return lower("vl") ?? lower("gemma3") ?? lower("vision") ?? null;
+  return lower("qwen3") ?? lower("mistral") ?? lower("gemma3:12b") ?? lower("coder") ?? models[0] ?? null;
+}
+
+function defaultModelConfig(models: string[]): AiModelConfig {
+  return {
+    assistant: preferredOllamaModel(models, "assistant"),
+    code: preferredOllamaModel(models, "code"),
+    fast: preferredOllamaModel(models, "fast"),
+    vision: preferredOllamaModel(models, "vision"),
+  };
+}
+
+function loadModelConfig(): AiModelConfig {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("sindri_ai_model_roles") ?? "{}") as Partial<AiModelConfig>;
+    return {
+      assistant: parsed.assistant ?? localStorage.getItem("sindri_selected_model"),
+      code: parsed.code ?? null,
+      fast: parsed.fast ?? null,
+      vision: parsed.vision ?? null,
+    };
+  } catch {
+    return { assistant: localStorage.getItem("sindri_selected_model"), code: null, fast: null, vision: null };
+  }
+}
+
 export interface Entity {
   id: number;
   name: string;
   parent: number | null;
   children: number[];
   active: boolean;
+  staged: boolean;
   components: Component[];
 }
 
@@ -46,7 +89,10 @@ export interface ProposalChange {
   id: string;
   label: string;
   detail: string;
-  action: Record<string, unknown>;
+  staged_entity_ids: number[];
+  modified_entity_ids: number[];
+  new_script_paths: string[];
+  script_backups: { path: string; existed: boolean; content: string }[];
 }
 
 export interface ProposalData {
@@ -55,55 +101,8 @@ export interface ProposalData {
   changes: ProposalChange[];
 }
 
-export interface GhostEntity {
-  changeId: string;
-  name: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  rotation: number;
-}
 
-function deriveGhostEntities(proposal: ProposalData | null, scene: Scene | null): GhostEntity[] {
-  if (!proposal || !scene) return [];
-  const ghosts: GhostEntity[] = [];
-
-  for (const change of proposal.changes) {
-    const a = change.action;
-    if (a.type !== "edit_transform") continue;
-
-    // Resolve entity from scene
-    let entity: Entity | undefined;
-    if (typeof a.entity_id === "number") {
-      entity = scene.entities[String(a.entity_id)];
-    } else if (typeof a.entity_name === "string") {
-      entity = Object.values(scene.entities).find(e => e.name === a.entity_name);
-    }
-
-    const x = typeof a.x === "number" ? a.x : 0;
-    const y = typeof a.y === "number" ? a.y : 0;
-    const sx = typeof a.scale_x === "number" ? a.scale_x : 1;
-    const sy = typeof a.scale_y === "number" ? a.scale_y : 1;
-    const rot = typeof a.rotation === "number" ? a.rotation : 0;
-    const name = entity?.name ?? (typeof a.entity_name === "string" ? a.entity_name : "?");
-
-    let w = 64, h = 64;
-    if (entity) {
-      const sprite = entity.components.find(c => c.type === "Sprite") as { width: number; height: number } | undefined;
-      const collider = entity.components.find(c => c.type === "Collider") as { width: number; height: number } | undefined;
-      if (sprite) { w = sprite.width * Math.abs(sx); h = sprite.height * Math.abs(sy); }
-      else if (collider) { w = collider.width; h = collider.height; }
-      else { w = Math.abs(sx) * 64; h = Math.abs(sy) * 64; }
-    }
-
-    ghosts.push({ changeId: change.id, name, x, y, w, h, rotation: rot });
-  }
-
-  return ghosts;
-}
-
-export type ActiveTool = "select" | "move" | "scale" | "rotate";
+export type ActiveTool = "select" | "move" | "scale" | "rotate" | "collider";
 type PlaybackState = "stopped" | "playing" | "paused";
 type TransformSnapshot = TransformChange["before"];
 interface EngineStatus {
@@ -112,6 +111,14 @@ interface EngineStatus {
   paused: boolean;
   playback?: string | null;
   error_count?: number | null;
+}
+
+type AiProvider = "ollama" | "openai" | "anthropic";
+
+interface AiProviderStatus {
+  provider: AiProvider;
+  configured: boolean;
+  defaultModel: string;
 }
 
 export default function App() {
@@ -124,10 +131,13 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [engineReady, setEngineReady] = useState(false);
   const [ollamaReady, setOllamaReady] = useState(false);
-  const [, setOllamaModels] = useState<string[]>([]); // populated for future model picker
-  const [selectedModel, setSelectedModel] = useState<string | null>(
-    () => localStorage.getItem("sindri_selected_model")
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [modelConfig, setModelConfig] = useState<AiModelConfig>(() => loadModelConfig());
+  const [selectedProvider, setSelectedProvider] = useState<AiProvider>(
+    () => (localStorage.getItem("sindri_ai_provider") as AiProvider | null) ?? "ollama"
   );
+  const [providerStatuses, setProviderStatuses] = useState<AiProviderStatus[]>([]);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [playbackState, setPlaybackState] = useState<PlaybackState>("stopped");
   const [leftTab, setLeftTab] = useState<"scene" | "files" | "history">("scene");
   const [projectFiles, setProjectFiles] = useState<{ path: string; kind: string; name: string }[]>([]);
@@ -138,12 +148,13 @@ export default function App() {
   const [cmdKOpen, setCmdKOpen] = useState(false);
   const [cmdKInit, setCmdKInit] = useState<{ message?: string; input?: string } | null>(null);
   const [pendingProposal, setPendingProposal] = useState<ProposalData | null>(null);
-  const [hoveredChangeId, setHoveredChangeId] = useState<string | null>(null);
-  const ghostEntities = useMemo(() => deriveGhostEntities(pendingProposal, scene), [pendingProposal, scene]);
   const [suggestionModel, setSuggestionModel] = useState<string | null>(null);
   const [suggestionModelPulling, setSuggestionModelPulling] = useState(false);
-  const undoStack = useRef<TransformChange[]>([]);
-  const redoStack = useRef<TransformChange[]>([]);
+  const undoStack = useRef<(TransformChange | ColliderChange)[]>([]);
+  const redoStack = useRef<(TransformChange | ColliderChange)[]>([]);
+  const [undoLabels, setUndoLabels] = useState<string[]>([]);
+  const [redoLabels, setRedoLabels] = useState<string[]>([]);
+  const sceneRestoredRef = useRef(false);
 
   const refreshScene = useCallback(async () => {
     try {
@@ -166,6 +177,11 @@ export default function App() {
         }
         clearInterval(healthInterval);
         await refreshScene();
+        // Restore staged proposal from disk if any staged entities exist.
+        try {
+          const pending = await invoke<ProposalData | null>("get_pending_proposal");
+          if (pending) setPendingProposal(pending);
+        } catch { /* no pending proposal */ }
       } catch {
         // still waiting
       }
@@ -174,6 +190,17 @@ export default function App() {
     checkHealth();
     return () => clearInterval(healthInterval);
   }, [refreshScene]);
+
+  // Restore the last-opened scene for this project after engine first becomes ready.
+  useEffect(() => {
+    if (!engineReady || !projectPath || sceneRestoredRef.current) return;
+    sceneRestoredRef.current = true;
+    const lastScene = localStorage.getItem(`sindri_last_scene:${projectPath}`);
+    if (!lastScene) return;
+    invoke("open_scene_file", { projectPath, relativePath: lastScene })
+      .then(() => refreshScene())
+      .catch(() => { /* last scene may have been deleted — engine already has main.sindri */ });
+  }, [engineReady, projectPath, refreshScene]);
 
   useEffect(() => {
     if (!engineReady) return;
@@ -225,21 +252,47 @@ export default function App() {
   }, [engineReady]);
 
   useEffect(() => {
-    if (selectedModel) localStorage.setItem("sindri_selected_model", selectedModel);
-  }, [selectedModel]);
+    localStorage.setItem("sindri_ai_model_roles", JSON.stringify(modelConfig));
+    if (modelConfig.assistant) {
+      localStorage.setItem("sindri_selected_model", modelConfig.assistant);
+    } else {
+      localStorage.removeItem("sindri_selected_model");
+    }
+  }, [modelConfig]);
+
+  useEffect(() => {
+    localStorage.setItem("sindri_ai_provider", selectedProvider);
+  }, [selectedProvider]);
+
+  const refreshProviderStatuses = useCallback(async () => {
+    try {
+      setProviderStatuses(await invoke<AiProviderStatus[]>("get_ai_provider_status"));
+    } catch {
+      setProviderStatuses([]);
+    }
+  }, []);
 
   useEffect(() => {
     invoke<string[]>("list_ollama_models")
       .then(models => {
         setOllamaReady(true);
         setOllamaModels(models);
-        if (models.length > 0 && !localStorage.getItem("sindri_selected_model")) {
-          const preferred = models.find(m => m.includes("vl")) ?? models[0];
-          setSelectedModel(preferred);
+        if (selectedProvider === "ollama" && models.length > 0) {
+          setModelConfig(current => {
+            const defaults = defaultModelConfig(models);
+            const next: AiModelConfig = { ...current };
+            for (const role of AI_MODEL_ROLES.map(item => item.role)) {
+              if (!next[role] || !models.includes(next[role] ?? "")) {
+                next[role] = defaults[role];
+              }
+            }
+            return next;
+          });
         }
       })
       .catch(() => setOllamaReady(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    refreshProviderStatuses();
+  }, [refreshProviderStatuses, selectedProvider]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!ollamaReady || suggestionModel || suggestionModelPulling) return;
@@ -274,50 +327,101 @@ export default function App() {
     });
   }, []);
 
+  const labelForChange = useCallback((change: TransformChange | ColliderChange, entityName?: string): string => {
+    const name = entityName ?? `#${change.entityId}`;
+    if ("scale_x" in change.before) {
+      const tc = change as TransformChange;
+      const ds = Math.abs(tc.after.scale_x - tc.before.scale_x) + Math.abs(tc.after.scale_y - tc.before.scale_y);
+      const dr = Math.abs(tc.after.rotation - tc.before.rotation);
+      if (ds > 0.001) return `Scale ${name}`;
+      if (dr > 0.001) return `Rotate ${name}`;
+      return `Move ${name}`;
+    }
+    return `Resize Collider ${name}`;
+  }, []);
+
+  const applyChange = useCallback(async (change: TransformChange | ColliderChange, direction: "undo" | "redo") => {
+    const data = direction === "undo" ? change.before : change.after;
+    if ("scale_x" in data) {
+      await patchTransformSnapshot(change.entityId, data as TransformSnapshot);
+    } else {
+      await invoke("patch_component", {
+        entityId: change.entityId,
+        componentIdx: (change as ColliderChange).componentIdx,
+        data,
+      });
+    }
+  }, [patchTransformSnapshot]);
+
   const handleTransformCommit = useCallback(async (change: TransformChange) => {
     try {
       await patchTransformSnapshot(change.entityId, change.after);
+      const label = labelForChange(change, scene?.entities[String(change.entityId)]?.name);
       undoStack.current.push(change);
       redoStack.current = [];
+      setUndoLabels(prev => [...prev, label]);
+      setRedoLabels([]);
       syncHistoryDepths();
       setSceneDirty(true);
       await refreshScene();
     } catch (err) {
       console.error("Failed to patch transform:", err);
     }
-  }, [patchTransformSnapshot, refreshScene, syncHistoryDepths]);
+  }, [labelForChange, patchTransformSnapshot, refreshScene, scene, syncHistoryDepths]);
+
+  const handleColliderCommit = useCallback(async (change: ColliderChange) => {
+    try {
+      await invoke("patch_component", {
+        entityId: change.entityId,
+        componentIdx: change.componentIdx,
+        data: change.after,
+      });
+      const label = labelForChange(change, scene?.entities[String(change.entityId)]?.name);
+      undoStack.current.push(change);
+      redoStack.current = [];
+      setUndoLabels(prev => [...prev, label]);
+      setRedoLabels([]);
+      syncHistoryDepths();
+      setSceneDirty(true);
+      await refreshScene();
+    } catch (err) {
+      console.error("Failed to patch collider:", err);
+    }
+  }, [labelForChange, refreshScene, scene, syncHistoryDepths]);
 
   const undoTransform = useCallback(async () => {
     const change = undoStack.current.pop();
     if (!change) return;
     try {
-      await patchTransformSnapshot(change.entityId, change.before);
+      await applyChange(change, "undo");
       redoStack.current.push(change);
+      setUndoLabels(prev => { const n = [...prev]; const moved = n.pop()!; setRedoLabels(r => [moved, ...r]); return n; });
       syncHistoryDepths();
       setSceneDirty(true);
       await refreshScene();
     } catch (err) {
       undoStack.current.push(change);
       syncHistoryDepths();
-      console.error("Failed to undo transform:", err);
+      console.error("Failed to undo:", err);
     }
-  }, [patchTransformSnapshot, refreshScene, syncHistoryDepths]);
+  }, [applyChange, refreshScene, syncHistoryDepths]);
 
   const redoTransform = useCallback(async () => {
     const change = redoStack.current.pop();
     if (!change) return;
     try {
-      await patchTransformSnapshot(change.entityId, change.after);
+      await applyChange(change, "redo");
       undoStack.current.push(change);
+      setRedoLabels(prev => { const n = [...prev]; const moved = n.shift()!; setUndoLabels(u => [...u, moved]); return n; });
       syncHistoryDepths();
       setSceneDirty(true);
       await refreshScene();
     } catch (err) {
       redoStack.current.push(change);
       syncHistoryDepths();
-      console.error("Failed to redo transform:", err);
+      console.error("Failed to redo:", err);
     }
-  }, [patchTransformSnapshot, refreshScene, syncHistoryDepths]);
+  }, [applyChange, refreshScene, syncHistoryDepths]);
 
   const saveScene = useCallback(async () => {
     try {
@@ -351,11 +455,14 @@ export default function App() {
     if (!projectPath) return;
     try {
       await invoke("open_scene_file", { projectPath, relativePath });
+      localStorage.setItem(`sindri_last_scene:${projectPath}`, relativePath);
       setSelectedId(null);
       setSelectedComponent(null);
       setLeftTab("scene");
       undoStack.current = [];
       redoStack.current = [];
+      setUndoLabels([]);
+      setRedoLabels([]);
       syncHistoryDepths();
       setSceneDirty(false);
       await refreshScene();
@@ -412,16 +519,25 @@ export default function App() {
     return (
       <ContextMenuProvider>
         <div style={{ width: "100%", height: "100%" }}>
-          <WelcomeScreen onOpen={(dir, name) => { setProjectPath(dir); setProjectName(name); }} />
+          <WelcomeScreen onOpen={(dir, name) => { sceneRestoredRef.current = false; setProjectPath(dir); setProjectName(name); }} />
         </div>
       </ContextMenuProvider>
     );
   }
 
-  const aiStatusDot = ollamaReady ? "var(--amber)" : "var(--ink-4)";
-  const aiStatusText = ollamaReady
-    ? (selectedModel ? `ready · ${selectedModel}` : "ready")
-    : "ollama offline";
+  const selectedProviderStatus = providerStatuses.find(s => s.provider === selectedProvider);
+  const providerConfigured = selectedProvider === "ollama" ? ollamaReady : selectedProviderStatus?.configured === true;
+  const resolvedModelConfig: AiModelConfig = {
+    assistant: modelConfig.assistant || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "assistant") : selectedProviderStatus?.defaultModel ?? null),
+    code: modelConfig.code || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "code") : selectedProviderStatus?.defaultModel ?? null),
+    fast: modelConfig.fast || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "fast") : selectedProviderStatus?.defaultModel ?? null),
+    vision: modelConfig.vision || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "vision") : selectedProviderStatus?.defaultModel ?? null),
+  };
+  const effectiveModel = resolvedModelConfig.assistant || "";
+  const aiStatusDot = providerConfigured ? "var(--amber)" : "var(--ink-4)";
+  const aiStatusText = providerConfigured
+    ? `${selectedProvider} · ${effectiveModel || "ready"}`
+    : `${selectedProvider} not configured`;
 
   return (
     <ContextMenuProvider>
@@ -442,6 +558,7 @@ export default function App() {
           canRedo={redoDepth > 0}
           onUndo={undoTransform}
           onRedo={redoTransform}
+          onOpenAiSettings={() => setAiSettingsOpen(true)}
         />
 
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -511,7 +628,7 @@ export default function App() {
               />
             )}
             {leftTab === "history" && (
-              <HistoryPanel />
+              <HistoryPanel undoLabels={undoLabels} redoLabels={redoLabels} onUndo={undoTransform} onRedo={redoTransform} />
             )}
           </div>
 
@@ -523,10 +640,9 @@ export default function App() {
               onSelect={setSelectedId}
               activeTool={activeTool}
               onTransformCommit={handleTransformCommit}
+              onColliderCommit={handleColliderCommit}
               engineReady={engineReady}
               isPlaying={playbackState === "playing"}
-              ghostEntities={ghostEntities}
-              hoveredChangeId={hoveredChangeId}
             />
             <ScriptEditor
               openScript={openScript}
@@ -548,8 +664,7 @@ export default function App() {
               <ProposalsLane
                 proposal={pendingProposal}
                 onSceneChange={handleSceneChange}
-                onClose={() => { setPendingProposal(null); setHoveredChangeId(null); }}
-                onHoverChange={setHoveredChangeId}
+                onClose={() => setPendingProposal(null)}
               />
             ) : (
               <Inspector
@@ -572,7 +687,7 @@ export default function App() {
           engineReady={engineReady}
           ollamaReady={ollamaReady}
           scene={scene}
-          selectedModel={selectedModel}
+          selectedModel={resolvedModelConfig.assistant}
           runtimeErrors={runtimeErrors}
           suggestionModelPulling={suggestionModelPulling}
           suggestionModel={suggestionModel}
@@ -584,7 +699,8 @@ export default function App() {
           scene={scene}
           projectPath={projectPath}
           openScript={openScript}
-          selectedModel={selectedModel}
+          modelConfig={resolvedModelConfig}
+          selectedProvider={selectedProvider}
           projectFiles={projectFiles}
           runtimeErrors={runtimeErrors}
           onSceneChange={handleSceneChange}
@@ -597,6 +713,30 @@ export default function App() {
             setCmdKOpen(false);
             setCmdKInit(null);
           }}
+        />
+      )}
+
+      {aiSettingsOpen && (
+        <AiSettingsModal
+          provider={selectedProvider}
+          setProvider={provider => {
+            setSelectedProvider(provider);
+            const status = providerStatuses.find(s => s.provider === provider);
+            setModelConfig(provider === "ollama"
+              ? defaultModelConfig(ollamaModels)
+              : {
+                  assistant: status?.defaultModel ?? "",
+                  code: status?.defaultModel ?? "",
+                  fast: status?.defaultModel ?? "",
+                  vision: status?.defaultModel ?? "",
+                });
+          }}
+          modelConfig={modelConfig}
+          setModelForRole={(role, model) => setModelConfig(current => ({ ...current, [role]: model }))}
+          ollamaModels={ollamaModels}
+          statuses={providerStatuses}
+          onRefresh={refreshProviderStatuses}
+          onClose={() => setAiSettingsOpen(false)}
         />
       )}
 
@@ -628,6 +768,7 @@ interface TopbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  onOpenAiSettings: () => void;
 }
 
 function Topbar({
@@ -636,12 +777,14 @@ function Topbar({
   onOpenCmdK, aiStatusDot, aiStatusText,
   activeTool, setActiveTool,
   canUndo, canRedo, onUndo, onRedo,
+  onOpenAiSettings,
 }: TopbarProps) {
   const tools: { key: ActiveTool; icon: string; label: string }[] = [
-    { key: "select", icon: "↖", label: "Select" },
-    { key: "move",   icon: "✥", label: "Move" },
-    { key: "scale",  icon: "⤢", label: "Scale" },
-    { key: "rotate", icon: "↻", label: "Rotate" },
+    { key: "select",   icon: "↖", label: "Select" },
+    { key: "move",     icon: "✥", label: "Move" },
+    { key: "scale",    icon: "⤢", label: "Scale" },
+    { key: "rotate",   icon: "↻", label: "Rotate" },
+    { key: "collider", icon: "⬡", label: "Edit Collider" },
   ];
 
   return (
@@ -793,6 +936,18 @@ function Topbar({
             {aiStatusText}
           </span>
         </div>
+        <button
+          onClick={onOpenAiSettings}
+          title="AI provider settings"
+          style={{
+            width: "28px", height: "28px",
+            background: "transparent",
+            border: "1px solid var(--rule)",
+            color: "var(--ink-3)",
+            cursor: "pointer",
+            fontFamily: "var(--font-mono)",
+          }}
+        >⚙</button>
       </div>
     </header>
   );
@@ -857,6 +1012,500 @@ function RunBtn({ title, disabled, variant, onClick }: {
   );
 }
 
+function AiSettingsModal({
+  provider,
+  setProvider,
+  modelConfig,
+  setModelForRole,
+  ollamaModels,
+  statuses,
+  onRefresh,
+  onClose,
+}: {
+  provider: AiProvider;
+  setProvider: (provider: AiProvider) => void;
+  modelConfig: AiModelConfig;
+  setModelForRole: (role: AiModelRole, model: string | null) => void;
+  ollamaModels: string[];
+  statuses: AiProviderStatus[];
+  onRefresh: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [consent, setConsent] = useState(() => localStorage.getItem("sindri_cloud_ai_consent") === "accepted");
+  const activeStatus = statuses.find(s => s.provider === provider);
+  const cloud = provider !== "ollama";
+
+  const acceptConsent = () => {
+    localStorage.setItem("sindri_cloud_ai_consent", "accepted");
+    setConsent(true);
+  };
+
+  const saveKey = async () => {
+    if (!cloud) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await invoke("save_ai_api_key", { provider, apiKey });
+      setApiKey("");
+      await onRefresh();
+      setMessage(`${provider} key saved to OS keychain.`);
+    } catch (err) {
+      setMessage(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearKey = async () => {
+    if (!cloud) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await invoke("clear_ai_api_key", { provider });
+      await onRefresh();
+      setMessage(`${provider} key cleared.`);
+    } catch (err) {
+      setMessage(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testProvider = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await invoke("test_ai_provider", {
+        provider,
+        model: modelConfig.assistant
+          ?? (provider === "ollama" ? preferredOllamaModel(ollamaModels, "assistant") : activeStatus?.defaultModel),
+      });
+      await onRefresh();
+      setMessage(`${provider} responded successfully.`);
+    } catch (err) {
+      setMessage(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const providerCard = (id: AiProvider, title: string, detail: string) => {
+    const status = statuses.find(s => s.provider === id);
+    const selected = provider === id;
+    return (
+      <button
+        key={id}
+        onClick={() => {
+          setProvider(id);
+          setMessage("");
+        }}
+        style={{
+          textAlign: "left",
+          border: `1px solid ${selected ? "var(--amber)" : "var(--rule-2)"}`,
+          background: selected ? "rgba(240,192,80,0.08)" : "var(--paper)",
+          color: selected ? "var(--ink)" : "var(--ink-2)",
+          padding: "12px",
+          cursor: "pointer",
+          display: "grid",
+          gap: "6px",
+          fontFamily: "var(--font-ui)",
+        }}
+      >
+        <span style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+          <strong>{title}</strong>
+          <span style={{
+            fontFamily: "var(--font-mono)",
+            color: status?.configured ? "var(--moss)" : "var(--ink-4)",
+            fontSize: "10.5px",
+          }}>
+            {status?.configured ? "configured" : id === "ollama" ? "offline" : "no key"}
+          </span>
+        </span>
+        <span style={{ color: "var(--ink-3)", fontSize: "12px", lineHeight: 1.4 }}>{detail}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.64)",
+        zIndex: 260,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "32px",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: "760px",
+          maxWidth: "calc(100vw - 48px)",
+          maxHeight: "calc(100vh - 48px)",
+          overflow: "auto",
+          background: "var(--paper)",
+          border: "1px solid var(--rule-2)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
+        }}
+      >
+        <div style={{
+          height: "52px",
+          display: "flex", alignItems: "center",
+          padding: "0 18px",
+          borderBottom: "1px solid var(--rule)",
+          gap: "12px",
+        }}>
+          <SparkleIcon size={15} />
+          <div style={{ flex: 1 }}>
+            <div style={{ color: "var(--ink)", fontSize: "15px" }}>AI Provider</div>
+            <div style={{ color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "10.5px" }}>
+              local-first by default · cloud is BYOK and opt-in
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "var(--ink-3)", cursor: "pointer", fontSize: "18px" }}>×</button>
+        </div>
+
+        <div style={{ padding: "18px", display: "grid", gap: "16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" }}>
+            {providerCard("ollama", "Ollama", "Offline local models on localhost. No API key and no external network calls.")}
+            {providerCard("openai", "OpenAI", "BYOK cloud models for stronger code, vision, and reasoning.")}
+            {providerCard("anthropic", "Anthropic", "BYOK Claude models for long-context planning and code review.")}
+          </div>
+
+          {cloud && (
+            <div style={{
+              border: `1px solid ${consent ? "var(--rule-2)" : "var(--amber)"}`,
+              background: consent ? "var(--paper-2)" : "rgba(240,192,80,0.08)",
+              padding: "14px",
+              display: "grid",
+              gap: "10px",
+              color: "var(--ink-2)",
+              lineHeight: 1.5,
+            }}>
+              <strong style={{ color: "var(--ink)" }}>Cloud AI privacy notice</strong>
+              <p>
+                When you use OpenAI or Anthropic, enabled context may be sent to that external provider:
+                scene JSON, open Lua scripts, viewport screenshots, runtime errors, chat history, and your prompt.
+                Sindri is not responsible for personal, private, proprietary, or sensitive data you choose to send.
+                Use cloud providers at your own discretion and under that provider&apos;s terms.
+              </p>
+              {!consent && (
+                <button onClick={acceptConsent} style={{
+                  justifySelf: "start",
+                  background: "var(--amber)",
+                  color: "var(--paper)",
+                  border: "1px solid var(--amber)",
+                  padding: "7px 12px",
+                  cursor: "pointer",
+                  fontFamily: "var(--font-ui)",
+                }}>
+                  I understand and want cloud AI available
+                </button>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: cloud ? "1fr 1fr" : "1fr", gap: "14px", alignItems: "start" }}>
+            <div style={{ display: "grid", gap: "8px" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>model roles</span>
+              {AI_MODEL_ROLES.map(({ role, title, detail }) => (
+                <ModelRolePicker
+                  key={role}
+                  provider={provider}
+                  role={role}
+                  title={title}
+                  detail={detail}
+                  value={modelConfig[role]}
+                  models={ollamaModels}
+                  defaultModel={provider === "ollama"
+                    ? preferredOllamaModel(ollamaModels, role)
+                    : activeStatus?.defaultModel ?? ""}
+                  onChange={model => setModelForRole(role, model)}
+                />
+              ))}
+              {provider === "ollama" && (
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10.5px", color: "var(--ink-4)" }}>
+                  {ollamaModels.length > 0
+                    ? `from \`ollama list\` · ${ollamaModels.length} installed`
+                    : "No installed models found from `ollama list`."}
+                </span>
+              )}
+            </div>
+
+            {cloud && (
+              <label style={{ display: "grid", gap: "6px", opacity: consent ? 1 : 0.45 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>api key</span>
+                <input
+                  value={apiKey}
+                  disabled={!consent}
+                  onChange={e => setApiKey(e.target.value)}
+                  type="password"
+                  placeholder={activeStatus?.configured ? "saved in OS keychain" : `${provider.toUpperCase()} API key`}
+                  style={{
+                    background: "var(--paper-2)",
+                    border: "1px solid var(--rule-2)",
+                    color: "var(--ink)",
+                    padding: "8px 10px",
+                    fontFamily: "var(--font-mono)",
+                    outline: "none",
+                  }}
+                />
+              </label>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {cloud && (
+              <>
+                <button disabled={!consent || busy || !apiKey.trim()} onClick={saveKey} style={settingsButtonStyle(!consent || busy || !apiKey.trim(), true)}>save key</button>
+                <button disabled={!consent || busy || !activeStatus?.configured} onClick={clearKey} style={settingsButtonStyle(!consent || busy || !activeStatus?.configured)}>clear key</button>
+              </>
+            )}
+            <button disabled={busy || (cloud && (!consent || !activeStatus?.configured))} onClick={testProvider} style={settingsButtonStyle(busy || (cloud && (!consent || !activeStatus?.configured)))}>
+              test provider
+            </button>
+            <div style={{ flex: 1 }} />
+            <button onClick={onClose} style={settingsButtonStyle(false, true)}>done</button>
+          </div>
+
+          {message && (
+            <div style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "11px",
+              color: message.includes("success") || message.includes("saved") ? "var(--moss)" : "var(--ink-3)",
+              borderTop: "1px solid var(--rule)",
+              paddingTop: "10px",
+              whiteSpace: "pre-wrap",
+            }}>
+              {message}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function settingsButtonStyle(disabled: boolean, primary = false): CSSProperties {
+  return {
+    background: disabled ? "transparent" : primary ? "var(--ink)" : "var(--paper-2)",
+    border: "1px solid var(--rule-2)",
+    color: disabled ? "var(--ink-4)" : primary ? "var(--paper)" : "var(--ink-2)",
+    padding: "7px 12px",
+    cursor: disabled ? "default" : "pointer",
+    fontFamily: "var(--font-ui)",
+    fontSize: "12px",
+  };
+}
+
+function ModelRolePicker({
+  provider,
+  role,
+  title,
+  detail,
+  value,
+  models,
+  defaultModel,
+  onChange,
+}: {
+  provider: AiProvider;
+  role: AiModelRole;
+  title: string;
+  detail: string;
+  value: string | null;
+  models: string[];
+  defaultModel: string | null;
+  onChange: (model: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuRect, setMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const local = provider === "ollama";
+  const hasLocalModels = local && models.length > 0;
+  const resolvedDefault = defaultModel || null;
+  const label = value && (!local || models.includes(value))
+    ? value
+    : resolvedDefault ? `auto · ${resolvedDefault}` : "not configured";
+
+  useEffect(() => {
+    if (!open) return;
+
+    const updateRect = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuRect({ left: rect.left, top: rect.bottom + 4, width: rect.width });
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+
+    updateRect();
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("resize", updateRect);
+    window.addEventListener("scroll", updateRect, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("scroll", updateRect, true);
+    };
+  }, [open]);
+
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "110px 1fr",
+      gap: "10px",
+      alignItems: "center",
+      border: "1px solid var(--rule)",
+      background: "var(--paper-2)",
+      padding: "8px",
+    }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: "var(--font-ui)", color: "var(--ink)", fontSize: "12px" }}>{title}</div>
+        <div style={{ fontFamily: "var(--font-mono)", color: "var(--ink-4)", fontSize: "10px", lineHeight: 1.35 }}>{detail}</div>
+      </div>
+
+      {hasLocalModels ? (
+        <div
+          tabIndex={0}
+          onKeyDown={event => {
+            if (event.key === "Escape") setOpen(false);
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setOpen(current => !current);
+            }
+          }}
+          style={{ position: "relative", outline: "none" }}
+        >
+          <button
+            ref={buttonRef}
+            type="button"
+            onClick={() => setOpen(current => !current)}
+            style={{
+              width: "100%",
+              height: "32px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              background: "var(--paper)",
+              border: `1px solid ${open ? "var(--amber)" : "var(--rule-2)"}`,
+              color: "var(--ink)",
+              padding: "0 10px",
+              fontFamily: "var(--font-mono)",
+              fontSize: "11px",
+              cursor: "pointer",
+              boxShadow: open ? "0 0 0 2px rgba(240,192,80,0.08)" : "none",
+            }}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+            <span style={{
+              width: 0,
+              height: 0,
+              borderLeft: "4px solid transparent",
+              borderRight: "4px solid transparent",
+              borderTop: "5px solid var(--ink-3)",
+              transform: open ? "rotate(180deg)" : "none",
+            }} />
+          </button>
+
+          {open && menuRect && createPortal(
+            <div
+              ref={menuRef}
+              style={{
+                position: "fixed",
+                zIndex: 1000,
+                left: `${menuRect.left}px`,
+                top: `${menuRect.top}px`,
+                width: `${menuRect.width}px`,
+                maxHeight: "190px",
+                overflowY: "auto",
+                background: "var(--paper)",
+                border: "1px solid var(--rule-2)",
+                boxShadow: "0 14px 34px rgba(0,0,0,0.45)",
+                padding: "4px",
+              }}
+            >
+              <button
+                type="button"
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+                style={modelOptionStyle(!value || !models.includes(value))}
+              >
+                <span>auto</span>
+                <span style={{ color: "var(--ink-4)" }}>{resolvedDefault ?? "none"}</span>
+              </button>
+              {models.map(name => (
+                <button
+                  key={`${role}:${name}`}
+                  type="button"
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => {
+                    onChange(name);
+                    setOpen(false);
+                  }}
+                  style={modelOptionStyle(value === name)}
+                >
+                  <span>{name}</span>
+                  {value === name && <span style={{ color: "var(--amber)" }}>selected</span>}
+                </button>
+              ))}
+            </div>,
+            document.body
+          )}
+        </div>
+      ) : (
+        <input
+          value={value ?? ""}
+          disabled={local}
+          onChange={event => onChange(event.target.value.trim() || null)}
+          placeholder={local ? "No local Ollama models found" : resolvedDefault ?? "model name"}
+          style={{
+            height: "32px",
+            background: "var(--paper)",
+            border: "1px solid var(--rule-2)",
+            color: local ? "var(--ink-4)" : "var(--ink)",
+            padding: "0 10px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "11px",
+            outline: "none",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function modelOptionStyle(selected: boolean): CSSProperties {
+  return {
+    width: "100%",
+    minHeight: "30px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    background: selected ? "rgba(240,192,80,0.08)" : "transparent",
+    border: `1px solid ${selected ? "var(--amber)" : "transparent"}`,
+    color: selected ? "var(--ink)" : "var(--ink-2)",
+    padding: "6px 8px",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    fontSize: "11px",
+    textAlign: "left",
+  };
+}
+
 // ─── Forge logo mark ───────────────────────────────────────────────────────
 
 function ForgeLogo({ size = 22 }: { size?: number }) {
@@ -906,14 +1555,68 @@ export function KbdKey({ children }: { children: React.ReactNode; }) {
   );
 }
 
-// ─── History panel placeholder ─────────────────────────────────────────────
+// ─── History panel ─────────────────────────────────────────────────────────
 
-function HistoryPanel() {
+function HistoryPanel({ undoLabels, redoLabels, onUndo, onRedo }: {
+  undoLabels: string[];
+  redoLabels: string[];
+  onUndo: () => void;
+  onRedo: () => void;
+}) {
+  const isEmpty = undoLabels.length === 0 && redoLabels.length === 0;
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: "14px 16px" }}>
-      <div style={{ color: "var(--ink-3)", fontSize: "12.5px", fontFamily: "var(--font-ui)" }}>
-        History will appear here as you work.
-      </div>
+    <div style={{ flex: 1, overflow: "auto", padding: "8px 0" }}>
+      {isEmpty ? (
+        <div style={{ padding: "14px 16px", color: "var(--ink-3)", fontSize: "12.5px", fontFamily: "var(--font-ui)" }}>
+          History will appear here as you work.
+        </div>
+      ) : (
+        <>
+          {/* Redo stack (future, greyed) — shown top-to-bottom = oldest redo last */}
+          {[...redoLabels].reverse().map((label, i) => (
+            <button key={`redo-${i}`} onClick={onRedo} style={{
+              display: "flex", alignItems: "center", gap: "8px",
+              width: "100%", padding: "6px 16px",
+              background: "none", border: "none", cursor: "pointer",
+              fontFamily: "var(--font-ui)", fontSize: "12px",
+              color: "var(--ink-4)", textAlign: "left",
+            }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--paper-3)"}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "none"}
+            >
+              <span style={{ width: "10px", height: "10px", border: "1px solid var(--rule-2)", flexShrink: 0, opacity: 0.4 }} />
+              <span>{label}</span>
+            </button>
+          ))}
+
+          {/* Current state marker */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: "8px",
+            padding: "5px 16px",
+            borderTop: "1px solid var(--rule)", borderBottom: "1px solid var(--rule)",
+          }}>
+            <span style={{ width: "10px", height: "10px", background: "var(--amber)", flexShrink: 0 }} />
+            <span style={{ fontSize: "11px", color: "var(--amber)", fontFamily: "var(--font-mono)" }}>current</span>
+          </div>
+
+          {/* Undo stack (past) — most recent first */}
+          {[...undoLabels].reverse().map((label, i) => (
+            <button key={`undo-${i}`} onClick={onUndo} style={{
+              display: "flex", alignItems: "center", gap: "8px",
+              width: "100%", padding: "6px 16px",
+              background: "none", border: "none", cursor: "pointer",
+              fontFamily: "var(--font-ui)", fontSize: "12px",
+              color: "var(--ink-2)", textAlign: "left",
+            }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--paper-3)"}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "none"}
+            >
+              <span style={{ width: "10px", height: "10px", background: "var(--rule-2)", flexShrink: 0 }} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </>
+      )}
     </div>
   );
 }

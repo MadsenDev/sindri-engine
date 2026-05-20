@@ -1,21 +1,29 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useContextMenu } from "../components/ContextMenu";
 
-interface ProjectFile {
-  path: string;
-  kind: string;
+interface FileNode {
   name: string;
+  path: string;
+  is_dir: boolean;
+  kind: string; // "dir" | "script" | "scene" | "image" | "audio" | "other"
+  children: FileNode[];
+}
+
+interface CreateState {
+  parentPath: string;
+  type: "script" | "scene" | "folder";
+  value: string;
 }
 
 interface Props {
   projectPath: string | null;
   onOpenScript: (path: string) => void;
   onOpenScene: (path: string) => void;
-  onFilesChange?: (files: ProjectFile[]) => void;
+  onFilesChange?: (files: { path: string; kind: string; name: string }[]) => void;
 }
 
-const KIND_ICON: Record<string, string> = {
+const FILE_ICON: Record<string, string> = {
   script: "⚡",
   scene:  "◈",
   image:  "▣",
@@ -23,125 +31,306 @@ const KIND_ICON: Record<string, string> = {
   other:  "·",
 };
 
-const KIND_ORDER = ["script", "scene", "image", "audio", "other"];
-const KIND_LABEL: Record<string, string> = {
-  script: "Scripts",
-  scene:  "Scenes",
-  image:  "Images",
-  audio:  "Audio",
-  other:  "Other",
+function flattenTree(node: FileNode): { path: string; kind: string; name: string }[] {
+  const out: { path: string; kind: string; name: string }[] = [];
+  if (!node.is_dir) {
+    out.push({ path: node.path, kind: node.kind, name: node.name });
+  }
+  for (const child of node.children) {
+    out.push(...flattenTree(child));
+  }
+  return out;
+}
+
+const inputStyle: React.CSSProperties = {
+  flex: 1, height: "18px", background: "var(--bg-3)",
+  border: "1px solid var(--accent)", borderRadius: "var(--radius)",
+  color: "var(--text-bright)", fontFamily: "var(--font-mono)",
+  fontSize: "10px", padding: "0 4px", outline: "none",
+};
+
+const toolbarBtnStyle: React.CSSProperties = {
+  background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius)",
+  color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "11px",
+  padding: "1px 7px", cursor: "pointer",
 };
 
 export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onFilesChange }: Props) {
-  const [files, setFiles] = useState<ProjectFile[]>([]);
+  const [tree, setTree] = useState<FileNode | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(["scripts", "scenes", "assets"]));
   const [selected, setSelected] = useState<string | null>(null);
-  const [renamingPath, setRenamingPath] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [newScriptOpen, setNewScriptOpen] = useState(false);
-  const [newScriptName, setNewScriptName] = useState("");
-  const renameRef = useRef<HTMLInputElement>(null);
-  const newScriptRef = useRef<HTMLInputElement>(null);
+  const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null);
+  const [creating, setCreating] = useState<CreateState | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const { show } = useContextMenu();
+  const renameRef = useRef<HTMLInputElement>(null);
+  const createRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef<Record<string, number>>({});
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!projectPath) return;
     try {
-      const result = await invoke<ProjectFile[]>("list_project_files", { projectPath });
-      setFiles(result);
-      onFilesChange?.(result);
-    } catch {}
+      const node = await invoke<FileNode>("list_project_tree", { projectPath });
+      setTree(node);
+      onFilesChange?.(flattenTree(node));
+    } catch (e) {
+      console.error("list_project_tree failed:", e);
+    }
+  }, [projectPath, onFilesChange]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { if (renaming) renameRef.current?.select(); }, [renaming]);
+  useEffect(() => { if (creating) setTimeout(() => createRef.current?.focus(), 0); }, [creating]);
+
+  const startCreate = (parentPath: string, type: CreateState["type"]) => {
+    if (parentPath) setExpanded(prev => new Set([...prev, parentPath]));
+    setCreating({ parentPath, type, value: "" });
   };
 
-  useEffect(() => { refresh(); }, [projectPath]);
-
-  useEffect(() => {
-    if (renamingPath) renameRef.current?.select();
-  }, [renamingPath]);
-
-  useEffect(() => {
-    if (newScriptOpen) {
-      setNewScriptName("");
-      setTimeout(() => newScriptRef.current?.focus(), 0);
-    }
-  }, [newScriptOpen]);
-
-  const handleOpen = (file: ProjectFile) => {
-    if (file.kind === "script") {
-      // file.path is project-relative ("scripts/foo.lua") but the engine's
-      // /script route resolves relative to scripts_root, so strip the prefix.
-      const scriptRelative = file.path.replace(/^scripts\//, "");
-      onOpenScript(scriptRelative);
-      return;
-    }
-    if (file.kind === "scene") {
-      onOpenScene(file.path);
-    }
-  };
-
-  const handleDelete = async (file: ProjectFile) => {
-    if (!projectPath) return;
+  const commitCreate = async () => {
+    if (!creating || !projectPath) { setCreating(null); return; }
+    const { parentPath, type, value } = creating;
+    const name = value.trim();
+    setCreating(null);
+    if (!name) return;
+    const relPath = parentPath ? `${parentPath}/${name}` : name;
     try {
-      await invoke("delete_project_file", { projectPath, relativePath: file.path });
-      if (selected === file.path) setSelected(null);
-      refresh();
-    } catch (err) {
-      console.error("delete failed:", err);
+      if (type === "script") {
+        const created = await invoke<string>("new_script", { projectPath, relativePath: relPath });
+        await refresh();
+        setSelected(created);
+        onOpenScript(created);
+      } else if (type === "scene") {
+        const created = await invoke<string>("new_scene_file", { projectPath, relativePath: relPath });
+        await refresh();
+        setSelected(created);
+      } else {
+        await invoke("create_folder", { projectPath, relativePath: relPath });
+        await refresh();
+        setExpanded(prev => new Set([...prev, relPath]));
+      }
+    } catch (e) {
+      console.error("create failed:", e);
     }
   };
 
-  const startRename = (file: ProjectFile) => {
-    setRenamingPath(file.path);
-    setRenameValue(file.name);
-  };
-
-  const commitRename = async (file: ProjectFile) => {
-    const newName = renameValue.trim();
-    setRenamingPath(null);
-    if (!newName || newName === file.name || !projectPath) return;
+  const commitRename = async (node: FileNode, newName: string) => {
+    setRenaming(null);
+    if (!newName || newName === node.name || !projectPath) return;
     try {
       const newPath = await invoke<string>("rename_project_file", {
         projectPath,
-        relativePath: file.path,
+        relativePath: node.path,
         newName,
       });
-      if (selected === file.path) setSelected(newPath);
+      if (selected === node.path) setSelected(newPath);
       refresh();
-    } catch (err) {
-      console.error("rename failed:", err);
+    } catch (e) {
+      console.error("rename failed:", e);
     }
   };
 
-  const commitNewScript = async () => {
-    const name = newScriptName.trim();
-    setNewScriptOpen(false);
-    if (!name || !projectPath) return;
+  const handleDelete = async (node: FileNode) => {
+    if (!projectPath) return;
     try {
-      const path = await invoke<string>("new_script", { projectPath, name });
-      await refresh();
-      setSelected(path);
-      onOpenScript(path.replace(/^scripts\//, ""));
-    } catch (err) {
-      console.error("new script failed:", err);
+      await invoke("delete_project_file", { projectPath, relativePath: node.path });
+      if (selected === node.path) setSelected(null);
+      refresh();
+    } catch (e) {
+      console.error("delete failed:", e);
     }
   };
 
-  const handleContextMenu = (e: React.MouseEvent, file: ProjectFile) => {
+  const openNode = (node: FileNode) => {
+    if (node.kind === "script") onOpenScript(node.path);
+    else if (node.kind === "scene") onOpenScene(node.path);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetFolderPath: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = {};
+    setDragOver(null);
+    const fromPath = e.dataTransfer.getData("text/plain");
+    if (!fromPath || fromPath === targetFolderPath || !projectPath) return;
+    if (targetFolderPath.startsWith(fromPath + "/")) return;
+    try {
+      await invoke("move_project_entry", {
+        projectPath,
+        fromRelative: fromPath,
+        toFolderRelative: targetFolderPath,
+      });
+      refresh();
+    } catch (e) {
+      console.error("move failed:", e);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent, path: string) => {
+    e.preventDefault();
+    dragCounterRef.current[path] = (dragCounterRef.current[path] ?? 0) + 1;
+    setDragOver(path);
+  };
+
+  const handleDragLeave = (_e: React.DragEvent, path: string) => {
+    dragCounterRef.current[path] = (dragCounterRef.current[path] ?? 1) - 1;
+    if ((dragCounterRef.current[path] ?? 0) <= 0) {
+      dragCounterRef.current[path] = 0;
+      setDragOver(prev => (prev === path ? null : prev));
+    }
+  };
+
+  const showContextMenu = (e: React.MouseEvent, node: FileNode) => {
     e.preventDefault();
     e.stopPropagation();
     const items = [
-      ...(file.kind === "script" || file.kind === "scene" ? [{ label: "Open", icon: "↗", onClick: () => handleOpen(file) }] : []),
-      { label: "Rename", icon: "✎", onClick: () => startRename(file) },
+      ...(!node.is_dir && (node.kind === "script" || node.kind === "scene")
+        ? [{ label: "Open", icon: "↗", onClick: () => openNode(node) }]
+        : []),
+      ...(node.is_dir ? [
+        { label: "New Script", icon: "⚡", onClick: () => startCreate(node.path, "script") },
+        { label: "New Scene",  icon: "◈", onClick: () => startCreate(node.path, "scene") },
+        { label: "New Folder", icon: "▷", onClick: () => startCreate(node.path, "folder") },
+        { divider: true as const },
+      ] : []),
+      { label: "Rename", icon: "✎", onClick: () => setRenaming({ path: node.path, value: node.name }) },
       { divider: true as const },
-      { label: "Delete", icon: "×", danger: true, onClick: () => handleDelete(file) },
+      { label: "Delete", icon: "×", danger: true, onClick: () => handleDelete(node) },
     ];
     show(e.clientX, e.clientY, items);
   };
 
-  // Group files by kind
-  const byKind: Record<string, ProjectFile[]> = {};
-  for (const f of files) {
-    (byKind[f.kind] ??= []).push(f);
-  }
+  const renderCreateInput = (depth: number) => {
+    if (!creating) return null;
+    const placeholder = creating.type === "folder" ? "folder-name"
+      : creating.type === "script" ? "script.lua"
+      : "scene.sindri";
+    const icon = creating.type === "folder" ? "▷" : creating.type === "script" ? "⚡" : "◈";
+    return (
+      <div key="__create__" style={{
+        display: "flex", alignItems: "center", gap: "7px",
+        height: "22px", paddingLeft: `${depth * 14 + 8}px`, paddingRight: "6px",
+      }}>
+        <span style={{ fontSize: "10px", color: "var(--text-dim)", width: "12px", textAlign: "center" }}>
+          {icon}
+        </span>
+        <input
+          ref={createRef}
+          value={creating.value}
+          onChange={e => setCreating({ ...creating, value: e.target.value })}
+          onKeyDown={e => {
+            if (e.key === "Enter") commitCreate();
+            if (e.key === "Escape") setCreating(null);
+            e.stopPropagation();
+          }}
+          onBlur={commitCreate}
+          placeholder={placeholder}
+          style={inputStyle}
+        />
+      </div>
+    );
+  };
+
+  const renderNode = (node: FileNode, depth: number): React.ReactNode => {
+    const isExpanded = expanded.has(node.path);
+    const isSelected = selected === node.path;
+    const isDragOver = dragOver === node.path;
+    const indent = depth * 14 + 8;
+    const isCreatingHere = creating?.parentPath === node.path;
+
+    if (node.is_dir) {
+      return (
+        <div key={node.path}>
+          <div
+            onClick={() => { setSelected(node.path); expanded.has(node.path) ? setExpanded(prev => { const s = new Set(prev); s.delete(node.path); return s; }) : setExpanded(prev => new Set([...prev, node.path])); }}
+            onContextMenu={e => showContextMenu(e, node)}
+            draggable
+            onDragStart={e => { e.dataTransfer.setData("text/plain", node.path); e.stopPropagation(); }}
+            onDragOver={e => e.preventDefault()}
+            onDragEnter={e => handleDragEnter(e, node.path)}
+            onDragLeave={e => handleDragLeave(e, node.path)}
+            onDrop={e => handleDrop(e, node.path)}
+            style={{
+              display: "flex", alignItems: "center", gap: "5px",
+              height: "22px", paddingLeft: `${indent}px`, paddingRight: "6px",
+              cursor: "pointer", userSelect: "none",
+              background: isDragOver ? "var(--accent-glow)" : isSelected ? "var(--bg-2)" : "none",
+              outline: isDragOver ? "1px solid var(--accent-dim)" : "none",
+              outlineOffset: "-1px",
+            }}
+          >
+            <span style={{ fontSize: "8px", color: "var(--text-dim)", width: "10px", flexShrink: 0 }}>
+              {isExpanded ? "▼" : "▶"}
+            </span>
+            <span style={{ fontSize: "11px", color: isDragOver ? "var(--accent)" : "var(--text-dim)" }}>▷</span>
+            <span style={{
+              flex: 1, fontSize: "11px", fontFamily: "var(--font-mono)",
+              color: isSelected ? "var(--text-bright)" : "var(--text-muted)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {node.name}
+            </span>
+          </div>
+
+          {isExpanded && (
+            <div>
+              {node.children.map(child => renderNode(child, depth + 1))}
+              {isCreatingHere && renderCreateInput(depth + 1)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // File
+    return (
+      <div
+        key={node.path}
+        draggable
+        onDragStart={e => { e.dataTransfer.setData("text/plain", node.path); e.stopPropagation(); }}
+        onClick={() => setSelected(node.path)}
+        onDoubleClick={() => openNode(node)}
+        onContextMenu={e => showContextMenu(e, node)}
+        style={{
+          display: "flex", alignItems: "center", gap: "7px",
+          height: "22px", paddingLeft: `${indent}px`, paddingRight: "6px",
+          cursor: "pointer", userSelect: "none",
+          background: isSelected ? "var(--accent-glow)" : "none",
+          borderLeft: `2px solid ${isSelected ? "var(--accent)" : "transparent"}`,
+        }}
+        onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "var(--bg-2)"; }}
+        onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "none"; }}
+      >
+        <span style={{ fontSize: "10px", color: "var(--text-dim)", width: "12px", textAlign: "center", flexShrink: 0 }}>
+          {FILE_ICON[node.kind] ?? "·"}
+        </span>
+
+        {renaming?.path === node.path ? (
+          <input
+            ref={renameRef}
+            value={renaming.value}
+            onChange={e => setRenaming({ ...renaming, value: e.target.value })}
+            onKeyDown={e => {
+              if (e.key === "Enter") commitRename(node, renaming.value.trim());
+              if (e.key === "Escape") setRenaming(null);
+              e.stopPropagation();
+            }}
+            onBlur={() => commitRename(node, renaming.value.trim())}
+            onClick={e => e.stopPropagation()}
+            style={inputStyle}
+          />
+        ) : (
+          <span style={{
+            flex: 1, fontSize: "11px", fontFamily: "var(--font-mono)",
+            color: isSelected ? "var(--accent)" : "var(--text-bright)",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {node.name}
+          </span>
+        )}
+      </div>
+    );
+  };
 
   if (!projectPath) {
     return (
@@ -158,122 +347,37 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
         height: "28px", borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", padding: "0 6px", gap: "4px", flexShrink: 0,
       }}>
-        <button
-          onClick={() => setNewScriptOpen(v => !v)}
-          title="New script"
-          style={{
-            background: newScriptOpen ? "var(--accent-glow)" : "none",
-            border: `1px solid ${newScriptOpen ? "var(--accent-dim)" : "var(--border)"}`,
-            borderRadius: "var(--radius)", color: newScriptOpen ? "var(--accent)" : "var(--text-muted)",
-            fontFamily: "var(--font-mono)", fontSize: "11px",
-            padding: "1px 7px", cursor: "pointer",
-          }}
-        >+ script</button>
+        <button onClick={() => startCreate("scripts", "script")} title="New script" style={toolbarBtnStyle}>
+          + script
+        </button>
+        <button onClick={() => startCreate("scenes", "scene")} title="New scene" style={toolbarBtnStyle}>
+          + scene
+        </button>
         <div style={{ flex: 1 }} />
         <button
           onClick={refresh}
           title="Refresh"
-          style={{
-            background: "none", border: "none", color: "var(--text-dim)",
-            cursor: "pointer", fontSize: "12px", padding: "2px 4px",
-          }}
-        >↺</button>
+          style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", fontSize: "12px", padding: "2px 4px" }}
+        >
+          ↺
+        </button>
       </div>
 
-      {/* New script input */}
-      {newScriptOpen && (
-        <div style={{ padding: "4px 8px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <input
-            ref={newScriptRef}
-            value={newScriptName}
-            onChange={e => setNewScriptName(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter") commitNewScript();
-              if (e.key === "Escape") setNewScriptOpen(false);
-            }}
-            onBlur={() => setNewScriptOpen(false)}
-            placeholder="script-name.lua"
-            style={{
-              width: "100%", height: "22px", background: "var(--bg-3)",
-              border: "1px solid var(--accent)", borderRadius: "var(--radius)",
-              color: "var(--text-bright)", fontFamily: "var(--font-mono)",
-              fontSize: "11px", padding: "0 6px", outline: "none",
-            }}
-          />
-        </div>
-      )}
-
-      {/* File list */}
-      <div style={{ flex: 1, overflow: "auto", padding: "4px 0" }}>
-        {files.length === 0 ? (
+      {/* Tree */}
+      <div
+        style={{ flex: 1, overflow: "auto", padding: "4px 0" }}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => handleDrop(e, "")}
+      >
+        {!tree || tree.children.length === 0 ? (
           <div style={{ padding: "8px 10px", color: "var(--text-dim)", fontSize: "11px" }}>
             No files yet.
           </div>
         ) : (
-          KIND_ORDER.filter(k => byKind[k]?.length).map(kind => (
-            <div key={kind}>
-              {/* Section header */}
-              <div style={{
-                padding: "4px 10px 2px",
-                fontSize: "9px", letterSpacing: "0.1em", textTransform: "uppercase",
-                color: "var(--text-dim)", fontFamily: "var(--font-ui)", fontWeight: 600,
-              }}>
-                {KIND_LABEL[kind]}
-              </div>
-
-              {byKind[kind].map(file => (
-                <div
-                  key={file.path}
-                  onClick={() => setSelected(file.path)}
-                  onDoubleClick={() => handleOpen(file)}
-                  onContextMenu={e => handleContextMenu(e, file)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "7px",
-                    height: "24px", padding: "0 10px",
-                    background: selected === file.path ? "var(--accent-glow)" : "none",
-                    borderLeft: `2px solid ${selected === file.path ? "var(--accent)" : "transparent"}`,
-                    cursor: "pointer",
-                  }}
-                  onMouseEnter={e => { if (selected !== file.path) (e.currentTarget as HTMLElement).style.background = "var(--bg-2)"; }}
-                  onMouseLeave={e => { if (selected !== file.path) (e.currentTarget as HTMLElement).style.background = "none"; }}
-                >
-                  <span style={{ fontSize: "10px", color: "var(--text-dim)", width: "12px", textAlign: "center", flexShrink: 0 }}>
-                    {KIND_ICON[file.kind] ?? "·"}
-                  </span>
-
-                  {renamingPath === file.path ? (
-                    <input
-                      ref={renameRef}
-                      value={renameValue}
-                      onChange={e => setRenameValue(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === "Enter") commitRename(file);
-                        if (e.key === "Escape") setRenamingPath(null);
-                        e.stopPropagation();
-                      }}
-                      onBlur={() => commitRename(file)}
-                      onClick={e => e.stopPropagation()}
-                      style={{
-                        flex: 1, height: "18px", background: "var(--bg-3)",
-                        border: "1px solid var(--accent)", borderRadius: "var(--radius)",
-                        color: "var(--text-bright)", fontFamily: "var(--font-mono)",
-                        fontSize: "10px", padding: "0 4px", outline: "none",
-                      }}
-                    />
-                  ) : (
-                    <span style={{
-                      flex: 1, fontSize: "11px",
-                      color: selected === file.path ? "var(--accent)" : "var(--text-bright)",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      fontFamily: "var(--font-mono)",
-                    }}>
-                      {file.name}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))
+          <>
+            {tree.children.map(child => renderNode(child, 0))}
+            {creating?.parentPath === "" && renderCreateInput(0)}
+          </>
         )}
       </div>
     </div>

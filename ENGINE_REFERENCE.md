@@ -42,6 +42,7 @@ All components are variants of this enum. Serialised with `"type"` discriminant.
 pub enum Component {
     Transform(Transform),
     Sprite(Sprite),
+    PhysicsBody(PhysicsBody),
     Collider(Collider),
     Script(Script),
     Camera(Camera),
@@ -72,6 +73,22 @@ pub struct Sprite {
     pub color: [f32; 4], // RGBA tint, [1,1,1,1] = no tint
 }
 ```
+
+#### PhysicsBody
+```rust
+pub struct PhysicsBody {
+    pub body_type: BodyType,     // "Dynamic" | "Fixed" | "Kinematic"
+    pub lock_rotation: bool,     // prevent angular rotation (use true for platformer players)
+    pub linear_damping: f32,     // drag applied to linear velocity
+    pub angular_damping: f32,
+    pub collision_layer: u8,
+    pub collision_mask: u32,     // bitmask of layers this body collides with
+}
+```
+Physics requires **both** a `PhysicsBody` and a `Collider` on the same entity.
+- `Dynamic` — fully simulated (players, enemies, projectiles)
+- `Fixed` — immovable but collidable (ground, walls, platforms)
+- `Kinematic` — script-driven movement that still interacts with dynamic bodies
 
 #### Collider
 ```rust
@@ -182,9 +199,9 @@ Runtime component types (in `sindri::entities`):
 
 ## Lua scripting system
 
-> **This is NOT LÖVE2D, Unity, or Godot.** Do not use `love.*`, `Input.GetKey`, `self:input()`, or any other engine's API. Use only the globals and patterns documented below.
+> **This is NOT LÖVE2D, Unity, or Godot.** Use only the API documented below.
 
-Scripts are `.lua` files attached to an entity via a `Script` component. The entity **must also have a Transform component** for position changes to take effect.
+Scripts are `.lua` files attached to an entity via a `Script` component. The entity **must also have a Transform component** for position to be readable.
 
 ### Lifecycle hooks
 
@@ -193,68 +210,130 @@ function on_start(self)         end  -- called once on the first frame
 function on_update(self, dt)    end  -- called every frame; dt = delta time in seconds
 ```
 
-### The `self` table
+### `self` — the entity facade
 
-`self` is a plain Lua table passed into every hook. Read and write these fields directly:
+`self` is an **engine userdata object** (not a plain table). Access components via method calls:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `self.x` | number | World X position (read/write) |
-| `self.y` | number | World Y position (read/write) |
-| `self.rotation` | number | Rotation in radians (read/write) |
-| `self.scale_x` | number | X scale (read/write) |
-| `self.scale_y` | number | Y scale (read/write) |
-| `self.entity_id` | number | Entity ID (read-only) |
-| `self.elapsed` | number | Total elapsed time in seconds (read-only) |
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `self:entity()` | integer | This entity's numeric ID |
+| `self:input()` | InputFacet | Keyboard/mouse input |
+| `self:transform()` | TransformFacet \| nil | Position/rotation/scale (nil if no Transform component) |
+| `self:physics()` | PhysicsFacet \| nil | Physics body (nil if no PhysicsBody component) |
+| `self:sprite()` | SpriteFacet \| nil | Sprite tint/visibility (nil if no Sprite component) |
+| `self:camera()` | CameraFacet \| nil | Camera control (nil if no Camera component) |
+| `self:position()` | Vec2 | Shortcut — entity world position |
+| `self:set_position(vec2)` | — | Shortcut — set entity world position |
+| `self:apply_impulse(vec2)` | — | Shortcut — apply physics impulse |
 
-Changes to `self.x`, `self.y`, etc. are written back to the entity's Transform after each `on_update` call.
-
-### Global functions
+### InputFacet — `self:input()`
 
 ```lua
-key_down(key)      -- bool: true while the key is held
-key_pressed(key)   -- bool: true only on the frame the key was first pressed
-print(...)         -- logs to the engine console
+local input = self:input()
+input:is_key_down("A")           -- bool: true while key held
+input:is_key_pressed("Space")    -- bool: true only on the frame key was first pressed
+input:axis("A", "D")             -- float -1..1: neg key = -1, pos key = +1, both/neither = 0
 ```
 
-Key name strings match browser `KeyboardEvent.key` values:
-`"ArrowLeft"`, `"ArrowRight"`, `"ArrowUp"`, `"ArrowDown"`, `"a"`–`"z"`, `"A"`–`"Z"`, `"0"`–`"9"`, `" "` (Space), `"Enter"`, `"Escape"`, `"Shift"`, `"Control"`, `"Alt"`
+**Key name strings:** Single letters `"A"`–`"Z"` (uppercase). Arrows: `"Left"`, `"Right"`, `"Up"`, `"Down"`. Special: `"Space"`, `"Enter"`, `"Escape"`, `"Shift"`, `"Control"`, `"Alt"`. Digits: `"0"`–`"9"`.
+
+### TransformFacet — `self:transform()`
+
+```lua
+local t = self:transform()
+if t == nil then return end      -- always nil-check
+t:position()                     -- Vec2
+t:rotation()                     -- float (radians)
+t:set_position(vec2(x, y))
+t:set_rotation(radians)
+t:set_scale(vec2(sx, sy))
+```
+
+### PhysicsFacet — `self:physics()`
+
+```lua
+local phys = self:physics()
+if phys == nil then return end   -- nil if entity has no PhysicsBody component
+phys:velocity()                  -- Vec2: current linear velocity
+phys:set_velocity(vec2(vx, vy)) -- directly set linear velocity
+phys:apply_impulse(vec2(ix,iy)) -- add an instantaneous impulse
+```
+
+### SpriteFacet — `self:sprite()`
+
+```lua
+local spr = self:sprite()
+if spr == nil then return end
+spr:set_tint({r, g, b, a})      -- RGBA floats 0..1
+spr:set_visible(bool)
+```
+
+### Global `vec2`
+
+```lua
+vec2(x, y)   -- construct a Vec2 value; x and y are accessible as .x and .y
+```
 
 ### Script examples
 
-**Move with arrow keys:**
+**Move with WASD (transform-based):**
 ```lua
+local speed = 200.0
+
 function on_update(self, dt)
-  local speed = 200
-  if key_down("ArrowLeft")  then self.x = self.x - speed * dt end
-  if key_down("ArrowRight") then self.x = self.x + speed * dt end
-  if key_down("ArrowUp")    then self.y = self.y - speed * dt end
-  if key_down("ArrowDown")  then self.y = self.y + speed * dt end
+    local input = self:input()
+    local t = self:transform()
+    if t == nil then return end
+
+    local pos = t:position()
+    local h = input:axis("A", "D")
+    local v = input:axis("W", "S")
+    t:set_position(vec2(pos.x + h * speed * dt, pos.y + v * speed * dt))
 end
 ```
 
-**Rotate over time:**
+**Platformer player (physics-based — requires PhysicsBody Dynamic + Collider):**
 ```lua
+local speed = 260.0
+local jump_impulse = -520.0
+local grounded_threshold = 30.0
+
 function on_update(self, dt)
-  self.rotation = self.elapsed  -- 1 radian per second
+    local input = self:input()
+    local phys = self:physics()
+    if phys == nil then return end
+
+    local vel = phys:velocity()
+    local h = input:axis("A", "D")
+    if h == 0.0 then h = input:axis("Left", "Right") end
+
+    local vy = vel.y
+    local grounded = math.abs(vel.y) < grounded_threshold
+    if grounded and (input:is_key_pressed("W") or input:is_key_pressed("Up") or input:is_key_pressed("Space")) then
+        vy = jump_impulse
+    end
+
+    phys:set_velocity(vec2(h * speed, vy))
 end
 ```
 
-**Bounce between two positions:**
+**Rotate and pulse a sprite:**
 ```lua
-function on_start(self)
-  self.start_x = self.x
-end
+local time = 0.0
 
 function on_update(self, dt)
-  self.x = self.start_x + math.sin(self.elapsed * 2) * 100
-end
-```
-
-**Spawn-once log:**
-```lua
-function on_start(self)
-  print("Entity " .. self.entity_id .. " started at " .. self.x .. ", " .. self.y)
+    time = time + dt
+    local t = self:transform()
+    if t ~= nil then
+        t:set_rotation(time * 0.65)
+        local pulse = 1.0 + math.sin(time * 2.5) * 0.08
+        t:set_scale(vec2(pulse, pulse))
+    end
+    local spr = self:sprite()
+    if spr ~= nil then
+        local glow = 0.72 + math.sin(time * 3.0) * 0.2
+        spr:set_tint({1.0, glow, 0.22, 1.0})
+    end
 end
 ```
 

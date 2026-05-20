@@ -545,7 +545,7 @@ Do not delete anything inside `crates/sindri/`.
 
 ## Non-negotiables
 
-1. No external AI API calls. Ollama on localhost only.
+1. Local-first AI by default. External AI API calls are allowed only when the user explicitly opts into a BYOK cloud provider in the editor UI. Ollama on localhost remains the default.
 2. No UI component libraries. Hand-built only.
 3. No Tailwind. CSS tokens only.
 4. Amber = user. Blue = AI. Absolute.

@@ -25,7 +25,9 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         .route("/health", get(routes::health))
         .route("/errors", get(routes::get_errors))
         .route("/scene", get(routes::get_scene).put(routes::put_scene))
+        .route("/scene/path", get(routes::get_scene_path))
         .route("/scene/save", post(routes::save_scene))
+        .route("/scene/world", get(routes::get_world_settings).patch(routes::patch_world_settings))
         .route("/scene/open", post(routes::open_scene))
         .route(
             "/scene/entity/:id",
@@ -45,9 +47,13 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
             patch(routes::patch_component).delete(routes::remove_component_by_idx),
         )
         .route("/scene/entity", post(routes::create_entity))
+        .route("/scene/entity/:id/staged", patch(routes::set_entity_staged))
+        .route("/scene/staged/commit", post(routes::commit_staged))
+        .route("/scene/staged/revert", post(routes::revert_staged))
         .route("/screenshot", get(routes::get_screenshot))
         .route("/stream", get(routes::stream_handler))
         .route("/control", axum::routing::post(routes::post_control))
+        .route("/gizmos", axum::routing::post(routes::post_gizmos))
         .route("/input/keys", axum::routing::post(routes::post_keys))
         .route("/scripts", get(routes::list_scripts))
         .route("/script", get(routes::get_script).put(routes::put_script))

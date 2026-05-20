@@ -1,40 +1,98 @@
 {
   "name": "Editor Scene Showcase",
   "entities": {
-    "1": {
-      "id": 1,
-      "name": "Beacon",
+    "11": {
+      "id": 11,
+      "name": "Player",
       "parent": null,
       "children": [],
       "components": [
         {
           "type": "Transform",
-          "x": 628.7124,
-          "y": 361.30313,
-          "scale_x": 0.9488337,
-          "scale_y": 0.9488337,
-          "rotation": 61.897446
+          "x": 400.0,
+          "y": 260.0,
+          "scale_x": 0.9977047,
+          "scale_y": 0.9977047,
+          "rotation": 0.0
         },
         {
           "type": "Sprite",
           "texture_path": "generated:white",
-          "width": 96.0,
-          "height": 96.0,
+          "width": 28.0,
+          "height": 40.0,
           "flip_x": false,
           "flip_y": false,
           "color": [
-            1.0,
-            0.5950231,
-            0.22,
+            0.3,
+            0.75,
+            0.4,
             1.0
           ]
         },
         {
+          "type": "PhysicsBody",
+          "body_type": "Dynamic",
+          "lock_rotation": true,
+          "linear_damping": 0.0,
+          "angular_damping": 0.0,
+          "collision_layer": 0,
+          "collision_mask": 4294967295
+        },
+        {
+          "type": "Collider",
+          "width": 28.263327,
+          "height": 40.0,
+          "offset_x": 0.13166624,
+          "offset_y": 1.4210855e-14,
+          "is_trigger": false
+        },
+        {
           "type": "Script",
-          "path": "scripts/beacon.lua"
+          "path": "player.lua"
         }
       ],
-      "active": true
+      "active": true,
+      "staged": false
+    },
+    "12": {
+      "id": 12,
+      "name": "Sprite",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 405.68747,
+          "y": 368.48468,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0
+        },
+        {
+          "type": "Sprite",
+          "texture_path": "generated:white",
+          "width": 64.0,
+          "height": 64.0,
+          "flip_x": false,
+          "flip_y": false,
+          "color": [
+            0.34,
+            0.54,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "type": "Collider",
+          "width": 66.0,
+          "height": 65.0,
+          "offset_x": 0.0,
+          "offset_y": -0.5,
+          "is_trigger": false
+        }
+      ],
+      "active": true,
+      "staged": false
     },
     "5": {
       "id": 5,
@@ -66,7 +124,52 @@
           "dead_zone_height": 0.0
         }
       ],
-      "active": true
+      "active": true,
+      "staged": false
+    },
+    "1": {
+      "id": 1,
+      "name": "Beacon",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 628.7124,
+          "y": 361.30313,
+          "scale_x": 0.9488337,
+          "scale_y": 0.9488337,
+          "rotation": 61.897446
+        },
+        {
+          "type": "Sprite",
+          "texture_path": "generated:white",
+          "width": 96.0,
+          "height": 96.0,
+          "flip_x": false,
+          "flip_y": false,
+          "color": [
+            1.0,
+            0.5950231,
+            0.22,
+            1.0
+          ]
+        },
+        {
+          "type": "Script",
+          "path": "beacon.lua"
+        },
+        {
+          "type": "Collider",
+          "width": 34.0,
+          "height": 45.0,
+          "offset_x": 1.0,
+          "offset_y": 6.5,
+          "is_trigger": false
+        }
+      ],
+      "active": true,
+      "staged": false
     },
     "2": {
       "id": 2,
@@ -99,9 +202,18 @@
         {
           "type": "Script",
           "path": "scripts/drone.lua"
+        },
+        {
+          "type": "Collider",
+          "width": 147.0,
+          "height": 145.0,
+          "offset_x": -0.5,
+          "offset_y": -0.5,
+          "is_trigger": false
         }
       ],
-      "active": true
+      "active": true,
+      "staged": false
     },
     "3": {
       "id": 3,
@@ -130,10 +242,21 @@
             0.28,
             1.0
           ]
+        },
+        {
+          "type": "Collider",
+          "width": 720.0,
+          "height": 28.0,
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "is_trigger": false
         }
       ],
-      "active": true
+      "active": true,
+      "staged": false
     }
   },
-  "next_id": 7
+  "next_id": 13,
+  "gravity_y": 980.0,
+  "gravity_x": 0.0
 }

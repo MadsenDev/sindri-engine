@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import ForgeLogo from "../components/ForgeLogo";
 
 const RECENT_KEY = "sindri_recent_projects";
 const MAX_RECENT = 8;
@@ -118,16 +119,11 @@ export default function WelcomeScreen({ onOpen }: Props) {
       <div style={{ position: "relative", width: "100%", maxWidth: "520px", padding: "0 24px" }}>
         {/* Logo */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
-          <div style={{
-            width: "32px", height: "32px",
-            background: "var(--accent)",
-            clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-            flexShrink: 0,
-          }} />
+          <ForgeLogo size={36} />
           <div>
             <div style={{
               fontFamily: "var(--font-ui)", fontWeight: 800, fontSize: "24px",
-              color: "var(--accent)", letterSpacing: "-0.03em",
+              color: "var(--ink)", letterSpacing: "-0.03em",
             }}>SINDRI</div>
             <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.08em" }}>
               2D GAME ENGINE
