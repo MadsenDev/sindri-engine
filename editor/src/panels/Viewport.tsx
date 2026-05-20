@@ -187,6 +187,10 @@ function SceneView({
   const draftRef = useRef<Map<number, TransformDraft>>(new Map());
   const colliderDragRef = useRef<ColliderDragState | null>(null);
   const colliderDraftRef = useRef<Map<number, ColliderDraft>>(new Map());
+  // Animated sprite: image cache and per-entity animation state
+  const imgCacheRef = useRef<Map<string, HTMLImageElement | null>>(new Map());
+  const animStateRef = useRef<Map<number, { frame: number; timer: number }>>(new Map());
+  const lastDrawTimeRef = useRef(performance.now());
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
@@ -211,6 +215,9 @@ function SceneView({
     const cam = cameraRef.current;
     const sc = sceneRef.current;
     const selId = selectedRef.current;
+    const now = performance.now();
+    const dt = Math.min((now - lastDrawTimeRef.current) / 1000, 0.1);
+    lastDrawTimeRef.current = now;
 
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, cw, ch);
@@ -281,7 +288,7 @@ function SceneView({
     // — Entities —
     if (sc) {
       for (const entity of Object.values(sc.entities)) {
-        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id));
+        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt);
       }
     }
 
@@ -357,13 +364,76 @@ function SceneView({
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
-    const hit = hitTest(sc, wx, wy);
+    const tool = activeToolRef.current;
 
+    // In collider mode: check handles on the selected entity FIRST, before any hit test.
+    // This ensures handles always win over selecting a different entity underneath.
+    if (tool === "collider") {
+      const selectedEntity = selectedRef.current !== null ? sc.entities[String(selectedRef.current)] : null;
+      if (selectedEntity) {
+        const collider = selectedEntity.components.find(c => c.type === "Collider") as
+          | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
+          | undefined;
+        const transform = getTransform(selectedEntity);
+        const componentIdx = selectedEntity.components.findIndex(c => c.type === "Collider");
+        if (collider && transform && componentIdx >= 0) {
+          const cx = transform.x + collider.offset_x;
+          const cy = transform.y + collider.offset_y;
+          const hw = collider.width * 0.5;
+          const hh = collider.height * 0.5;
+          const rot = transform.rotation;
+          const cosR = Math.cos(rot);
+          const sinR = Math.sin(rot);
+          const relX = wx - cx;
+          const relY = wy - cy;
+          // Rotate click into entity-local space
+          const localX = relX * cosR + relY * sinR;
+          const localY = -relX * sinR + relY * cosR;
+          const handles: [ColliderHandle, number, number][] = [
+            ["left",   -hw, 0],
+            ["right",  hw,  0],
+            ["top",    0,   -hh],
+            ["bottom", 0,   hh],
+          ];
+          const hitThreshold = 10 / cameraRef.current.zoom;
+          for (const [handle, hx, hy] of handles) {
+            if (Math.abs(localX - hx) <= hitThreshold && Math.abs(localY - hy) <= hitThreshold) {
+              colliderDragRef.current = {
+                entityId: selectedRef.current!,
+                componentIdx,
+                handle,
+                startMouse: { x: wx, y: wy },
+                entityRotation: rot,
+                startCollider: {
+                  width: collider.width,
+                  height: collider.height,
+                  offset_x: collider.offset_x,
+                  offset_y: collider.offset_y,
+                },
+              };
+              colliderDraftRef.current.set(selectedRef.current!, {
+                width: collider.width,
+                height: collider.height,
+                offset_x: collider.offset_x,
+                offset_y: collider.offset_y,
+              });
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+      }
+      // Clicked outside any handle — allow selecting a different entity
+      const hit = hitTest(sc, wx, wy);
+      if (hit !== null) onSelect(hit);
+      return;
+    }
+
+    const hit = hitTest(sc, wx, wy);
     if (hit !== null && hit !== selectedRef.current) {
       onSelect(hit);
     }
 
-    const tool = activeToolRef.current;
     const targetId = hit ?? selectedRef.current;
     if (tool === "select" || targetId === null) {
       return;
@@ -372,66 +442,8 @@ function SceneView({
     const entity = sc.entities[String(targetId)];
     if (!entity) return;
 
-    // Collider edit mode: check for handle hits
-    if (tool === "collider") {
-      const collider = entity.components.find(c => c.type === "Collider") as
-        | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
-        | undefined;
-      const transform = getTransform(entity);
-      const componentIdx = entity.components.findIndex(c => c.type === "Collider");
-      if (collider && transform && componentIdx >= 0) {
-        const cx = transform.x + collider.offset_x;
-        const cy = transform.y + collider.offset_y;
-        const hw = collider.width * 0.5;
-        const hh = collider.height * 0.5;
-        // Convert click to collider-local space (inverse entity rotation)
-        const rot = transform.rotation;
-        const relX = wx - cx;
-        const relY = wy - cy;
-        const cosR = Math.cos(-rot);
-        const sinR = Math.sin(-rot);
-        const localX = relX * cosR - relY * sinR;
-        const localY = relX * sinR + relY * cosR;
-        const handles: [ColliderHandle, number, number][] = [
-          ["left",   -hw, 0],
-          ["right",  hw,  0],
-          ["top",    0,   -hh],
-          ["bottom", 0,   hh],
-        ];
-        const hitThreshold = 10 / cameraRef.current.zoom;
-        for (const [handle, hx, hy] of handles) {
-          if (Math.abs(localX - hx) <= hitThreshold && Math.abs(localY - hy) <= hitThreshold) {
-            colliderDragRef.current = {
-              entityId: targetId,
-              componentIdx,
-              handle,
-              startMouse: { x: wx, y: wy },
-              entityRotation: transform.rotation,
-              startCollider: {
-                width: collider.width,
-                height: collider.height,
-                offset_x: collider.offset_x,
-                offset_y: collider.offset_y,
-              },
-            };
-            colliderDraftRef.current.set(targetId, {
-              width: collider.width,
-              height: collider.height,
-              offset_x: collider.offset_x,
-              offset_y: collider.offset_y,
-            });
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-      return;
-    }
-
     const transform = getTransform(entity);
-    if (!transform) {
-      return;
-    }
+    if (!transform) return;
 
     dragRef.current = {
       entityId: targetId,
@@ -455,19 +467,42 @@ function SceneView({
       const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
       const dx = wx - colliderDrag.startMouse.x;
       const dy = wy - colliderDrag.startMouse.y;
-      // Project world-space delta into entity-local space
+      // Project world delta onto entity local axes
       const rot = colliderDrag.entityRotation;
-      const cosR = Math.cos(-rot);
-      const sinR = Math.sin(-rot);
-      const ldx = dx * cosR - dy * sinR;
-      const ldy = dx * sinR + dy * cosR;
+      const cosR = Math.cos(rot);
+      const sinR = Math.sin(rot);
+      const ldx = dx * cosR + dy * sinR;   // component along local X
+      const ldy = -dx * sinR + dy * cosR;  // component along local Y
       const s = colliderDrag.startCollider;
       let { width, height, offset_x, offset_y } = s;
+      // For each handle: grow the dimension, then move center by half in world space.
+      // Local X axis in world space: (cosR, sinR)
+      // Local Y axis in world space: (-sinR, cosR)
       switch (colliderDrag.handle) {
-        case "right":  width = Math.max(1, s.width + ldx);  offset_x = s.offset_x + ldx * 0.5; break;
-        case "left":   width = Math.max(1, s.width - ldx);  offset_x = s.offset_x + ldx * 0.5; break;
-        case "bottom": height = Math.max(1, s.height + ldy); offset_y = s.offset_y + ldy * 0.5; break;
-        case "top":    height = Math.max(1, s.height - ldy); offset_y = s.offset_y + ldy * 0.5; break;
+        case "right": {
+          width = Math.max(1, s.width + ldx);
+          const h = ldx * 0.5;
+          offset_x = s.offset_x + h * cosR; offset_y = s.offset_y + h * sinR;
+          break;
+        }
+        case "left": {
+          width = Math.max(1, s.width - ldx);
+          const h = ldx * 0.5;
+          offset_x = s.offset_x + h * cosR; offset_y = s.offset_y + h * sinR;
+          break;
+        }
+        case "bottom": {
+          height = Math.max(1, s.height + ldy);
+          const h = ldy * 0.5;
+          offset_x = s.offset_x - h * sinR; offset_y = s.offset_y + h * cosR;
+          break;
+        }
+        case "top": {
+          height = Math.max(1, s.height - ldy);
+          const h = ldy * 0.5;
+          offset_x = s.offset_x - h * sinR; offset_y = s.offset_y + h * cosR;
+          break;
+        }
       }
       colliderDraftRef.current.set(colliderDrag.entityId, { width, height, offset_x, offset_y });
       return;
@@ -573,10 +608,13 @@ function hitTest(scene: Scene, wx: number, wy: number): number | null {
   for (const entity of Object.values(scene.entities)) {
     const transform = getTransform(entity);
     const sprite = entity.components.find(c => c.type === "Sprite") as { type: "Sprite"; width: number; height: number } | undefined;
+    const anim = entity.components.find(c => c.type === "AnimatedSprite") as { type: "AnimatedSprite"; width: number; height: number } | undefined;
     const camera = entity.components.find(c => c.type === "Camera") as { type: "Camera"; zoom: number } | undefined;
     if (!transform) continue;
-    const hw = sprite ? Math.abs(sprite.width * transform.scale_x) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_x) * 16, 12);
-    const hh = sprite ? Math.abs(sprite.height * transform.scale_y) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_y) * 16, 12);
+    const visW = sprite?.width ?? anim?.width;
+    const visH = sprite?.height ?? anim?.height;
+    const hw = visW ? Math.abs(visW * transform.scale_x) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_x) * 16, 12);
+    const hh = visH ? Math.abs(visH * transform.scale_y) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_y) * 16, 12);
     if (wx >= transform.x - hw && wx <= transform.x + hw && wy >= transform.y - hh && wy <= transform.y + hh) {
       hit = entity.id;
     }
@@ -630,12 +668,18 @@ function drawEntity(
   draft?: TransformDraft,
   activeTool?: ActiveTool,
   colliderDraft?: ColliderDraft,
+  imgCache?: Map<string, HTMLImageElement | null>,
+  animState?: Map<number, { frame: number; timer: number }>,
+  dt?: number,
 ) {
   const transform = entity.components.find(c => c.type === "Transform") as
     | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
     | undefined;
   const sprite = entity.components.find(c => c.type === "Sprite") as
     | { type: "Sprite"; width: number; height: number; color: [number, number, number, number] }
+    | undefined;
+  const animSprite = entity.components.find(c => c.type === "AnimatedSprite") as
+    | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; tint: [number,number,number,number]; clips: { name: string; start_frame: number; end_frame: number; fps: number; looping: boolean }[]; default_clip: string; flip_x: boolean; flip_y: boolean }
     | undefined;
   const collider = entity.components.find(c => c.type === "Collider") as
     | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
@@ -663,26 +707,90 @@ function drawEntity(
 
   if (cameraComp) {
     drawCameraFrame(ctx, entity.name, sx, sy, activeTransform.rotation, cameraComp.zoom, cam.zoom, cameraComp.active ?? true, isSelected);
-    if (!sprite && !collider) return;
+    if (!sprite && !animSprite && !collider) return;
   }
 
-  const hw = sprite ? sprite.width * activeTransform.scale_x * 0.5 : Math.max(activeTransform.scale_x * 16, 1);
-  const hh = sprite ? sprite.height * activeTransform.scale_y * 0.5 : Math.max(activeTransform.scale_y * 16, 1);
+  const visW = sprite?.width ?? animSprite?.width;
+  const visH = sprite?.height ?? animSprite?.height;
+  const hw = visW ? visW * activeTransform.scale_x * 0.5 : Math.max(activeTransform.scale_x * 16, 1);
+  const hh = visH ? visH * activeTransform.scale_y * 0.5 : Math.max(activeTransform.scale_y * 16, 1);
 
   const screenW = hw * 2 * cam.zoom;
   const screenH = hh * 2 * cam.zoom;
 
-  const color = sprite ? `rgba(${Math.round(sprite.color[0] * 255)},${Math.round(sprite.color[1] * 255)},${Math.round(sprite.color[2] * 255)},${(sprite.color[3] * 0.5).toFixed(2)})` : "rgba(77,166,255,0.25)";
   ctx.save();
   ctx.translate(sx, sy);
   ctx.rotate(activeTransform.rotation);
 
-  // Entity fill
-  ctx.fillStyle = color;
-  ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
+  if (animSprite && imgCache && animState) {
+    // Advance animation timer
+    const clip = animSprite.clips.find(c => c.name === animSprite.default_clip) ?? animSprite.clips[0];
+    if (clip) {
+      const frameDur = clip.fps > 0 ? 1 / clip.fps : 0.1;
+      const frameCount = clip.end_frame - clip.start_frame + 1;
+      let state = animState.get(entity.id);
+      if (!state) { state = { frame: 0, timer: 0 }; animState.set(entity.id, state); }
+      if (dt) {
+        state.timer += dt;
+        while (state.timer >= frameDur) {
+          state.timer -= frameDur;
+          state.frame = (state.frame + 1) % frameCount;
+        }
+      }
+      const absFrame = clip.start_frame + state.frame;
+      const col = absFrame % animSprite.cols;
+      const row = Math.floor(absFrame / animSprite.cols);
+      const uvW = 1 / animSprite.cols;
+      const uvH = 1 / animSprite.rows;
+
+      // Load image if not cached
+      let img = imgCache.get(animSprite.texture_path);
+      if (img === undefined && animSprite.texture_path) {
+        const el = new Image();
+        el.onload = () => imgCache.set(animSprite.texture_path, el);
+        el.onerror = () => imgCache.set(animSprite.texture_path, null);
+        imgCache.set(animSprite.texture_path, null); // mark as loading
+        el.src = animSprite.texture_path.startsWith("/") ? animSprite.texture_path : `http://localhost:7878/assets/${animSprite.texture_path}`;
+        img = null;
+      }
+
+      if (img) {
+        const sx2 = col * uvW * img.naturalWidth;
+        const sy2 = row * uvH * img.naturalHeight;
+        const sw = uvW * img.naturalWidth;
+        const sh = uvH * img.naturalHeight;
+        if (animSprite.flip_x || animSprite.flip_y) {
+          ctx.scale(animSprite.flip_x ? -1 : 1, animSprite.flip_y ? -1 : 1);
+        }
+        const t = animSprite.tint;
+        ctx.globalAlpha = t[3];
+        ctx.drawImage(img, sx2, sy2, sw, sh, -screenW / 2, -screenH / 2, screenW, screenH);
+        ctx.globalAlpha = 1;
+      } else {
+        // Fallback: tinted placeholder
+        const t = animSprite.tint;
+        ctx.fillStyle = `rgba(${Math.round(t[0]*255)},${Math.round(t[1]*255)},${Math.round(t[2]*255)},0.25)`;
+        ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
+      }
+    } else {
+      ctx.fillStyle = "rgba(77,166,255,0.25)";
+      ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
+    }
+  } else {
+    // Regular sprite or placeholder fill
+    const color = sprite
+      ? `rgba(${Math.round(sprite.color[0]*255)},${Math.round(sprite.color[1]*255)},${Math.round(sprite.color[2]*255)},${(sprite.color[3]*0.5).toFixed(2)})`
+      : "rgba(77,166,255,0.25)";
+    ctx.fillStyle = color;
+    ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
+  }
 
   // Entity outline
-  ctx.strokeStyle = isSelected ? SELECTED_COLOR : (sprite ? `rgba(${Math.round(sprite.color[0] * 255)},${Math.round(sprite.color[1] * 255)},${Math.round(sprite.color[2] * 255)},0.9)` : ENTITY_COLOR);
+  const outlineColor = isSelected
+    ? SELECTED_COLOR
+    : sprite ? `rgba(${Math.round(sprite.color[0]*255)},${Math.round(sprite.color[1]*255)},${Math.round(sprite.color[2]*255)},0.9)`
+    : ENTITY_COLOR;
+  ctx.strokeStyle = outlineColor;
   ctx.lineWidth = isSelected ? 2 : 1;
   ctx.strokeRect(-screenW / 2, -screenH / 2, screenW, screenH);
   ctx.restore();

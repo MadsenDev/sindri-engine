@@ -257,7 +257,20 @@ if phys == nil then return end   -- nil if entity has no PhysicsBody component
 phys:velocity()                  -- Vec2: current linear velocity
 phys:set_velocity(vec2(vx, vy)) -- directly set linear velocity
 phys:apply_impulse(vec2(ix,iy)) -- add an instantaneous impulse
+phys:contacts()                  -- table of entity name strings currently touching this entity
 ```
+
+### Global `entity_transform(name)`
+
+```lua
+local t = entity_transform("Player")   -- returns {x, y, rotation} or nil if not found
+if t then
+    local dx = t.x - self.x
+    local dy = t.y - self.y
+end
+```
+
+Returns a snapshot table `{x: float, y: float, rotation: float}` for the named entity based on the scene state at the start of the current frame. Returns `nil` if no entity with that name exists.
 
 ### SpriteFacet — `self:sprite()`
 

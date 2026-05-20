@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum Component {
     Transform(Transform),
     Sprite(Sprite),
+    AnimatedSprite(AnimatedSprite),
     PhysicsBody(PhysicsBody),
     Collider(Collider),
     Script(Script),
@@ -122,6 +123,72 @@ fn default_camera_zoom() -> f32 {
 
 fn default_camera_smoothing() -> f32 {
     1.0
+}
+
+/// A named animation clip: a contiguous range of frames on the spritesheet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimClip {
+    /// Identifier used from Lua: `anim:play("walk")`
+    pub name: String,
+    /// First frame index (0-based, row-major order on the spritesheet)
+    pub start_frame: u32,
+    /// Last frame index (inclusive)
+    pub end_frame: u32,
+    /// Frames per second
+    pub fps: f32,
+    pub looping: bool,
+}
+
+impl AnimClip {
+    pub fn frame_duration(&self) -> f32 {
+        if self.fps > 0.0 { 1.0 / self.fps } else { 0.1 }
+    }
+    pub fn frame_count(&self) -> u32 {
+        self.end_frame.saturating_sub(self.start_frame) + 1
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimatedSprite {
+    pub texture_path: String,
+    /// Number of columns in the spritesheet grid
+    pub cols: u32,
+    /// Number of rows in the spritesheet grid
+    pub rows: u32,
+    /// Display width in world units
+    pub width: f32,
+    /// Display height in world units
+    pub height: f32,
+    pub flip_x: bool,
+    pub flip_y: bool,
+    pub tint: [f32; 4],
+    /// Named animation clips referencing frame ranges on the spritesheet
+    pub clips: Vec<AnimClip>,
+    /// Name of the clip to play on start
+    pub default_clip: String,
+}
+
+impl Default for AnimatedSprite {
+    fn default() -> Self {
+        Self {
+            texture_path: String::new(),
+            cols: 4,
+            rows: 1,
+            width: 64.0,
+            height: 64.0,
+            flip_x: false,
+            flip_y: false,
+            tint: [1.0, 1.0, 1.0, 1.0],
+            clips: vec![AnimClip {
+                name: "idle".to_string(),
+                start_frame: 0,
+                end_frame: 3,
+                fps: 10.0,
+                looping: true,
+            }],
+            default_clip: "idle".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1076,9 +1076,11 @@ Rules:
 - Sindri script API summary: hooks are `on_start(self)` / `on_update(self, dt)`. Key facets: `self:input()` → InputFacet, `self:transform()` → TransformFacet|nil, `self:physics()` → PhysicsFacet|nil, `self:sprite()` → SpriteFacet|nil. Global: `vec2(x,y)`.
 - InputFacet: `input:is_key_down("A")`, `input:is_key_pressed("Space")`, `input:axis("A","D")` → -1..1. Key names: single letters `"A"`–`"Z"`, arrows `"Left"` `"Right"` `"Up"` `"Down"`, `"Space"`, `"Enter"`, `"Escape"`.
 - TransformFacet: `t:position()` → Vec2, `t:set_position(vec2(x,y))`, `t:set_rotation(r)`, `t:set_scale(vec2(sx,sy))`. Always nil-check: `local t = self:transform(); if t == nil then return end`.
-- PhysicsFacet: `p:velocity()` → Vec2, `p:set_velocity(vec2(vx,vy))`, `p:apply_impulse(vec2(ix,iy))`. Nil if entity has no PhysicsBody component.
+- PhysicsFacet: `p:velocity()` → Vec2, `p:set_velocity(vec2(vx,vy))`, `p:apply_impulse(vec2(ix,iy))`, `p:contacts()` → table of entity name strings currently touching this entity (e.g. `{{"Player","Ground"}}`). Nil if entity has no PhysicsBody component.
+- Global `entity_transform(name)` → `{{x, y, rotation}}` or nil. Returns the named entity's transform as a snapshot for this frame. Example: `local t = entity_transform("Drone"); if t then local dx = t.x - self.x end`.
 - SpriteFacet: `spr:set_tint({{r,g,b,a}})`, `spr:set_visible(bool)`. Nil if no Sprite component.
 - Correct platformer movement: `local h = input:axis("A","D"); phys:set_velocity(vec2(h * speed, phys:velocity().y))`
+- ATTACH/FOLLOW PATTERN — to ride/follow another entity, use `contacts()` to detect the touch, then `entity_transform("Name")` to get its position/rotation: `local contacts = self:physics():contacts(); for _, name in ipairs(contacts) do if name == "Drone" then local dt = entity_transform("Drone"); if dt then self:transform():set_rotation(dt.rotation); self:transform():set_position(vec2(dt.x, dt.y - 32)); end end end`
 - WRONG (do not use): `love.keyboard.isDown`, `Input.GetKey`, `key_down()` global, `self.x`/`self.y` field access, `self:move_and_slide()`
 - When the user asks you to make an entity do something with scripting, use `attach_script` — it writes the file AND wires up the Script component in one action. Also add a Transform component if the entity doesn't have one.
 - When the user explicitly references an existing script file like `#scripts/beacon.lua`, prefer a `write_script` action that edits that file directly instead of unrelated scene actions.
@@ -1284,6 +1286,8 @@ Rules:
 - Physics needs both PhysicsBody and Collider. body_type: "Dynamic" (players/enemies), "Fixed" (ground/walls), "Kinematic" (scripted platforms). lock_rotation=true for platformer players.
 - Supported component types: Transform, Sprite, PhysicsBody, Collider, Script, Camera, AudioSource.
 - Scripts use the REAL Sindri Lua API — NOT globals like key_down(). Use: self:input():is_key_down("A"), self:transform():set_position(vec2(x,y)), self:physics():set_velocity(vec2(vx,vy)), self:sprite():set_tint({{r,g,b,a}}). Always nil-check facets before use.
+- Cross-entity queries: `entity_transform("Name")` → `{{x, y, rotation}}` or nil (snapshot from this frame). `self:physics():contacts()` → array of entity name strings currently touching this entity's collider.
+- ATTACH/FOLLOW PATTERN — to make entity A ride/follow entity B: in A's script, check `self:physics():contacts()` for B's name, then use `entity_transform("B")` to read B's position/rotation, then `self:transform():set_position(...)` and `self:transform():set_rotation(...)` to snap A onto B with an offset. Example: `local contacts = self:physics():contacts(); for _, name in ipairs(contacts) do if name == "Drone" then local dt_b = entity_transform("Drone"); if dt_b then self:transform():set_rotation(dt_b.rotation); self:transform():set_position(vec2(dt_b.x, dt_b.y - 32)); end end end`
 - PLAYER TEMPLATE — "actions" must include: create_entity, add+patch Transform, add+patch Sprite (color/size), add+patch PhysicsBody (Dynamic, lock_rotation true), add+patch Collider (same size as sprite), attach_script with full Lua movement code.
 - Return ONLY the JSON object."#,
         engine_ref = engine_ref,
@@ -1597,10 +1601,15 @@ async fn read_script_backup(client: &reqwest::Client, path: &str) -> ScriptBacku
 }
 
 fn looks_like_edit_request(message: &str) -> bool {
+    // Any message with an @entity mention is always an edit request.
+    if message.contains('@') {
+        return true;
+    }
     let lower = message.to_lowercase();
     [
         "add ", "make ", "create ", "update ", "change ", "fix ", "remove ", "delete ",
         "attach ", "write ", "set ", "move ", "rename ", "jump", "script",
+        "connect", "rotate with", "follow", "can you",
     ]
     .iter()
     .any(|needle| lower.contains(needle))

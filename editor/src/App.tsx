@@ -65,9 +65,18 @@ export interface Entity {
   components: Component[];
 }
 
+export interface AnimClip {
+  name: string;
+  start_frame: number;
+  end_frame: number;
+  fps: number;
+  looping: boolean;
+}
+
 export type Component =
   | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
   | { type: "Sprite"; texture_path: string; width: number; height: number; flip_x: boolean; flip_y: boolean; color: [number, number, number, number] }
+  | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; flip_x: boolean; flip_y: boolean; tint: [number, number, number, number]; clips: AnimClip[]; default_clip: string }
   | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number }
   | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number; is_trigger: boolean }
   | { type: "Script"; path: string }

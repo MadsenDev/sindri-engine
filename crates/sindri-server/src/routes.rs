@@ -590,6 +590,7 @@ pub async fn add_component(
             flip_y: false,
             color: [1.0, 1.0, 1.0, 1.0],
         }),
+        "AnimatedSprite" => Component::AnimatedSprite(AnimatedSprite::default()),
         "PhysicsBody" => Component::PhysicsBody(PhysicsBody {
             body_type: BodyType::Dynamic,
             lock_rotation: false,
@@ -672,6 +673,7 @@ pub async fn remove_component(
                 let type_name = match c {
                     sindri::component::Component::Transform(_) => "Transform",
                     sindri::component::Component::Sprite(_) => "Sprite",
+                    sindri::component::Component::AnimatedSprite(_) => "AnimatedSprite",
                     sindri::component::Component::PhysicsBody(_) => "PhysicsBody",
                     sindri::component::Component::Collider(_) => "Collider",
                     sindri::component::Component::Script(_) => "Script",
@@ -910,6 +912,26 @@ pub async fn patch_component(
                 patched_camera = true;
             }
             result
+        }
+        sindri::component::Component::AnimatedSprite(a) => {
+            patch_string(&body, "texture_path", &mut a.texture_path)
+                .and_then(|_| patch_u32(&body, "cols", &mut a.cols))
+                .and_then(|_| patch_u32(&body, "rows", &mut a.rows))
+                .and_then(|_| patch_f32(&body, "width", &mut a.width))
+                .and_then(|_| patch_f32(&body, "height", &mut a.height))
+                .and_then(|_| patch_bool(&body, "flip_x", &mut a.flip_x))
+                .and_then(|_| patch_bool(&body, "flip_y", &mut a.flip_y))
+                .and_then(|_| patch_color(&body, "tint", &mut a.tint))
+                .and_then(|_| patch_string(&body, "default_clip", &mut a.default_clip))
+                .and_then(|_| {
+                    if let Some(clips_val) = body.get("clips") {
+                        let clips: Vec<sindri::component::AnimClip> =
+                            serde_json::from_value(clips_val.clone())
+                                .map_err(|e| format!("invalid clips: {e}"))?;
+                        a.clips = clips;
+                    }
+                    Ok(())
+                })
         }
         sindri::component::Component::AudioSource(a) => patch_string(&body, "path", &mut a.path)
             .and_then(|_| patch_f32(&body, "volume", &mut a.volume))

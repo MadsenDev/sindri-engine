@@ -39,6 +39,9 @@ enum SceneCommand {
     SetTransformRotation(f32),
     SetTransformScale { x: f32, y: f32 },
     SetSpriteTint([f32; 4]),
+    AnimPlay(String),
+    AnimSetFlipX(bool),
+    AnimSetFlipY(bool),
 }
 
 fn resolve_script_path(scripts_root: &Path, script_path: &str) -> PathBuf {
@@ -135,6 +138,31 @@ fn apply_scene_commands(scene: &mut Scene, entity_id: u64, commands: Vec<SceneCo
                     sprite.color = color;
                 }
             }
+            SceneCommand::AnimPlay(_) | SceneCommand::AnimSetFlipX(_) | SceneCommand::AnimSetFlipY(_) => {
+                // Handled by apply_anim_commands — should not reach here
+            }
+        }
+    }
+}
+
+fn apply_anim_commands(anim_states: &mut HashMap<u64, AnimState>, entity_id: u64, commands: &[SceneCommand]) {
+    for command in commands {
+        match command {
+            SceneCommand::AnimPlay(name) => {
+                if let Some(state) = anim_states.get_mut(&entity_id) {
+                    state.current_clip = name.clone();
+                    state.frame = 0;
+                    state.timer = 0.0;
+                    state.playing = true;
+                }
+            }
+            SceneCommand::AnimSetFlipX(v) => {
+                if let Some(state) = anim_states.get_mut(&entity_id) { state.flip_x = *v; }
+            }
+            SceneCommand::AnimSetFlipY(v) => {
+                if let Some(state) = anim_states.get_mut(&entity_id) { state.flip_y = *v; }
+            }
+            _ => {}
         }
     }
 }
@@ -266,6 +294,15 @@ fn normalize_camera_activity(scene: &mut Scene) {
     }
 }
 
+pub struct AnimState {
+    pub current_clip: String,
+    pub frame: usize,
+    pub timer: f32,
+    pub playing: bool,
+    pub flip_x: bool,
+    pub flip_y: bool,
+}
+
 pub struct LuaRuntime {
     lua: Lua,
     envs: HashMap<(u64, String), mlua::RegistryKey>,
@@ -279,6 +316,8 @@ pub struct LuaRuntime {
     errors: SharedErrors,
     // Velocity cache for script access — keyed by entity id
     pub velocities: HashMap<u64, (f32, f32)>,
+    // Animation state per entity
+    pub anim_states: HashMap<u64, AnimState>,
     physics: PhysicsWorld,
     physics_initialized: bool,
 }
@@ -345,6 +384,7 @@ impl LuaRuntime {
             prev_keys: HashSet::new(),
             errors,
             velocities: HashMap::new(),
+            anim_states: HashMap::new(),
             physics: PhysicsWorld::new(),
             physics_initialized: false,
         })
@@ -670,13 +710,27 @@ impl LuaRuntime {
             self.physics_initialized = true;
         }
 
+        // Push scene transforms → Rapier for kinematic bodies (script-driven position).
+        for (entity_id, entity) in scene.entities.iter() {
+            let eid = EntityId(*entity_id as u32);
+            if !matches!(self.physics.body_type(eid), Some(PhysicsBodyType::Kinematic)) {
+                continue;
+            }
+            let Some(t) = entity.components.iter().find_map(|c| {
+                if let Component::Transform(t) = c { Some(t) } else { None }
+            }) else { continue };
+            self.physics.set_body_position(eid, Vec2::new(t.x, t.y));
+            self.physics.set_body_rotation(eid, t.rotation);
+        }
+
         self.physics.step(dt);
 
-        // Sync Rapier positions → scene transforms for non-fixed bodies
+        // Sync Rapier positions → scene transforms for dynamic bodies only.
+        // Fixed and kinematic bodies have their transforms managed elsewhere.
         for (entity_id, entity) in scene.entities.iter_mut() {
             let eid = EntityId(*entity_id as u32);
             let Some(pos) = self.physics.body_position(eid) else { continue };
-            if matches!(self.physics.body_type(eid), Some(PhysicsBodyType::Fixed)) {
+            if !matches!(self.physics.body_type(eid), Some(PhysicsBodyType::Dynamic)) {
                 continue;
             }
             for comp in &mut entity.components {
@@ -710,14 +764,17 @@ impl LuaRuntime {
             });
             let has_script = entity.components.iter().any(|c| matches!(c, Component::Script(_)));
 
-            // Only register in Rapier if explicitly dynamic, or if it's a static object (no script)
-            if physics_body.is_none() && has_script { continue; }
-
-            let body_type = physics_body.map(|p| match p.body_type {
-                BodyType::Dynamic => PhysicsBodyType::Dynamic,
-                BodyType::Kinematic => PhysicsBodyType::Kinematic,
-                BodyType::Fixed => PhysicsBodyType::Fixed,
-            }).unwrap_or(PhysicsBodyType::Fixed);
+            // Script-driven entities with a collider become kinematic so they participate
+            // in collision detection while their position is owned by the script.
+            let body_type = match physics_body {
+                Some(p) => match p.body_type {
+                    BodyType::Dynamic => PhysicsBodyType::Dynamic,
+                    BodyType::Kinematic => PhysicsBodyType::Kinematic,
+                    BodyType::Fixed => PhysicsBodyType::Fixed,
+                },
+                None if has_script => PhysicsBodyType::Kinematic,
+                None => PhysicsBodyType::Fixed,
+            };
 
             let eid = EntityId(*entity_id as u32);
             let pos = Vec2::new(transform.x, transform.y);
@@ -757,6 +814,48 @@ impl LuaRuntime {
         self.update_key_globals(keys);
         self.elapsed += dt as f64;
         let elapsed = self.elapsed;
+
+        // Snapshot entity name → (id, x, y, rotation) for cross-entity queries.
+        let entity_snapshot: std::sync::Arc<HashMap<String, (u64, f32, f32, f32)>> = {
+            let map: HashMap<String, (u64, f32, f32, f32)> = scene.entities.iter().map(|(id, e)| {
+                let (x, y, rot) = e.components.iter().find_map(|c| {
+                    if let Component::Transform(t) = c { Some((t.x, t.y, t.rotation)) } else { None }
+                }).unwrap_or((0.0, 0.0, 0.0));
+                (e.name.clone(), (*id, x, y, rot))
+            }).collect();
+            std::sync::Arc::new(map)
+        };
+
+        // Snapshot contacts: entity_id → Vec<touching entity names>
+        let contacts_snapshot: HashMap<u64, Vec<String>> = if self.physics_initialized {
+            scene.entities.keys().map(|&eid| {
+                let names = self.physics.active_contacts(EntityId(eid as u32))
+                    .into_iter()
+                    .filter_map(|c| scene.entities.get(&(c.0 as u64)).map(|e| e.name.clone()))
+                    .collect();
+                (eid, names)
+            }).collect()
+        } else {
+            HashMap::new()
+        };
+
+        // Register entity_transform(name) global for this frame.
+        {
+            let snap = entity_snapshot.clone();
+            if let Ok(f) = self.lua.create_function(move |lua, name: String| {
+                if let Some(&(_, x, y, rot)) = snap.get(&name) {
+                    let t = lua.create_table()?;
+                    t.set("x", x as f64)?;
+                    t.set("y", y as f64)?;
+                    t.set("rotation", rot as f64)?;
+                    Ok(mlua::Value::Table(t))
+                } else {
+                    Ok(mlua::Value::Nil)
+                }
+            }) {
+                let _ = self.lua.globals().set("entity_transform", f);
+            }
+        }
 
         // Collect entity ids to avoid borrow issues
         let entity_ids: Vec<u64> = scene.entities.keys().cloned().collect();
@@ -805,6 +904,37 @@ impl LuaRuntime {
                 }
             });
             let has_physics = entity.components.iter().any(|c| matches!(c, Component::PhysicsBody(_)));
+            let anim_comp = entity.components.iter().find_map(|c| {
+                if let Component::AnimatedSprite(a) = c { Some(a.clone()) } else { None }
+            });
+
+            // Advance animation state
+            if let Some(ref anim) = anim_comp {
+                let state = self.anim_states.entry(entity_id).or_insert_with(|| AnimState {
+                    current_clip: anim.default_clip.clone(),
+                    frame: 0,
+                    timer: 0.0,
+                    playing: true,
+                    flip_x: anim.flip_x,
+                    flip_y: anim.flip_y,
+                });
+                if state.playing {
+                    if let Some(clip) = anim.clips.iter().find(|c| c.name == state.current_clip)
+                        .or_else(|| anim.clips.first())
+                    {
+                        let frame_dur = if clip.fps > 0.0 { 1.0 / clip.fps } else { 0.1 };
+                        let frame_count = (clip.end_frame.saturating_sub(clip.start_frame) + 1) as usize;
+                        state.timer += dt as f32;
+                        while state.timer >= frame_dur {
+                            state.timer -= frame_dur;
+                            state.frame += 1;
+                            if state.frame >= frame_count {
+                                if clip.looping { state.frame = 0; } else { state.frame = frame_count.saturating_sub(1); state.playing = false; }
+                            }
+                        }
+                    }
+                }
+            }
 
             for script_path in script_paths {
                 if script_path.is_empty() {
@@ -947,6 +1077,10 @@ impl LuaRuntime {
                 let vel_cell: Arc<std::sync::Mutex<(f32, f32)>> = Arc::new(std::sync::Mutex::new(
                     self.velocities.get(&entity_id).copied().unwrap_or((0.0, 0.0)),
                 ));
+                let entity_contacts: Vec<String> = contacts_snapshot
+                    .get(&entity_id)
+                    .cloned()
+                    .unwrap_or_default();
                 {
                     let vel_for_physics = vel_cell.clone();
                     let phys_fn = if has_physics {
@@ -973,6 +1107,14 @@ impl LuaRuntime {
                                 vel.0 += ix;
                                 vel.1 += iy;
                                 Ok(())
+                            })?)?;
+                            let contacts = entity_contacts.clone();
+                            tbl.set("contacts", lua.create_function(move |lua, _: Table| {
+                                let t = lua.create_table()?;
+                                for (i, name) in contacts.iter().enumerate() {
+                                    t.set(i + 1, name.as_str())?;
+                                }
+                                Ok(t)
                             })?)?;
                             Ok(Some(tbl))
                         })
@@ -1007,6 +1149,59 @@ impl LuaRuntime {
                         Err(e) => self.report_error(format!(
                             "[lua] camera method error ({script_path}): {e}"
                         )),
+                    }
+                }
+
+                // animated_sprite() facet
+                {
+                    let anim_for_facet = anim_comp.clone();
+                    let anim_state_snap = self.anim_states.get(&entity_id).map(|s| (
+                        s.current_clip.clone(), s.frame, s.playing, s.flip_x, s.flip_y,
+                    ));
+                    let scene_cmds = scene_commands.clone();
+                    let anim_fn = if let (Some(anim), Some((cur_clip, cur_frame, playing, flip_x, flip_y))) = (anim_for_facet, anim_state_snap) {
+                        self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                            let tbl = lua.create_table()?;
+                            let clips = anim.clips.clone();
+                            let default_clip = cur_clip.clone();
+                            let cmds = scene_cmds.clone();
+                            tbl.set("current_clip", lua.create_function(move |_, _: Table| {
+                                Ok(default_clip.clone())
+                            })?)?;
+                            tbl.set("current_frame", cur_frame as u32)?;
+                            tbl.set("playing", playing)?;
+                            tbl.set("flip_x", flip_x)?;
+                            tbl.set("flip_y", flip_y)?;
+                            // play(clip_name) — switch clip; resets frame to 0
+                            let cmds2 = cmds.clone();
+                            let clips2 = clips.clone();
+                            tbl.set("play", lua.create_function(move |_, (_this, name): (Table, String)| {
+                                if clips2.iter().any(|c| c.name == name) {
+                                    cmds2.lock().unwrap().push(SceneCommand::AnimPlay(name));
+                                }
+                                Ok(())
+                            })?)?;
+                            // set_flip_x / set_flip_y
+                            let cmds3 = cmds.clone();
+                            tbl.set("set_flip_x", lua.create_function(move |_, (_this, v): (Table, bool)| {
+                                cmds3.lock().unwrap().push(SceneCommand::AnimSetFlipX(v));
+                                Ok(())
+                            })?)?;
+                            let cmds4 = cmds.clone();
+                            tbl.set("set_flip_y", lua.create_function(move |_, (_this, v): (Table, bool)| {
+                                cmds4.lock().unwrap().push(SceneCommand::AnimSetFlipY(v));
+                                Ok(())
+                            })?)?;
+                            Ok(Some(tbl))
+                        })
+                    } else {
+                        self.lua.create_function(|_, _: mlua::MultiValue| {
+                            Ok::<Option<Table>, mlua::Error>(None)
+                        })
+                    };
+                    match anim_fn {
+                        Ok(f) => { let _ = self_tbl.set("animated_sprite", f); }
+                        Err(e) => self.report_error(format!("[lua] animated_sprite method error ({script_path}): {e}")),
                     }
                 }
 
@@ -1099,6 +1294,7 @@ impl LuaRuntime {
                     .map(|mut commands| std::mem::take(&mut *commands))
                     .unwrap_or_default();
                 if !scene_commands.is_empty() {
+                    apply_anim_commands(&mut self.anim_states, entity_id, &scene_commands);
                     apply_scene_commands(scene, entity_id, scene_commands);
                 }
             }

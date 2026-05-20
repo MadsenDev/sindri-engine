@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene, Entity, ProposalData, AiModelConfig, AiModelRole } from "../App";
 import { KbdKey } from "../App";
@@ -47,7 +47,7 @@ function loadMessages(projectPath: string): Message[] {
 
 export default function CmdK({
   scene, projectPath, openScript, modelConfig, selectedProvider,
-  projectFiles: _projectFiles, runtimeErrors: _runtimeErrors,
+  projectFiles, runtimeErrors: _runtimeErrors,
   onSceneChange: _onSceneChange, onClose, selectedEntity,
   onProposalReady, initialMessage, initialInput,
 }: Props) {
@@ -55,13 +55,19 @@ export default function CmdK({
   const [input, setInput] = useState(initialInput ?? "");
   const [thinking, setThinking] = useState(false);
   const [activeFlags] = useState<Set<ContextFlag>>(new Set(["scene"]));
+
+  // Mention autocomplete state
+  const [mentionType, setMentionType] = useState<"@" | "#" | null>(null);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState(-1);
+  const [mentionIndex, setMentionIndex] = useState(0);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoSentRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
-    // Move cursor to end of pre-filled text
     const el = inputRef.current;
     if (el && initialInput) {
       el.setSelectionRange(el.value.length, el.value.length);
@@ -71,6 +77,82 @@ export default function CmdK({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, thinking]);
+
+  // Compute autocomplete suggestions
+  const mentionSuggestions = useMemo(() => {
+    if (mentionType === "@") {
+      const entities = scene ? Object.values(scene.entities) : [];
+      return entities
+        .map(e => e.name)
+        .filter(name => name.toLowerCase().startsWith(mentionQuery.toLowerCase()));
+    }
+    if (mentionType === "#") {
+      const q = mentionQuery.toLowerCase();
+      return projectFiles
+        .filter(f => f.kind === "script" || f.path.endsWith(".lua"))
+        .map(f => f.path)
+        .filter(p => q === "" || p.toLowerCase().includes(q));
+    }
+    return [];
+  }, [mentionType, mentionQuery, scene, projectFiles]);
+
+  // Entities mentioned via @Name in the input
+  const mentionedEntities = useMemo(() => {
+    if (!scene) return [];
+    const matches = [...input.matchAll(/@([\w]+)/g)];
+    return matches
+      .map(m => Object.values(scene.entities).find(e => e.name === m[1]))
+      .filter((e): e is Entity => e !== undefined)
+      .filter(e => e.id !== selectedEntity?.id);
+  }, [input, scene, selectedEntity]);
+
+  // Files mentioned via #path in the input
+  const mentionedFiles = useMemo(() => {
+    const matches = [...input.matchAll(/#([^\s]+)/g)];
+    return matches.map(m => m[1]);
+  }, [input]);
+
+  const detectMention = (val: string, cursor: number) => {
+    let i = cursor - 1;
+    while (i >= 0 && val[i] !== " " && val[i] !== "\n" && val[i] !== "@" && val[i] !== "#") i--;
+    if (i >= 0 && (val[i] === "@" || val[i] === "#")) {
+      const query = val.slice(i + 1, cursor);
+      if (!query.includes(" ")) {
+        setMentionType(val[i] as "@" | "#");
+        setMentionQuery(query);
+        setMentionStart(i);
+        setMentionIndex(0);
+        return;
+      }
+    }
+    setMentionType(null);
+    setMentionQuery("");
+    setMentionStart(-1);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    detectMention(val, e.target.selectionStart ?? val.length);
+  };
+
+  const insertMention = (value: string) => {
+    const before = input.slice(0, mentionStart);
+    const after = input.slice(mentionStart + 1 + mentionQuery.length);
+    const tag = mentionType + value;
+    const newInput = before + tag + " " + after.trimStart();
+    setInput(newInput);
+    setMentionType(null);
+    setMentionQuery("");
+    setMentionStart(-1);
+    setTimeout(() => {
+      if (inputRef.current) {
+        const pos = before.length + tag.length + 1;
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(pos, pos);
+      }
+    }, 0);
+  };
 
   const callAI = async (message: string, currentMessages: Message[]): Promise<Message[]> => {
     const scriptContext = await resolveScriptContext(message, scene, selectedEntity, openScript, activeFlags);
@@ -117,6 +199,7 @@ export default function CmdK({
     const text = (textOverride ?? input).trim();
     if (!text || thinking) return;
     setInput("");
+    setMentionType(null);
 
     const userMsg: Message = { role: "user", text };
     const nextMessages = [...messages, userMsg];
@@ -143,7 +226,11 @@ export default function CmdK({
   const ctxChips = [
     { kind: "scene", text: scene?.name ?? "scene" },
     ...(selectedEntity ? [{ kind: "entity", text: `@${selectedEntity.name}` }] : []),
+    ...mentionedEntities.map(e => ({ kind: "entity", text: `@${e.name}` })),
+    ...mentionedFiles.map(f => ({ kind: "file", text: `#${f.split("/").pop()}` })),
   ];
+
+  const dropdownOpen = mentionType !== null && mentionSuggestions.length > 0;
 
   return (
     <div
@@ -168,32 +255,87 @@ export default function CmdK({
         onClick={e => e.stopPropagation()}
       >
         {/* Input row */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "12px",
-          padding: "18px 22px 16px",
-          borderBottom: "1px solid var(--rule)",
-        }}>
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-            <path d="M8 1v14M1 8h14M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="var(--amber)" strokeWidth="1.4" strokeLinecap="square" />
-          </svg>
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-              if (e.key === "Escape") onClose();
-            }}
-            placeholder={`Ask Sindri${selectedEntity ? ` about ${selectedEntity.name}` : " to build something"}…`}
-            style={{
-              flex: 1,
-              background: "none", border: "none", outline: "none",
-              fontFamily: "var(--font-ui)", fontSize: "22px",
-              color: "var(--ink)",
-              lineHeight: 1.1,
-            }}
-          />
-          <KbdKey>esc</KbdKey>
+        <div style={{ position: "relative" }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: "12px",
+            padding: "18px 22px 16px",
+            borderBottom: dropdownOpen ? "none" : "1px solid var(--rule)",
+          }}>
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1v14M1 8h14M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="var(--amber)" strokeWidth="1.4" strokeLinecap="square" />
+            </svg>
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={e => {
+                if (dropdownOpen) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setMentionIndex(i => Math.min(i + 1, mentionSuggestions.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setMentionIndex(i => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    insertMention(mentionSuggestions[mentionIndex]);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setMentionType(null);
+                  }
+                } else {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                  if (e.key === "Escape") onClose();
+                }
+              }}
+              placeholder={`Ask Sindri${selectedEntity ? ` about ${selectedEntity.name}` : " to build something"}…`}
+              style={{
+                flex: 1,
+                background: "none", border: "none", outline: "none",
+                fontFamily: "var(--font-ui)", fontSize: "22px",
+                color: "var(--ink)",
+                lineHeight: 1.1,
+              }}
+            />
+            <KbdKey>esc</KbdKey>
+          </div>
+
+          {/* Autocomplete dropdown */}
+          {dropdownOpen && (
+            <div style={{
+              position: "absolute", left: 0, right: 0, top: "100%",
+              background: "var(--paper)",
+              border: "1px solid var(--rule-2)",
+              borderTop: "1px solid var(--rule)",
+              zIndex: 10,
+              maxHeight: "180px", overflowY: "auto",
+            }}>
+              {mentionSuggestions.map((s, i) => (
+                <div
+                  key={s}
+                  onMouseDown={e => { e.preventDefault(); insertMention(s); }}
+                  style={{
+                    padding: "8px 22px",
+                    fontFamily: "var(--font-mono)", fontSize: "12px",
+                    color: i === mentionIndex ? "var(--ink)" : "var(--ink-3)",
+                    background: i === mentionIndex ? "var(--paper-2, rgba(255,255,255,0.04))" : "transparent",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: "8px",
+                    borderBottom: i < mentionSuggestions.length - 1 ? "1px solid var(--rule)" : "none",
+                  }}
+                  onMouseEnter={() => setMentionIndex(i)}
+                >
+                  <span style={{
+                    color: mentionType === "@" ? "var(--cyan)" : "var(--amber)",
+                    fontSize: "10px",
+                  }}>
+                    {mentionType === "@" ? "entity" : "file"}
+                  </span>
+                  <span>{mentionType}{s}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Context chips */}
@@ -207,17 +349,18 @@ export default function CmdK({
             <span key={i} style={{
               fontSize: "11px", fontFamily: "var(--font-mono)",
               padding: "3px 8px",
-              border: `1px solid ${c.kind === "entity" ? "var(--cyan)" : "var(--rule-2)"}`,
-              color: c.kind === "entity" ? "var(--cyan)" : "var(--ink-3)",
-              background: c.kind === "entity" ? "rgba(109,188,219,0.10)" : "transparent",
+              border: `1px solid ${c.kind === "entity" ? "var(--cyan)" : c.kind === "file" ? "var(--amber)" : "var(--rule-2)"}`,
+              color: c.kind === "entity" ? "var(--cyan)" : c.kind === "file" ? "var(--amber)" : "var(--ink-3)",
+              background: c.kind === "entity" ? "rgba(109,188,219,0.10)" : c.kind === "file" ? "rgba(255,176,0,0.08)" : "transparent",
               display: "inline-flex", gap: "6px", alignItems: "center",
             }}>
               {c.kind === "entity" && <span style={{ width: "5px", height: "5px", background: "var(--cyan)", display: "inline-block" }} />}
+              {c.kind === "file" && <span style={{ width: "5px", height: "5px", background: "var(--amber)", display: "inline-block" }} />}
               {c.text}
             </span>
           ))}
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>
-            + type @ to add context
+            @ entity · # file
           </span>
         </div>
 

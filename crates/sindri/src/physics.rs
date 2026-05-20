@@ -552,6 +552,38 @@ impl PhysicsWorld {
         self.entity_to_body.contains_key(&entity)
     }
 
+    /// Returns all entity IDs currently in active contact with `entity`.
+    pub fn active_contacts(&self, entity: EntityId) -> Vec<EntityId> {
+        let Some(&body_handle) = self.entity_to_body.get(&entity) else {
+            return vec![];
+        };
+        let Some(body) = self.rigid_bodies.get(body_handle) else {
+            return vec![];
+        };
+        let mut result = Vec::new();
+        for &col_handle in body.colliders() {
+            for contact_pair in self.narrow_phase.contacts_with(col_handle) {
+                if !contact_pair.has_any_active_contact {
+                    continue;
+                }
+                let other_col = if contact_pair.collider1 == col_handle {
+                    contact_pair.collider2
+                } else {
+                    contact_pair.collider1
+                };
+                if let Some(other_body_h) = self.colliders.get(other_col).and_then(|c| c.parent()) {
+                    if let Some(&other_entity) = self.body_to_entity.get(&other_body_h) {
+                        if other_entity != entity {
+                            result.push(other_entity);
+                        }
+                    }
+                }
+            }
+        }
+        result.dedup();
+        result
+    }
+
     /// Get linear velocity for an entity's body.
     pub fn linear_velocity(&self, entity: EntityId) -> Option<Vec2> {
         let h = *self.entity_to_body.get(&entity)?;

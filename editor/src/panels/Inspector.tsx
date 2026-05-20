@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Entity, Component } from "../App";
 import { useContextMenu } from "../components/ContextMenu";
+import AnimClipEditor from "../components/AnimClipEditor";
 
 interface AiSuggestion {
   label: string;
@@ -56,13 +57,14 @@ function getAiSuggestions(entity: Entity): AiSuggestion[] {
 }
 
 const COMPONENT_ICON: Record<string, string> = {
-  Transform:   "⌖",
-  Sprite:      "▣",
-  PhysicsBody: "●",
-  Collider:    "⬡",
-  Script:      "⚡",
-  Camera:      "◉",
-  AudioSource: "♪",
+  Transform:      "⌖",
+  Sprite:         "▣",
+  AnimatedSprite: "▶",
+  PhysicsBody:    "●",
+  Collider:       "⬡",
+  Script:         "⚡",
+  Camera:         "◉",
+  AudioSource:    "♪",
 };
 
 interface Props {
@@ -405,8 +407,9 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
         {component.type === "Transform" && (
           <TransformFields comp={component} entityId={entity.id} onSceneChange={onSceneChange} />
         )}
-        {component.type === "Sprite"      && <SpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
-        {component.type === "PhysicsBody" && <PhysicsBodyFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
+        {component.type === "Sprite"          && <SpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
+        {component.type === "AnimatedSprite"  && <AnimatedSpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
+        {component.type === "PhysicsBody"     && <PhysicsBodyFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "Collider"    && <ColliderFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "Script"      && <ScriptField comp={component} entityId={entity.id} componentIdx={componentIdx} onOpenScript={onOpenScript} onSceneChange={onSceneChange} />}
         {component.type === "Camera"      && <CameraFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
@@ -483,6 +486,75 @@ function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
       <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
       <BoolField label="flip y" value={comp.flip_y} onChange={v => patch({ flip_y: v })} />
       <ColorField label="color" value={comp.color} onCommit={v => patch({ color: v })} />
+    </>
+  );
+}
+
+// ─── AnimatedSprite ───────────────────────────────────────────────────────────
+
+function AnimatedSpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
+  comp: Extract<Component, { type: "AnimatedSprite" }>;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
+}) {
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+  const [clipEditorOpen, setClipEditorOpen] = useState(false);
+
+  const browseTexture = async () => {
+    const file = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
+    });
+    if (file) patch({ texture_path: file as string });
+  };
+
+  return (
+    <>
+      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={browseTexture} />
+      <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
+      <NumberInputField label="height" value={comp.height} onCommit={v => patch({ height: v })} />
+      <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
+      <BoolField label="flip y" value={comp.flip_y} onChange={v => patch({ flip_y: v })} />
+      <ColorField label="tint" value={comp.tint} onCommit={v => patch({ tint: v })} />
+
+      {/* Clip summary + open button */}
+      <div style={{ padding: "8px 22px", borderTop: "1px solid var(--rule)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+          <span style={{ fontSize: "11px", color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+            {comp.clips.length} clip{comp.clips.length !== 1 ? "s" : ""}
+            {comp.default_clip ? ` · default: ${comp.default_clip}` : ""}
+          </span>
+          <button onClick={() => setClipEditorOpen(true)} style={{
+            background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
+            fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer",
+          }}>Edit Clips</button>
+        </div>
+        {comp.clips.slice(0, 4).map((c, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", marginBottom: "2px" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: c.name === comp.default_clip ? "var(--amber)" : "var(--ink-3)" }}>
+              {c.name === comp.default_clip ? "★ " : ""}{c.name}
+            </span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
+              {c.start_frame}–{c.end_frame} · {c.fps}fps
+            </span>
+          </div>
+        ))}
+        {comp.clips.length > 4 && (
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
+            +{comp.clips.length - 4} more
+          </span>
+        )}
+      </div>
+
+      {clipEditorOpen && (
+        <AnimClipEditor
+          comp={comp}
+          onClose={() => setClipEditorOpen(false)}
+          onSave={updates => {
+            patch(updates);
+            onSceneChange();
+          }}
+        />
+      )}
     </>
   );
 }
