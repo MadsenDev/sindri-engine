@@ -1147,8 +1147,7 @@ Action block schema — use as many actions as needed in one block:
     {{ "type": "write_script", "path": "scripts/beacon.lua", "content": "function on_update(self, dt)\n  self.rotation = self.rotation + 360 * dt\nend" }},
     // PREFERRED for new script-driven entities: write script + add Script component + set path in one shot
     // IMPORTANT: also add a Transform if the entity doesn't have one
-    {{ "type": "attach_script", "entity_name": "Player", "path": "scripts/player.lua", "content": "function on_update(self, dt)\n  ...\nend" }},
-    {{ "type": "attach_script", "entity_id": 1, "path": "scripts/player.lua", "content": "..." }},
+    {{ "type": "attach_script", "entity_name": "Player", "path": "scripts/player.lua", "content": "function on_update(self, dt)\n  local input = self:input()\n  local pb = self:physics()\n  local spd = 200\n  local vx = 0\n  if input:is_key_down('ArrowLeft') then vx = -spd end\n  if input:is_key_down('ArrowRight') then vx = spd end\n  pb:set_velocity(vec2(vx, pb:get_velocity().y))\nend" }},
 
     // Suggestion (shown as a card for user approval)
     {{ "type": "suggest_fix", "description": "Collider height doesn't match sprite height", "entity_id": 0 }}
@@ -1183,6 +1182,7 @@ Rules:
 - ATTACH/FOLLOW PATTERN — to ride/follow another entity, use `contacts()` to detect the touch, then `entity_transform("Name")` to get its position/rotation: `local contacts = self:physics():contacts(); for _, name in ipairs(contacts) do if name == "Drone" then local dt = entity_transform("Drone"); if dt then self:transform():set_rotation(dt.rotation); self:transform():set_position(vec2(dt.x, dt.y - 32)); end end end`
 - WRONG (do not use): `love.keyboard.isDown`, `Input.GetKey`, `key_down()` global, `self.x`/`self.y` field access, `self:move_and_slide()`
 - When the user asks you to make an entity do something with scripting, use `attach_script` — it writes the file AND wires up the Script component in one action. Also add a Transform component if the entity doesn't have one.
+- CRITICAL: attach_script and write_script MUST include the complete Lua code in "content". Never use "..." as a placeholder — if content is empty or placeholder the action will be rejected and the user will see an error.
 - When the user explicitly references an existing script file like `#scripts/beacon.lua`, prefer a `write_script` action that edits that file directly instead of unrelated scene actions.
 - `patch_component` with `entity_name` + `component_type` is the preferred form. The `entity_id` + `component_idx` form also works but is less readable.
 - Always respond with a brief plain-text explanation first, then the action block.
@@ -1377,10 +1377,11 @@ Action types — use as many as needed in one change's "actions" array:
 {{ "type": "patch_component", "entity_name": "Player", "component_type": "Collider", "data": {{ "width": 28, "height": 40 }} }}
 {{ "type": "remove_component", "entity_id": 1, "component_type": "Script" }}
 {{ "type": "edit_transform", "entity_name": "Player", "x": 400, "y": 260, "scale_x": 1.0, "scale_y": 1.0, "rotation": 0.0 }}
-{{ "type": "write_script", "path": "scripts/player.lua", "content": "..." }}
-{{ "type": "attach_script", "entity_name": "Player", "path": "scripts/player.lua", "content": "..." }}
+{{ "type": "write_script", "path": "scripts/player.lua", "content": "-- FULL script content here, never use '...'" }}
+{{ "type": "attach_script", "entity_name": "Player", "path": "scripts/player.lua", "content": "-- FULL script content here, never use '...'" }}
 
 Rules:
+- CRITICAL: write_script and attach_script MUST include the complete Lua code in "content". Never use "..." or leave it empty. If content is missing or placeholder the action will be rejected and the file will not be written.
 - Use entity_name for entities created in the same change; use entity_id for existing entities.
 - Coordinate system: +X right, +Y down.
 - Physics needs both PhysicsBody and Collider. body_type: "Dynamic" (players/enemies), "Fixed" (ground/walls), "Kinematic" (scripted platforms). lock_rotation=true for platformer players.
@@ -1699,6 +1700,16 @@ async fn read_script_backup(client: &reqwest::Client, path: &str) -> ScriptBacku
             content: String::new(),
         },
     }
+}
+
+fn is_placeholder_content(content: &str) -> bool {
+    let t = content.trim();
+    t.is_empty()
+        || t == "..."
+        || t == "-- ..."
+        || t == "--..."
+        || t.starts_with("-- TODO")
+        || (t.len() < 10 && t.chars().all(|c| c == '.' || c == '-' || c == ' '))
 }
 
 fn looks_like_edit_request(message: &str) -> bool {
@@ -2102,10 +2113,17 @@ pub async fn apply_action(action: serde_json::Value) -> Result<(), String> {
         }
         "write_script" => {
             let path = action["path"].as_str().ok_or("missing path")?;
-            let body = serde_json::json!({ "content": action["content"] });
+            let content = action["content"].as_str().ok_or(
+                "write_script action is missing a 'content' field — the model did not generate script code"
+            )?;
+            if is_placeholder_content(content) {
+                return Err(format!(
+                    "write_script for '{path}' has placeholder content (\"...\"). The model did not return real code. Nothing was written."
+                ));
+            }
             client
                 .put(engine_url(&format!("/script?path={}", path)))
-                .json(&body)
+                .json(&serde_json::json!({ "content": content }))
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
@@ -2181,7 +2199,14 @@ pub async fn apply_action(action: serde_json::Value) -> Result<(), String> {
         "attach_script" => {
             let entity_id = resolve_entity_id(&action, &client).await?;
             let path = action["path"].as_str().ok_or("missing path")?;
-            let content = action["content"].as_str().unwrap_or("");
+            let content = action["content"].as_str().ok_or(
+                "attach_script action is missing a 'content' field — the model did not generate script code"
+            )?;
+            if is_placeholder_content(content) {
+                return Err(format!(
+                    "attach_script for '{path}' has placeholder content (\"...\"). The model did not return real code. Nothing was written."
+                ));
+            }
 
             // Write the file
             client
