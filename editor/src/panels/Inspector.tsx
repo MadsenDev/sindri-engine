@@ -811,13 +811,22 @@ function NumberInputField({ label, value, decimals = 2, min, max, onCommit }: {
   label: string; value: number; decimals?: number; min?: number; max?: number; onCommit: (value: number) => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const commit = (raw: string) => {
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
     let next = Number(raw);
     if (!Number.isFinite(next)) return;
     if (min !== undefined) next = Math.max(min, next);
     if (max !== undefined) next = Math.min(max, next);
     onCommit(next);
   };
+
+  const handleChange = (raw: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { commit(raw); }, 280);
+  };
+
   return (
     <EditableRow label={label}>
       <input
@@ -825,6 +834,7 @@ function NumberInputField({ label, value, decimals = 2, min, max, onCommit }: {
         defaultValue={decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals)}
         onFocus={() => setFocused(true)}
         onBlur={e => { setFocused(false); commit(e.currentTarget.value); }}
+        onChange={e => handleChange(e.currentTarget.value)}
         onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         style={inputStyle(focused)}
       />
