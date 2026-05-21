@@ -292,10 +292,27 @@ function SceneView({
       }
     }
 
-    // — Entities —
+    // — Entities — sorted by z_index for correct depth order
     if (sc) {
+      type DrawItem = { z: number; entityId: number; layerIdx: number | null };
+      const drawList: DrawItem[] = [];
       for (const entity of Object.values(sc.entities)) {
-        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt, gizmosRef.current);
+        const transform = entity.components.find(c => c.type === "Transform") as { type: "Transform"; z_index?: number } | undefined;
+        const baseZ = transform?.z_index ?? 0;
+        const tm = entity.components.find(c => c.type === "Tilemap") as { type: "Tilemap"; layers: { visible: boolean; z_index?: number }[] } | undefined;
+        if (tm) {
+          tm.layers.forEach((layer, idx) => {
+            if (layer.visible) drawList.push({ z: baseZ + (layer.z_index ?? 0), entityId: entity.id, layerIdx: idx });
+          });
+        } else {
+          drawList.push({ z: baseZ, entityId: entity.id, layerIdx: null });
+        }
+      }
+      drawList.sort((a, b) => a.z !== b.z ? a.z - b.z : a.entityId - b.entityId);
+      for (const item of drawList) {
+        const entity = sc.entities[String(item.entityId)];
+        if (!entity) continue;
+        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt, gizmosRef.current, item.layerIdx);
       }
     }
 
@@ -688,6 +705,7 @@ function drawEntity(
   animState?: Map<number, { frame: number; timer: number }>,
   dt?: number,
   gizmos?: boolean,
+  onlyLayerIdx?: number | null,
 ) {
   const transform = entity.components.find(c => c.type === "Transform") as
     | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
@@ -699,7 +717,7 @@ function drawEntity(
     | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; tint: [number,number,number,number]; clips: { name: string; start_frame: number; end_frame: number; fps: number; looping: boolean }[]; default_clip: string; flip_x: boolean; flip_y: boolean }
     | undefined;
   const tilemap = entity.components.find(c => c.type === "Tilemap") as
-    | { type: "Tilemap"; palettes: { name: string; texture_path: string; tileset_cols: number; tileset_rows: number; margin: number; spacing: number; solid_tiles: number[] }[]; layers: { name: string; tiles: number[]; visible: boolean; opacity: number }[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tint: [number,number,number,number] }
+    | { type: "Tilemap"; palettes: { name: string; texture_path: string; tileset_cols: number; tileset_rows: number; margin: number; spacing: number; solid_tiles: number[] }[]; layers: { name: string; tiles: number[]; visible: boolean; opacity: number; z_index?: number }[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tint: [number,number,number,number] }
     | undefined;
   const collider = entity.components.find(c => c.type === "Collider") as
     | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
@@ -761,8 +779,10 @@ function drawEntity(
     const tileDrawW = Math.round(tilePxW);
     const tileDrawH = Math.round(tilePxH);
 
-    // Render all layers bottom-to-top
-    for (const layer of (tilemap.layers ?? [])) {
+    // Render layer(s) — when onlyLayerIdx is set, draw just that one layer
+    const layersToRender = (tilemap.layers ?? []).map((layer, idx) => ({ layer, idx }))
+      .filter(({ layer, idx }) => layer.visible && (onlyLayerIdx == null || idx === onlyLayerIdx));
+    for (const { layer } of layersToRender) {
       if (!layer.visible) continue;
       ctx.globalAlpha = (layer.opacity ?? 1) * tint[3];
       for (let r = 0; r < tilemap.map_rows; r++) {
@@ -795,32 +815,40 @@ function drawEntity(
     }
     ctx.globalAlpha = 1;
 
-    if ((tilemap.layers ?? []).length === 0) {
-      ctx.fillStyle = "rgba(77,120,180,0.20)";
-      ctx.fillRect(0, 0, screenTmW, screenTmH);
-    }
+    // Overlays only draw on the last (or only) layer call to avoid duplication
+    const visibleLayers = (tilemap.layers ?? []).filter(l => l.visible);
+    const isLastLayerCall = onlyLayerIdx == null
+      || onlyLayerIdx === (tilemap.layers ?? []).reduce((last, l, i) => l.visible ? i : last, -1);
 
-    // Solid tile overlay (gizmos) — check all layers
-    if (gizmos) {
-      ctx.fillStyle = "rgba(220,60,60,0.35)";
-      for (const layer of (tilemap.layers ?? [])) {
-        for (let r = 0; r < tilemap.map_rows; r++) {
-          for (let c = 0; c < tilemap.map_cols; c++) {
-            const cell = layer.tiles[r * tilemap.map_cols + c] ?? 0;
-            if (cell === 0) continue;
-            const paletteId = (cell >>> 16) & 0xffff;
-            const tileIdx = cell & 0xffff;
-            if (paletteId === 0) continue;
-            const pal = tilemap.palettes[paletteId - 1];
-            if (pal?.solid_tiles.includes(tileIdx)) ctx.fillRect(c * tilePxW, r * tilePxH, tilePxW, tilePxH);
+    if (isLastLayerCall) {
+      if (visibleLayers.length === 0) {
+        ctx.fillStyle = "rgba(77,120,180,0.20)";
+        ctx.fillRect(0, 0, screenTmW, screenTmH);
+      }
+
+      // Solid tile overlay (gizmos) — check all layers
+      if (gizmos) {
+        ctx.fillStyle = "rgba(220,60,60,0.35)";
+        for (const layer of (tilemap.layers ?? [])) {
+          for (let r = 0; r < tilemap.map_rows; r++) {
+            for (let c = 0; c < tilemap.map_cols; c++) {
+              const cell = layer.tiles[r * tilemap.map_cols + c] ?? 0;
+              if (cell === 0) continue;
+              const paletteId = (cell >>> 16) & 0xffff;
+              const tileIdx = cell & 0xffff;
+              if (paletteId === 0) continue;
+              const pal = tilemap.palettes[paletteId - 1];
+              if (pal?.solid_tiles.includes(tileIdx)) ctx.fillRect(c * tilePxW, r * tilePxH, tilePxW, tilePxH);
+            }
           }
         }
       }
+
+      ctx.strokeStyle = isSelected ? SELECTED_COLOR : "rgba(77,120,180,0.5)";
+      ctx.lineWidth = isSelected ? 2 : 1;
+      ctx.strokeRect(0, 0, screenTmW, screenTmH);
     }
 
-    ctx.strokeStyle = isSelected ? SELECTED_COLOR : "rgba(77,120,180,0.5)";
-    ctx.lineWidth = isSelected ? 2 : 1;
-    ctx.strokeRect(0, 0, screenTmW, screenTmH);
     ctx.restore();
 
     if (isSelected && activeTool && activeTool !== "select") {

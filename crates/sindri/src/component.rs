@@ -21,6 +21,9 @@ pub struct Transform {
     pub scale_x: f32,
     pub scale_y: f32,
     pub rotation: f32,
+    /// Render depth. Lower values draw first (behind). Default 0.
+    #[serde(default)]
+    pub z_index: i32,
 }
 
 impl Default for Transform {
@@ -31,6 +34,7 @@ impl Default for Transform {
             scale_x: 1.0,
             scale_y: 1.0,
             rotation: 0.0,
+            z_index: 0,
         }
     }
 }
@@ -248,6 +252,9 @@ pub struct TileLayer {
     pub visible: bool,
     #[serde(default = "default_layer_opacity")]
     pub opacity: f32,
+    /// Depth offset added to the entity's Transform z_index for this layer.
+    #[serde(default)]
+    pub z_index: i32,
 }
 
 fn default_layer_visible() -> bool { true }
@@ -255,7 +262,7 @@ fn default_layer_opacity() -> f32 { 1.0 }
 
 impl TileLayer {
     pub fn new(name: impl Into<String>, tile_count: usize) -> Self {
-        Self { name: name.into(), tiles: vec![0u32; tile_count], visible: true, opacity: 1.0 }
+        Self { name: name.into(), tiles: vec![0u32; tile_count], visible: true, opacity: 1.0, z_index: 0 }
     }
 }
 

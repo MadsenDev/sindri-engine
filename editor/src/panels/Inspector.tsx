@@ -440,16 +440,17 @@ function TransformFields({ comp, entityId, onSceneChange }: {
   const patch = async (field: string, value: string) => {
     const num = parseFloat(value);
     if (isNaN(num)) return;
-    const map: Record<string, string> = { x: "x", y: "y", scale_x: "scaleX", scale_y: "scaleY", rotation: "rotation" };
-    const args: Record<string, unknown> = { entityId, x: null, y: null, scaleX: null, scaleY: null, rotation: null };
-    args[map[field]] = num;
+    const map: Record<string, string> = { x: "x", y: "y", scale_x: "scaleX", scale_y: "scaleY", rotation: "rotation", z_index: "zIndex" };
+    const args: Record<string, unknown> = { entityId, x: null, y: null, scaleX: null, scaleY: null, rotation: null, zIndex: null };
+    args[map[field]] = field === "z_index" ? Math.round(num) : num;
     try { await invoke("patch_transform", args); onSceneChange(); } catch {}
   };
 
-  const rows: { label: string; fields: { key: string; value: number }[] }[] = [
+  const rows: { label: string; fields: { key: string; value: number; decimals?: number }[] }[] = [
     { label: "position", fields: [{ key: "x", value: comp.x }, { key: "y", value: comp.y }] },
     { label: "scale",    fields: [{ key: "scale_x", value: comp.scale_x }, { key: "scale_y", value: comp.scale_y }] },
     { label: "rotation", fields: [{ key: "rotation", value: comp.rotation }] },
+    { label: "z index",  fields: [{ key: "z_index", value: comp.z_index ?? 0, decimals: 0 }] },
   ];
 
   return (
@@ -460,7 +461,7 @@ function TransformFields({ comp, entityId, onSceneChange }: {
           {row.fields.map(f => (
             <input
               key={f.key}
-              defaultValue={f.value.toFixed(2)}
+              defaultValue={f.value.toFixed(f.decimals ?? 2)}
               onFocus={() => setFocused(f.key)}
               onBlur={e => { setFocused(null); patch(f.key, e.target.value); }}
               onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}

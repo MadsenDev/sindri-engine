@@ -440,6 +440,7 @@ pub struct TransformPatch {
     pub scale_x: Option<f32>,
     pub scale_y: Option<f32>,
     pub rotation: Option<f32>,
+    pub z_index: Option<i32>,
 }
 
 // PATCH /scene/entity/:id/transform
@@ -478,6 +479,9 @@ pub async fn patch_transform(
         if let Some(r) = patch.rotation {
             t.rotation = r;
         }
+        if let Some(z) = patch.z_index {
+            t.z_index = z;
+        }
     } else {
         entity
             .components
@@ -487,6 +491,7 @@ pub async fn patch_transform(
                 scale_x: patch.scale_x.unwrap_or(1.0),
                 scale_y: patch.scale_y.unwrap_or(1.0),
                 rotation: patch.rotation.unwrap_or(0.0),
+                z_index: patch.z_index.unwrap_or(0),
             }));
     }
 
@@ -603,6 +608,7 @@ pub async fn add_component(
             scale_x: 1.0,
             scale_y: 1.0,
             rotation: 0.0,
+            z_index: 0,
         }),
         "Sprite" => Component::Sprite(Sprite {
             texture_path: String::new(),

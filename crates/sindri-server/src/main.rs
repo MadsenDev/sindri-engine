@@ -46,6 +46,7 @@ fn default_scene() -> Scene {
             scale_x: 1.0,
             scale_y: 1.0,
             rotation: 0.0,
+            z_index: 0,
         }),
     );
     scene.add_component(
@@ -330,34 +331,56 @@ fn draw_scene_contents(
 
     let camera = scene_camera(scene, camera_runtime);
 
-    for entity in scene.entities.values() {
-        let transform = entity.components.iter().find_map(|c| {
-            if let Component::Transform(t) = c { Some(t) } else { None }
-        });
-        let sprite = entity.components.iter().find_map(|c| {
-            if let Component::Sprite(s) = c { Some(s) } else { None }
-        });
-        let anim_sprite = entity.components.iter().find_map(|c| {
-            if let Component::AnimatedSprite(s) = c { Some(s) } else { None }
-        });
-        let physics_body = entity.components.iter().find_map(|c| {
-            if let Component::PhysicsBody(body) = c { Some(body) } else { None }
-        });
+    // Collect draw items sorted by (z_index, entity_id) for deterministic render order.
+    // Tilemap layers are separate items: effective z = entity.transform.z_index + layer.z_index.
+    enum DrawKind { Sprite, AnimSprite, TilemapLayer(usize), PhysicsOnly }
+    struct DrawItem { z: i32, entity_id: u64, kind: DrawKind }
 
-        let tilemap = entity.components.iter().find_map(|c| {
+    let mut draw_list: Vec<DrawItem> = Vec::new();
+    for entity in scene.entities.values() {
+        let Some(t) = entity.components.iter().find_map(|c| {
+            if let Component::Transform(t) = c { Some(t) } else { None }
+        }) else { continue };
+
+        let has_sprite  = entity.components.iter().any(|c| matches!(c, Component::Sprite(_)));
+        let has_anim    = entity.components.iter().any(|c| matches!(c, Component::AnimatedSprite(_)));
+        let has_physics = entity.components.iter().any(|c| matches!(c, Component::PhysicsBody(_)));
+        let tilemap     = entity.components.iter().find_map(|c| {
             if let Component::Tilemap(tm) = c { Some(tm) } else { None }
         });
 
-        let Some(t) = transform else { continue };
-        if sprite.is_none() && anim_sprite.is_none() && physics_body.is_none() && tilemap.is_none() {
-            continue;
+        if let Some(tm) = tilemap {
+            for (layer_idx, layer) in tm.layers.iter().enumerate() {
+                if !layer.visible { continue; }
+                draw_list.push(DrawItem {
+                    z: t.z_index + layer.z_index,
+                    entity_id: entity.id,
+                    kind: DrawKind::TilemapLayer(layer_idx),
+                });
+            }
+        } else if has_anim {
+            draw_list.push(DrawItem { z: t.z_index, entity_id: entity.id, kind: DrawKind::AnimSprite });
+        } else if has_sprite {
+            draw_list.push(DrawItem { z: t.z_index, entity_id: entity.id, kind: DrawKind::Sprite });
+        } else if has_physics {
+            draw_list.push(DrawItem { z: t.z_index, entity_id: entity.id, kind: DrawKind::PhysicsOnly });
         }
+    }
+    draw_list.sort_by_key(|item| (item.z, item.entity_id));
 
+    for item in &draw_list {
+        let Some(entity) = scene.entities.get(&item.entity_id) else { continue };
+        let Some(t) = entity.components.iter().find_map(|c| {
+            if let Component::Transform(t) = c { Some(t) } else { None }
+        }) else { continue };
         let pos = Vec2::new(t.x, t.y);
 
-        if let Some(tm) = tilemap {
-            for layer in &tm.layers {
-                if !layer.visible { continue; }
+        match &item.kind {
+            DrawKind::TilemapLayer(layer_idx) => {
+                let Some(tm) = entity.components.iter().find_map(|c| {
+                    if let Component::Tilemap(tm) = c { Some(tm) } else { None }
+                }) else { continue };
+                let Some(layer) = tm.layers.get(*layer_idx) else { continue };
                 let layer_alpha = layer.opacity.clamp(0.0, 1.0) * tm.tint[3];
                 let tint = [tm.tint[0], tm.tint[1], tm.tint[2], layer_alpha];
                 for tile_row in 0..tm.map_rows {
@@ -387,77 +410,85 @@ fn draw_scene_contents(
                     }
                 }
             }
-        } else if let Some(s) = anim_sprite {
-            let (clip_name, runtime_frame, flip_x, flip_y) = if let Some(st) = anim_states.get(&entity.id) {
-                (st.current_clip.as_str(), Some(st.frame as u32), st.flip_x, st.flip_y)
-            } else {
-                (s.default_clip.as_str(), None, s.flip_x, s.flip_y)
-            };
-            let clip = s.clips.iter().find(|c| c.name == clip_name)
-                .or_else(|| s.clips.first());
-            let (start_frame, frame_count, fps) = clip
-                .map(|c| (c.start_frame, (c.end_frame - c.start_frame + 1).max(1), c.fps))
-                .unwrap_or((0, 1, 0.0));
-            let frame_offset = if let Some(f) = runtime_frame {
-                f % frame_count
-            } else {
-                render_state.tick_anim(entity.id, fps, frame_count, dt)
-            };
-            let abs_frame = start_frame + frame_offset;
-            let cols = s.cols.max(1);
-            let rows = s.rows.max(1);
-            let col = abs_frame % cols;
-            let row = abs_frame / cols;
-
-            let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
-                Some((h, tw, th)) => (h, tw as f32, th as f32),
-                None => (white_texture, 1.0, 1.0),
-            };
-            let uv_rect = spritesheet_uv(col, row, cols, rows, s.margin, s.spacing, tex_w, tex_h);
-
-            let transform = Transform2D {
-                position: pos,
-                rotation: t.rotation,
-                // to_matrix multiplies scale * full_tex_size, so divide by full_tex_size here
-                scale: Vec2::new(
-                    s.width * t.scale_x * (if flip_x { -1.0 } else { 1.0 }) / tex_w,
-                    s.height * t.scale_y * (if flip_y { -1.0 } else { 1.0 }) / tex_h,
-                ),
-            };
-            r.draw_texture_region(frame, tex, Some(uv_rect), &transform, s.tint, false, &camera)?;
-        } else if let Some(s) = sprite {
-            let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
-                Some((h, tw, th)) => (h, tw as f32, th as f32),
-                None => (white_texture, 1.0, 1.0),
-            };
-            let transform = Transform2D {
-                position: pos,
-                rotation: t.rotation,
-                scale: Vec2::new(s.width * t.scale_x / tex_w, s.height * t.scale_y / tex_h),
-            };
-            r.draw_texture_region(frame, tex, None, &transform, s.color, false, &camera)?;
-        } else {
-            let (hw, hh, color) = if let Some(body) = physics_body {
-                let color = match body.body_type {
-                    sindri::component::BodyType::Dynamic => [0.0, 1.0, 0.9, 0.85],
-                    sindri::component::BodyType::Kinematic => [1.0, 0.9, 0.0, 0.85],
-                    sindri::component::BodyType::Fixed => [0.0, 1.0, 0.3, 0.85],
+            DrawKind::AnimSprite => {
+                let Some(s) = entity.components.iter().find_map(|c| {
+                    if let Component::AnimatedSprite(s) = c { Some(s) } else { None }
+                }) else { continue };
+                let (clip_name, runtime_frame, flip_x, flip_y) = if let Some(st) = anim_states.get(&entity.id) {
+                    (st.current_clip.as_str(), Some(st.frame as u32), st.flip_x, st.flip_y)
+                } else {
+                    (s.default_clip.as_str(), None, s.flip_x, s.flip_y)
                 };
-                (t.scale_x * 16.0, t.scale_y * 16.0, color)
-            } else {
-                (t.scale_x * 16.0, t.scale_y * 16.0, [0.38, 0.60, 0.93, 0.9])
-            };
-
-            let rect = [
-                Vec2::new(pos.x - hw, pos.y - hh),
-                Vec2::new(pos.x + hw, pos.y - hh),
-                Vec2::new(pos.x + hw, pos.y + hh),
-                Vec2::new(pos.x - hw, pos.y + hh),
-            ];
-            r.draw_polygon(frame, &rect, color, &camera)?;
+                let clip = s.clips.iter().find(|c| c.name == clip_name)
+                    .or_else(|| s.clips.first());
+                let (start_frame, frame_count, fps) = clip
+                    .map(|c| (c.start_frame, (c.end_frame - c.start_frame + 1).max(1), c.fps))
+                    .unwrap_or((0, 1, 0.0));
+                let frame_offset = if let Some(f) = runtime_frame {
+                    f % frame_count
+                } else {
+                    render_state.tick_anim(entity.id, fps, frame_count, dt)
+                };
+                let abs_frame = start_frame + frame_offset;
+                let cols = s.cols.max(1);
+                let rows = s.rows.max(1);
+                let col = abs_frame % cols;
+                let row = abs_frame / cols;
+                let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
+                    Some((h, tw, th)) => (h, tw as f32, th as f32),
+                    None => (white_texture, 1.0, 1.0),
+                };
+                let uv_rect = spritesheet_uv(col, row, cols, rows, s.margin, s.spacing, tex_w, tex_h);
+                let transform = Transform2D {
+                    position: pos,
+                    rotation: t.rotation,
+                    scale: Vec2::new(
+                        s.width * t.scale_x * (if flip_x { -1.0 } else { 1.0 }) / tex_w,
+                        s.height * t.scale_y * (if flip_y { -1.0 } else { 1.0 }) / tex_h,
+                    ),
+                };
+                r.draw_texture_region(frame, tex, Some(uv_rect), &transform, s.tint, false, &camera)?;
+            }
+            DrawKind::Sprite => {
+                let Some(s) = entity.components.iter().find_map(|c| {
+                    if let Component::Sprite(s) = c { Some(s) } else { None }
+                }) else { continue };
+                let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
+                    Some((h, tw, th)) => (h, tw as f32, th as f32),
+                    None => (white_texture, 1.0, 1.0),
+                };
+                let transform = Transform2D {
+                    position: pos,
+                    rotation: t.rotation,
+                    scale: Vec2::new(s.width * t.scale_x / tex_w, s.height * t.scale_y / tex_h),
+                };
+                r.draw_texture_region(frame, tex, None, &transform, s.color, false, &camera)?;
+            }
+            DrawKind::PhysicsOnly => {
+                let physics_body = entity.components.iter().find_map(|c| {
+                    if let Component::PhysicsBody(body) = c { Some(body) } else { None }
+                });
+                let (hw, hh, color) = if let Some(body) = physics_body {
+                    let color = match body.body_type {
+                        sindri::component::BodyType::Dynamic => [0.0, 1.0, 0.9, 0.85],
+                        sindri::component::BodyType::Kinematic => [1.0, 0.9, 0.0, 0.85],
+                        sindri::component::BodyType::Fixed => [0.0, 1.0, 0.3, 0.85],
+                    };
+                    (t.scale_x * 16.0, t.scale_y * 16.0, color)
+                } else {
+                    (t.scale_x * 16.0, t.scale_y * 16.0, [0.38, 0.60, 0.93, 0.9])
+                };
+                let rect = [
+                    Vec2::new(pos.x - hw, pos.y - hh),
+                    Vec2::new(pos.x + hw, pos.y - hh),
+                    Vec2::new(pos.x + hw, pos.y + hh),
+                    Vec2::new(pos.x - hw, pos.y + hh),
+                ];
+                r.draw_polygon(frame, &rect, color, &camera)?;
+            }
         }
 
-        // Gizmo overlays
+        // Gizmo overlays drawn right after each entity
         if gizmos {
             let collider = entity.components.iter().find_map(|c| {
                 if let Component::Collider(col) = c { Some(col) } else { None }

@@ -23,6 +23,7 @@ interface TileLayer {
   tiles: number[];
   visible: boolean;
   opacity: number;
+  z_index: number;
 }
 
 interface TilemapComp {
@@ -80,7 +81,7 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
   const initLayers = () =>
     comp.layers.length > 0
       ? comp.layers.map(l => ({ ...l, tiles: [...l.tiles] }))
-      : [{ name: "Ground", tiles: new Array(comp.map_cols * comp.map_rows).fill(0), visible: true, opacity: 1.0 }];
+      : [{ name: "Ground", tiles: new Array(comp.map_cols * comp.map_rows).fill(0), visible: true, opacity: 1.0, z_index: 0 }];
 
   const [layers, setLayers] = useState<TileLayer[]>(initLayers);
   const [palettes, setPalettes] = useState<TilePalette[]>(() =>
@@ -349,7 +350,7 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
 
   const addLayer = () => {
     const tileCount = comp.map_cols * comp.map_rows;
-    const newLayer: TileLayer = { name: `Layer ${layers.length + 1}`, tiles: new Array(tileCount).fill(0), visible: true, opacity: 1.0 };
+    const newLayer: TileLayer = { name: `Layer ${layers.length + 1}`, tiles: new Array(tileCount).fill(0), visible: true, opacity: 1.0, z_index: 0 };
     const next = [...layers, newLayer];
     setLayers(next);
     setActiveLayerIdx(next.length - 1);
@@ -384,6 +385,12 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
     [next[i], next[j]] = [next[j], next[i]];
     setLayers(next);
     setActiveLayerIdx(j);
+    scheduleSave(next, null);
+  };
+
+  const setLayerZIndex = (i: number, z: number) => {
+    const next = layers.map((l, idx) => idx === i ? { ...l, z_index: z } : l);
+    setLayers(next);
     scheduleSave(next, null);
   };
 
@@ -542,6 +549,15 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
                           {layer.name || `Layer ${i + 1}`}
                         </span>
                       )}
+                      <input
+                        type="number"
+                        title="z-index"
+                        defaultValue={layer.z_index ?? 0}
+                        onClick={e => e.stopPropagation()}
+                        onBlur={e => setLayerZIndex(i, parseInt(e.currentTarget.value) || 0)}
+                        onKeyDown={e => { if (e.key === "Enter") { setLayerZIndex(i, parseInt(e.currentTarget.value) || 0); e.stopPropagation(); } e.stopPropagation(); }}
+                        style={{ width: "36px", fontFamily: "var(--font-mono)", fontSize: "9px", background: "var(--paper-2)", border: "1px solid var(--rule-2)", color: "var(--ink-3)", padding: "1px 3px", textAlign: "center", outline: "none" }}
+                      />
                       <button onClick={e => { e.stopPropagation(); moveLayer(i, 1); }} style={iconBtn} title="Move up">↑</button>
                       <button onClick={e => { e.stopPropagation(); moveLayer(i, -1); }} style={iconBtn} title="Move down">↓</button>
                       <button onClick={e => { e.stopPropagation(); removeLayer(i); }} disabled={layers.length <= 1} style={{ ...iconBtn, opacity: layers.length <= 1 ? 0.2 : 0.6 }} title="Delete layer">×</button>

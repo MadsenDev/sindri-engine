@@ -397,9 +397,10 @@ pub async fn patch_transform(
     scale_x: Option<f32>,
     scale_y: Option<f32>,
     rotation: Option<f32>,
+    z_index: Option<i32>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
-    let body = serde_json::json!({ "x": x, "y": y, "scale_x": scale_x, "scale_y": scale_y, "rotation": rotation });
+    let body = serde_json::json!({ "x": x, "y": y, "scale_x": scale_x, "scale_y": scale_y, "rotation": rotation, "z_index": z_index });
     client
         .patch(engine_url(&format!(
             "/scene/entity/{}/transform",
