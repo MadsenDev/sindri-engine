@@ -495,6 +495,7 @@ fn default_cloud_model(provider: &str) -> &'static str {
     match provider {
         "openai" => "gpt-5-mini",
         "anthropic" => "claude-sonnet-4-20250514",
+        "openrouter" => "meta-llama/llama-3.1-8b-instruct:free",
         _ => "qwen2.5-coder:7b",
     }
 }
@@ -513,6 +514,10 @@ fn provider_api_key(provider: &str) -> Result<String, String> {
             .ok()
             .or_else(|| keychain_entry("anthropic").ok()?.get_password().ok())
             .ok_or_else(|| "Anthropic API key is not configured".to_string()),
+        "openrouter" => std::env::var("OPENROUTER_API_KEY")
+            .ok()
+            .or_else(|| keychain_entry("openrouter").ok()?.get_password().ok())
+            .ok_or_else(|| "OpenRouter API key is not configured".to_string()),
         _ => Err("Local Ollama does not use an API key".to_string()),
     }
 }
@@ -535,13 +540,18 @@ pub async fn get_ai_provider_status() -> Result<Vec<AiProviderStatus>, String> {
             configured: provider_api_key("anthropic").is_ok(),
             default_model: default_cloud_model("anthropic").into(),
         },
+        AiProviderStatus {
+            provider: "openrouter".into(),
+            configured: provider_api_key("openrouter").is_ok(),
+            default_model: default_cloud_model("openrouter").into(),
+        },
     ])
 }
 
 #[tauri::command]
 pub async fn save_ai_api_key(provider: String, api_key: String) -> Result<(), String> {
-    if provider != "openai" && provider != "anthropic" {
-        return Err("Only OpenAI and Anthropic keys can be saved".into());
+    if !["openai", "anthropic", "openrouter"].contains(&provider.as_str()) {
+        return Err("Only cloud provider keys can be saved".into());
     }
     let api_key = api_key.trim();
     if api_key.is_empty() {
@@ -552,8 +562,8 @@ pub async fn save_ai_api_key(provider: String, api_key: String) -> Result<(), St
 
 #[tauri::command]
 pub async fn clear_ai_api_key(provider: String) -> Result<(), String> {
-    if provider != "openai" && provider != "anthropic" {
-        return Err("Only OpenAI and Anthropic keys can be cleared".into());
+    if !["openai", "anthropic", "openrouter"].contains(&provider.as_str()) {
+        return Err("Only cloud provider keys can be cleared".into());
     }
     match keychain_entry(&provider)?.delete_credential() {
         Ok(()) => Ok(()),
@@ -583,6 +593,7 @@ async fn request_ai_text(
     let text = match provider {
         "openai" => request_openai_text(client, model, messages).await,
         "anthropic" => request_anthropic_text(client, model, messages).await,
+        "openrouter" => request_openrouter_text(client, model, messages).await,
         _ => request_ollama_text(client, model, messages).await,
     }?;
 
@@ -650,6 +661,35 @@ async fn request_openai_text(
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| format!("OpenAI response did not include choices[0].message.content: {value}"))
+}
+
+async fn request_openrouter_text(
+    client: &reqwest::Client,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    let key = provider_api_key("openrouter")?;
+    let resp = client
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .bearer_auth(key)
+        .header("HTTP-Referer", "https://sindri.gg")
+        .header("X-Title", "Sindri Engine")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    let value: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    value["choices"][0]["message"]["content"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| format!("OpenRouter response did not include choices[0].message.content: {value}"))
 }
 
 fn anthropic_content_from_openai(content: &serde_json::Value) -> serde_json::Value {
@@ -840,6 +880,48 @@ async fn stream_openai_text(
     Ok(full)
 }
 
+async fn stream_openrouter_text(
+    app: tauri::AppHandle,
+    request_id: String,
+    client: reqwest::Client,
+    model: String,
+    messages: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    let key = provider_api_key("openrouter")?;
+    let resp = client
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .bearer_auth(key)
+        .header("HTTP-Referer", "https://sindri.gg")
+        .header("X-Title", "Sindri Engine")
+        .json(&serde_json::json!({ "model": model, "messages": messages, "stream": true }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    let mut full = String::new();
+    let mut buffer = String::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(pos) = buffer.find('\n') {
+            let line = buffer[..pos].trim().to_string();
+            buffer = buffer[pos + 1..].to_string();
+            let Some(data) = line.strip_prefix("data: ") else { continue; };
+            if data == "[DONE]" { continue; }
+            let value: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+            let delta = value["choices"][0]["delta"]["content"].as_str().unwrap_or("");
+            if !delta.is_empty() {
+                full.push_str(delta);
+                emit_ai_stream(&app, &request_id, "delta", delta);
+            }
+        }
+    }
+    Ok(full)
+}
+
 async fn stream_anthropic_text(
     app: tauri::AppHandle,
     request_id: String,
@@ -935,6 +1017,7 @@ pub async fn send_ai_message_stream(
     let result = match provider.as_str() {
         "openai" => stream_openai_text(app.clone(), request_id.clone(), client, model, messages).await,
         "anthropic" => stream_anthropic_text(app.clone(), request_id.clone(), client, model, messages).await,
+        "openrouter" => stream_openrouter_text(app.clone(), request_id.clone(), client, model, messages).await,
         _ => stream_ollama_text(app.clone(), request_id.clone(), client, model, messages).await,
     };
 

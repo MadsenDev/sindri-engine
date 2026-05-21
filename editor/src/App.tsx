@@ -142,7 +142,7 @@ interface EngineStatus {
   error_count?: number | null;
 }
 
-type AiProvider = "ollama" | "openai" | "anthropic";
+type AiProvider = "ollama" | "openai" | "anthropic" | "openrouter";
 
 interface AiProviderStatus {
   provider: AiProvider;

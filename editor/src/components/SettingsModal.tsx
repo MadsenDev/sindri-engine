@@ -22,7 +22,7 @@ interface WorldSettings {
 
 export type AiModelRole = "assistant" | "code" | "fast" | "vision";
 export type AiModelConfig = Record<AiModelRole, string | null>;
-export type AiProvider = "ollama" | "openai" | "anthropic";
+export type AiProvider = "ollama" | "openai" | "anthropic" | "openrouter";
 
 export interface AiProviderStatus {
   provider: AiProvider;
@@ -258,12 +258,13 @@ export default function SettingsModal({
             {tab === "ai" && (
               <div style={{ display: "grid", gap: "18px" }}>
                 {/* Provider cards */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
                   {(
                     [
-                      { id: "ollama" as AiProvider,    title: "Ollama",    detail: "Offline local models on localhost. No API key and no external network calls." },
-                      { id: "openai" as AiProvider,    title: "OpenAI",    detail: "BYOK cloud models for stronger code, vision, and reasoning." },
-                      { id: "anthropic" as AiProvider, title: "Anthropic", detail: "BYOK Claude models for long-context planning and code review." },
+                      { id: "ollama" as AiProvider,      title: "Ollama",      detail: "Offline local models on localhost. No API key and no external network calls." },
+                      { id: "openai" as AiProvider,      title: "OpenAI",      detail: "BYOK cloud models for stronger code, vision, and reasoning." },
+                      { id: "anthropic" as AiProvider,   title: "Anthropic",   detail: "BYOK Claude models for long-context planning and code review." },
+                      { id: "openrouter" as AiProvider,  title: "OpenRouter",  detail: "Unified API for 300+ models — many with free tiers. Single BYOK key." },
                     ]
                   ).map(({ id, title, detail }) => {
                     const status = providerStatuses.find(s => s.provider === id);

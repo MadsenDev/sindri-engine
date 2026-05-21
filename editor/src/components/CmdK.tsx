@@ -20,7 +20,7 @@ interface Props {
   projectPath: string;
   openScript: { path: string; content: string } | null;
   modelConfig: AiModelConfig;
-  selectedProvider: "ollama" | "openai" | "anthropic";
+  selectedProvider: "ollama" | "openai" | "anthropic" | "openrouter";
   projectFiles: ProjectFile[];
   runtimeErrors: string[];
   onSceneChange: () => void;
