@@ -570,18 +570,12 @@ export default function App() {
   }
 
   const selectedProviderStatus = providerStatuses.find(s => s.provider === selectedProvider);
-  const providerConfigured = selectedProvider === "ollama" ? ollamaReady : selectedProviderStatus?.configured === true;
   const resolvedModelConfig: AiModelConfig = {
     assistant: modelConfig.assistant || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "assistant") : selectedProviderStatus?.defaultModel ?? null),
     code: modelConfig.code || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "code") : selectedProviderStatus?.defaultModel ?? null),
     fast: modelConfig.fast || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "fast") : selectedProviderStatus?.defaultModel ?? null),
     vision: modelConfig.vision || (selectedProvider === "ollama" ? preferredOllamaModel(ollamaModels, "vision") : selectedProviderStatus?.defaultModel ?? null),
   };
-  const effectiveModel = resolvedModelConfig.assistant || "";
-  const aiStatusDot = providerConfigured ? "var(--amber)" : "var(--ink-4)";
-  const aiStatusText = providerConfigured
-    ? `${selectedProvider} · ${effectiveModel || "ready"}`
-    : `${selectedProvider} not configured`;
 
   return (
     <ContextMenuProvider>
@@ -594,17 +588,13 @@ export default function App() {
           engineReady={engineReady}
           onPlayback={handlePlayback}
           onOpenCmdK={() => setCmdKOpen(true)}
-          aiStatusDot={aiStatusDot}
-          aiStatusText={aiStatusText}
           activeTool={activeTool}
           setActiveTool={setActiveTool}
           canUndo={undoDepth > 0}
           canRedo={redoDepth > 0}
           onUndo={undoTransform}
           onRedo={redoTransform}
-          onOpenAiSettings={() => { setSettingsTab("ai"); setSettingsOpen(true); }}
           onOpenSettings={() => { setSettingsTab("project"); setSettingsOpen(true); }}
-          resolution={projectSettings ? `${projectSettings.resolution_width} × ${projectSettings.resolution_height}` : "1280 × 720"}
         />
 
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -808,26 +798,22 @@ interface TopbarProps {
   engineReady: boolean;
   onPlayback: (action: "play" | "pause" | "stop") => void;
   onOpenCmdK: () => void;
-  aiStatusDot: string;
-  aiStatusText: string;
   activeTool: ActiveTool;
   setActiveTool: (t: ActiveTool) => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  onOpenAiSettings: () => void;
   onOpenSettings: () => void;
-  resolution: string;
 }
 
 function Topbar({
   sceneName, projectName, sceneDirty,
   playbackState, engineReady, onPlayback,
-  onOpenCmdK, aiStatusDot, aiStatusText,
+  onOpenCmdK,
   activeTool, setActiveTool,
   canUndo, canRedo, onUndo, onRedo,
-  onOpenAiSettings, onOpenSettings, resolution,
+  onOpenSettings,
 }: TopbarProps) {
   const tools: { key: ActiveTool; icon: string; label: string }[] = [
     { key: "select",   icon: "↖", label: "Select" },
@@ -972,22 +958,10 @@ function Topbar({
 
         <div style={{ width: "1px", height: "18px", background: "var(--rule-2)" }} />
 
-        {/* Resolution */}
-        <button
-          onClick={onOpenSettings}
-          title="Project settings"
-          style={{
-            fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)",
-            background: "none", border: "none", cursor: "pointer", padding: "0 4px",
-          }}
-        >
-          {resolution}
-        </button>
-
         {/* Settings button */}
         <button
           onClick={onOpenSettings}
-          title="Project & editor settings"
+          title="Settings"
           style={{
             width: "28px", height: "28px",
             background: "transparent",
@@ -998,37 +972,6 @@ function Topbar({
             fontSize: "14px",
           }}
         >⊞</button>
-
-        <div style={{ width: "1px", height: "18px", background: "var(--rule-2)" }} />
-
-        {/* AI status pill */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "8px",
-          fontSize: "11.5px", color: "var(--ink-3)",
-          fontFamily: "var(--font-mono)",
-          padding: "5px 10px",
-          border: "1px solid var(--rule)",
-          background: "var(--paper-2)",
-          maxWidth: "200px",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        }}>
-          <span style={{ width: "6px", height: "6px", background: aiStatusDot, flexShrink: 0 }} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {aiStatusText}
-          </span>
-        </div>
-        <button
-          onClick={onOpenAiSettings}
-          title="AI provider settings"
-          style={{
-            width: "28px", height: "28px",
-            background: "transparent",
-            border: "1px solid var(--rule)",
-            color: "var(--ink-3)",
-            cursor: "pointer",
-            fontFamily: "var(--font-mono)",
-          }}
-        >⚙</button>
       </div>
     </header>
   );
