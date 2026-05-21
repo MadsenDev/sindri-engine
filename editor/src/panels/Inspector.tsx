@@ -619,6 +619,7 @@ function PhysicsBodyFields({ comp, entityId, componentIdx, onSceneChange }: {
       <BoolField label="lock rot" value={comp.lock_rotation} onChange={v => patch({ lock_rotation: v })} />
       <NumberInputField label="lin damp" value={comp.linear_damping} onCommit={v => patch({ linear_damping: v })} />
       <NumberInputField label="ang damp" value={comp.angular_damping} onCommit={v => patch({ angular_damping: v })} />
+      <NumberInputField label="gravity" value={comp.gravity_scale ?? 1} min={0} onCommit={v => patch({ gravity_scale: v })} />
       <NumberInputField label="layer" value={comp.collision_layer} decimals={0} min={0} max={255} onCommit={v => patch({ collision_layer: Math.round(v) })} />
       <NumberInputField label="mask" value={comp.collision_mask} decimals={0} min={0} onCommit={v => patch({ collision_mask: Math.round(v) })} />
     </>
@@ -645,15 +646,66 @@ function ColliderFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 // ─── Script ──────────────────────────────────────────────────────────────────
 
+type ScriptVar =
+  | { name: string; kind: "number"; value: number; lineIdx: number }
+  | { name: string; kind: "boolean"; value: boolean; lineIdx: number }
+  | { name: string; kind: "string"; value: string; lineIdx: number };
+
+function parseScriptVars(content: string): ScriptVar[] {
+  const vars: ScriptVar[] = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s/.test(line)) continue; // skip indented lines (not file-scope)
+    if (/^function\s/.test(line)) break; // stop at first function definition
+    let m: RegExpExecArray | null;
+    m = /^local\s+(\w+)\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:--.*)?$/.exec(line);
+    if (m) { vars.push({ name: m[1], kind: "number", value: parseFloat(m[2]), lineIdx: i }); continue; }
+    m = /^local\s+(\w+)\s*=\s*(true|false)\s*(?:--.*)?$/.exec(line);
+    if (m) { vars.push({ name: m[1], kind: "boolean", value: m[2] === "true", lineIdx: i }); continue; }
+    m = /^local\s+(\w+)\s*=\s*"([^"]*)"\s*(?:--.*)?$/.exec(line);
+    if (m) { vars.push({ name: m[1], kind: "string", value: m[2], lineIdx: i }); continue; }
+    m = /^local\s+(\w+)\s*=\s*'([^']*)'\s*(?:--.*)?$/.exec(line);
+    if (m) { vars.push({ name: m[1], kind: "string", value: m[2], lineIdx: i }); continue; }
+  }
+  return vars;
+}
+
 function ScriptField({ comp, entityId, componentIdx, onOpenScript, onSceneChange }: {
   comp: Extract<Component, { type: "Script" }>;
   entityId: number; componentIdx: number;
   onOpenScript: (path: string) => void; onSceneChange: () => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const [vars, setVars] = useState<ScriptVar[]>([]);
+
+  useEffect(() => {
+    if (!comp.path) { setVars([]); return; }
+    invoke<string>("get_script", { path: comp.path })
+      .then(content => setVars(parseScriptVars(content)))
+      .catch(() => setVars([]));
+  }, [comp.path]);
+
   const patchPath = async (newPath: string) => {
     try { await invoke("patch_component", { entityId, componentIdx, data: { path: newPath } }); onSceneChange(); } catch {}
   };
+
+  const patchVar = async (v: ScriptVar, newRaw: number | boolean | string) => {
+    if (!comp.path) return;
+    try {
+      const content = await invoke<string>("get_script", { path: comp.path });
+      const lines = content.split("\n");
+      const line = lines[v.lineIdx];
+      const prefix = /^local\s+\w+\s*=\s*/.exec(line)?.[0] ?? "";
+      const comment = /\s*--.*$/.exec(line)?.[0] ?? "";
+      const newValStr = v.kind === "string" ? `"${newRaw}"` : String(newRaw);
+      lines[v.lineIdx] = `${prefix}${newValStr}${comment}`;
+      const newContent = lines.join("\n");
+      await invoke("write_script", { path: comp.path, content: newContent });
+      setVars(parseScriptVars(newContent));
+    } catch {}
+  };
+
   return (
     <div style={{ padding: "2px 22px 8px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", height: "28px" }}>
@@ -678,6 +730,50 @@ function ScriptField({ comp, entityId, componentIdx, onOpenScript, onSceneChange
           padding: "5px 12px", cursor: comp.path ? "pointer" : "default", width: "100%",
         }}
       >Open in editor</button>
+
+      {vars.length > 0 && (
+        <div style={{ marginTop: "10px", borderTop: "1px solid var(--rule)", paddingTop: "8px" }}>
+          <div style={{
+            fontSize: "10px", color: "var(--ink-4)", fontFamily: "var(--font-mono)",
+            marginBottom: "4px", letterSpacing: "0.06em",
+          }}>VARIABLES</div>
+          {vars.map(v => v.kind === "boolean" ? (
+            <BoolField
+              key={v.name}
+              label={v.name}
+              value={v.value}
+              onChange={val => patchVar(v, val)}
+            />
+          ) : v.kind === "number" ? (
+            <NumberInputField
+              key={v.name}
+              label={v.name}
+              value={v.value}
+              decimals={Number.isInteger(v.value) ? 0 : 2}
+              onCommit={val => patchVar(v, val)}
+            />
+          ) : (
+            <ScriptStringVarRow key={v.name} label={v.name} value={v.value} onCommit={val => patchVar(v, val)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScriptStringVarRow({ label, value, onCommit }: { label: string; value: string; onCommit: (v: string) => void }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", height: "28px", paddingLeft: 0 }}>
+      <span style={{ width: "78px", fontSize: "12px", color: "var(--ink-3)", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <input
+        defaultValue={value}
+        key={value}
+        onFocus={() => setFocused(true)}
+        onBlur={e => { setFocused(false); onCommit(e.target.value); }}
+        onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        style={inputStyle(focused)}
+      />
     </div>
   );
 }

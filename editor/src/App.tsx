@@ -96,7 +96,7 @@ export type Component =
   | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number; z_index?: number }
   | { type: "Sprite"; texture_path: string; width: number; height: number; flip_x: boolean; flip_y: boolean; color: [number, number, number, number] }
   | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; flip_x: boolean; flip_y: boolean; tint: [number, number, number, number]; clips: AnimClip[]; default_clip: string; margin?: number; spacing?: number }
-  | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number }
+  | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number; gravity_scale: number }
   | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number; is_trigger: boolean }
   | { type: "Script"; path: string }
   | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number; pixel_perfect?: boolean }
@@ -122,6 +122,7 @@ export interface ProposalChange {
   modified_entity_ids: number[];
   new_script_paths: string[];
   script_backups: { path: string; existed: boolean; content: string }[];
+  script_new_contents: { path: string; content: string }[];
 }
 
 export interface ProposalData {
@@ -179,6 +180,7 @@ export default function App() {
   const [cmdKOpen, setCmdKOpen] = useState(false);
   const [cmdKInit, setCmdKInit] = useState<{ message?: string; input?: string } | null>(null);
   const [pendingProposal, setPendingProposal] = useState<ProposalData | null>(null);
+  const [resolvedProposalKeys, setResolvedProposalKeys] = useState<Set<string>>(new Set());
   const [suggestionModel, setSuggestionModel] = useState<string | null>(null);
   const [suggestionModelPulling, setSuggestionModelPulling] = useState(false);
   const undoStack = useRef<(TransformChange | ColliderChange)[]>([]);
@@ -699,9 +701,14 @@ export default function App() {
           }}>
             {pendingProposal ? (
               <ProposalsLane
+                key={pendingProposal.changes.map(c => c.id).join(",")}
                 proposal={pendingProposal}
                 onSceneChange={handleSceneChange}
                 onClose={() => setPendingProposal(null)}
+                onAllResolved={() => {
+                  const key = pendingProposal.changes.map(c => c.id).join(",");
+                  setResolvedProposalKeys(prev => new Set([...prev, key]));
+                }}
               />
             ) : (
               <Inspector
@@ -752,6 +759,7 @@ export default function App() {
             setCmdKOpen(false);
             setCmdKInit(null);
           }}
+          resolvedProposalKeys={resolvedProposalKeys}
         />
       )}
 

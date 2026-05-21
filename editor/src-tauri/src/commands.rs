@@ -1262,6 +1262,12 @@ pub struct ScriptBackup {
 }
 
 #[derive(Serialize)]
+pub struct ScriptNewContent {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
 pub struct ProposalChange {
     pub id: String,
     pub label: String,
@@ -1274,6 +1280,8 @@ pub struct ProposalChange {
     pub new_script_paths: Vec<String>,
     /// Previous script contents so reject can restore instead of deleting user files.
     pub script_backups: Vec<ScriptBackup>,
+    /// New script contents for diff display in the proposals panel.
+    pub script_new_contents: Vec<ScriptNewContent>,
 }
 
 #[derive(Serialize)]
@@ -1485,6 +1493,7 @@ Rules:
         let mut modified_entity_ids: Vec<u64> = Vec::new();
         let mut new_script_paths: Vec<String> = Vec::new();
         let mut script_backups: Vec<ScriptBackup> = Vec::new();
+        let mut script_new_contents: Vec<ScriptNewContent> = Vec::new();
         let mut applied_any = false;
 
         for action in &actions {
@@ -1541,6 +1550,25 @@ Rules:
                     .map_err(|err| format!("failed to apply {action_type}: {err}"))?;
                 applied_any = true;
 
+                // After writing, capture new content for diff display.
+                if action_type == "write_script" || action_type == "attach_script" {
+                    if let Some(path) = action["path"].as_str() {
+                        if !script_new_contents.iter().any(|c| c.path == path) {
+                            let new_content = client
+                                .get(engine_url(&format!("/script?path={}", path)))
+                                .send().await
+                                .ok()
+                                .and_then(|r| if r.status().is_success() { Some(r) } else { None });
+                            let content = if let Some(r) = new_content {
+                                r.text().await.unwrap_or_default()
+                            } else {
+                                action["content"].as_str().unwrap_or("").to_string()
+                            };
+                            script_new_contents.push(ScriptNewContent { path: path.to_string(), content });
+                        }
+                    }
+                }
+
                 // Mark modified existing entities as staged for visual indication.
                 let modifies_entity = matches!(
                     action_type,
@@ -1580,6 +1608,7 @@ Rules:
             modified_entity_ids,
             new_script_paths,
             script_backups,
+            script_new_contents,
         });
     }
 
@@ -1630,6 +1659,10 @@ Rules:
                 "path": b.path,
                 "existed": b.existed,
                 "content": b.content,
+            })).collect::<Vec<_>>(),
+            "script_new_contents": c.script_new_contents.iter().map(|s| serde_json::json!({
+                "path": s.path,
+                "content": s.content,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     }))
@@ -1807,8 +1840,9 @@ async fn stage_player_jump_fallback(
         detail: "Updates the player Lua script with horizontal movement and Space-to-jump using the Sindri input and physics facets.".to_string(),
         staged_entity_ids: Vec::new(),
         modified_entity_ids: vec![player_id],
-        new_script_paths: vec![script_path],
+        new_script_paths: vec![script_path.clone()],
         script_backups: vec![backup],
+        script_new_contents: vec![ScriptNewContent { path: script_path, content: content.to_string() }],
     }))
 }
 
@@ -2250,6 +2284,7 @@ pub async fn commit_staged_change(
     modified_entity_ids: Vec<u64>,
     script_paths: Vec<String>,
     script_backups: Vec<ScriptBackup>,
+    change_id: Option<String>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
     let all_ids: Vec<u64> = entity_ids.iter().chain(modified_entity_ids.iter()).copied().collect();
@@ -2261,8 +2296,9 @@ pub async fn commit_staged_change(
             .await
             .map_err(|e| e.to_string())?;
     }
-    let _ = script_paths; // scripts are already written; nothing extra to do on commit
+    let _ = script_paths;
     let _ = script_backups;
+    remove_change_from_proposal(change_id.as_deref()).await;
     Ok(())
 }
 
@@ -2272,6 +2308,7 @@ pub async fn revert_staged_change(
     modified_entity_ids: Vec<u64>,
     script_paths: Vec<String>,
     script_backups: Vec<ScriptBackup>,
+    change_id: Option<String>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
     // Delete newly created staged entities.
@@ -2324,7 +2361,34 @@ pub async fn revert_staged_change(
             }
         }
     }
+    remove_change_from_proposal(change_id.as_deref()).await;
     Ok(())
+}
+
+async fn remove_change_from_proposal(change_id: Option<&str>) {
+    let Some(change_id) = change_id else { return };
+    let scene_path = match reqwest::get(engine_url("/scene/path")).await {
+        Ok(r) => r.text().await.unwrap_or_default(),
+        Err(_) => return,
+    };
+    let proposal_path = format!("{}.proposal.json", scene_path.trim_matches('"'));
+    let content = match std::fs::read_to_string(&proposal_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut parsed: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    if let Some(changes) = parsed["changes"].as_array_mut() {
+        changes.retain(|c| c["id"].as_str() != Some(change_id));
+    }
+    let remaining = parsed["changes"].as_array().map(|a| a.len()).unwrap_or(0);
+    if remaining == 0 {
+        let _ = std::fs::remove_file(&proposal_path);
+    } else {
+        let _ = std::fs::write(&proposal_path, serde_json::to_string_pretty(&parsed).unwrap_or_default());
+    }
 }
 
 #[tauri::command]
@@ -2398,6 +2462,16 @@ pub async fn get_pending_proposal() -> Result<Option<ProposalResponse>, String> 
                 .map(|a| {
                     a.iter()
                         .filter_map(|v| serde_json::from_value::<ScriptBackup>(v.clone()).ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            script_new_contents: c["script_new_contents"].as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| Some(ScriptNewContent {
+                            path: v["path"].as_str()?.to_string(),
+                            content: v["content"].as_str().unwrap_or("").to_string(),
+                        }))
                         .collect()
                 })
                 .unwrap_or_default(),

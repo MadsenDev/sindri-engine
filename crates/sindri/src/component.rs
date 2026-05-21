@@ -57,6 +57,12 @@ pub struct PhysicsBody {
     pub angular_damping: f32,
     pub collision_layer: u8,
     pub collision_mask: u32,
+    #[serde(default = "default_gravity_scale")]
+    pub gravity_scale: f32,
+}
+
+fn default_gravity_scale() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

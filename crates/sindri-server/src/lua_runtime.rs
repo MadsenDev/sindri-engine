@@ -820,6 +820,7 @@ impl LuaRuntime {
                 }
                 self.physics.set_linear_damping(eid, pb.linear_damping);
                 self.physics.set_angular_damping(eid, pb.angular_damping);
+                self.physics.set_gravity_scale(eid, pb.gravity_scale);
                 self.physics.set_collision_mask(eid, pb.collision_layer, pb.collision_mask);
             }
 

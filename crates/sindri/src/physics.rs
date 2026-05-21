@@ -400,6 +400,14 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn set_gravity_scale(&mut self, entity: EntityId, scale: f32) {
+        if let Some(h) = self.entity_to_body.get(&entity).copied() {
+            if let Some(b) = self.rigid_bodies.get_mut(h) {
+                b.set_gravity_scale(scale, true);
+            }
+        }
+    }
+
     /// Set collision group membership and filter masks on all colliders for an entity.
     ///
     /// `memberships` is the set of groups this entity belongs to, and `filter` is

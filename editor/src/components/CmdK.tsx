@@ -7,6 +7,7 @@ interface Message {
   role: "user" | "ai";
   text: string;
   hadChanges?: boolean;
+  proposal?: ProposalData;
 }
 
 interface ProjectFile {
@@ -27,6 +28,7 @@ interface Props {
   onClose: () => void;
   selectedEntity: Entity | null;
   onProposalReady?: (proposal: ProposalData) => void;
+  resolvedProposalKeys?: Set<string>;
   initialMessage?: string;
   initialInput?: string;
 }
@@ -49,7 +51,7 @@ export default function CmdK({
   scene, projectPath, openScript, modelConfig, selectedProvider,
   projectFiles, runtimeErrors: _runtimeErrors,
   onSceneChange: _onSceneChange, onClose, selectedEntity,
-  onProposalReady, initialMessage, initialInput,
+  onProposalReady, resolvedProposalKeys, initialMessage, initialInput,
 }: Props) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(projectPath));
   const [input, setInput] = useState(initialInput ?? "");
@@ -184,7 +186,7 @@ export default function CmdK({
       || (hadChanges
         ? `Staged ${proposal.changes.length} proposed change${proposal.changes.length === 1 ? "" : "s"}. Review in inspector.`
         : "No changes proposed.");
-    const aiMsg: Message = { role: "ai", text: displayText, hadChanges };
+    const aiMsg: Message = { role: "ai", text: displayText, hadChanges, proposal: hadChanges ? proposal : undefined };
     const withAI = [...currentMessages, aiMsg];
     setMessages(withAI);
 
@@ -394,18 +396,30 @@ export default function CmdK({
                 }}>
                   {msg.text}
                 </div>
-                {msg.role === "ai" && msg.hadChanges && (
-                  <div style={{ marginTop: "8px" }}>
-                    <span style={{
-                      fontFamily: "var(--font-mono)", fontSize: "10.5px",
-                      padding: "2px 8px",
-                      border: "1px solid var(--amber)",
-                      color: "var(--amber)",
-                    }}>
-                      ✦ proposal staged → review in inspector
-                    </span>
-                  </div>
-                )}
+                {msg.role === "ai" && msg.hadChanges && msg.proposal && (() => {
+                  const proposalKey = msg.proposal.changes.map(c => c.id).join(",");
+                  const resolved = resolvedProposalKeys?.has(proposalKey) ?? false;
+                  return (
+                    <div style={{ marginTop: "8px" }}>
+                      <button
+                        onClick={() => !resolved && onProposalReady?.(msg.proposal!)}
+                        disabled={resolved}
+                        style={{
+                          fontFamily: "var(--font-mono)", fontSize: "10.5px",
+                          padding: "2px 8px",
+                          border: `1px solid ${resolved ? "var(--rule-2)" : "var(--amber)"}`,
+                          color: resolved ? "var(--ink-4)" : "var(--amber)",
+                          background: "none",
+                          cursor: resolved ? "default" : "pointer",
+                          textDecoration: resolved ? "line-through" : "none",
+                          opacity: resolved ? 0.5 : 1,
+                        }}
+                      >
+                        ✦ proposal {resolved ? "resolved" : "staged → review in inspector"}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
             {thinking && (

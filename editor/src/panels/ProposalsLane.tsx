@@ -2,19 +2,121 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ProposalData } from "../App";
 
+// ─── Diff ─────────────────────────────────────────────────────────────────────
+
+type DiffLine = { kind: "+" | "-" | " "; text: string };
+
+function computeDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText === "" ? [] : oldText.split("\n");
+  const newLines = newText === "" ? [] : newText.split("\n");
+  // Myers-style patience diff via LCS
+  const lcs = buildLCS(oldLines, newLines);
+  const result: DiffLine[] = [];
+  let oi = 0, ni = 0, li = 0;
+  while (oi < oldLines.length || ni < newLines.length) {
+    if (li < lcs.length && oi === lcs[li][0] && ni === lcs[li][1]) {
+      result.push({ kind: " ", text: oldLines[oi] });
+      oi++; ni++; li++;
+    } else if (ni < newLines.length && (li >= lcs.length || ni < lcs[li][1])) {
+      result.push({ kind: "+", text: newLines[ni++] });
+    } else {
+      result.push({ kind: "-", text: oldLines[oi++] });
+    }
+  }
+  return result;
+}
+
+function buildLCS(a: string[], b: string[]): [number, number][] {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  const result: [number, number][] = [];
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) { result.push([i - 1, j - 1]); i--; j--; }
+    else if (dp[i - 1][j] > dp[i][j - 1]) i--;
+    else j--;
+  }
+  return result.reverse();
+}
+
+function ScriptDiff({ path, oldContent, newContent }: { path: string; oldContent: string; newContent: string }) {
+  const [open, setOpen] = useState(false);
+  const [fullDiff] = useState(() => computeDiff(oldContent, newContent));
+  const diff = open ? fullDiff : [];
+  const added = fullDiff.filter(l => l.kind === "+").length;
+  const removed = fullDiff.filter(l => l.kind === "-").length;
+
+  return (
+    <div style={{ marginTop: "8px" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: "none", border: "1px solid var(--rule-2)",
+          color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px",
+          padding: "3px 8px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px",
+          width: "100%", textAlign: "left",
+        }}
+      >
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
+        {added > 0 && <span style={{ color: "var(--moss)" }}>+{added}</span>}
+        {removed > 0 && <span style={{ color: "var(--red, #e06c75)" }}>-{removed}</span>}
+        <span style={{ color: "var(--ink-4)" }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div style={{
+          overflowX: "auto", overflowY: "auto", maxHeight: "320px",
+          background: "var(--paper)", borderLeft: "2px solid var(--rule-2)",
+          fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "1.6",
+        }}>
+          {diff.map((line, i) => (
+            <div
+              key={i}
+              style={{
+                padding: "0 8px",
+                background: line.kind === "+" ? "rgba(152,195,121,0.12)" : line.kind === "-" ? "rgba(224,108,117,0.12)" : "transparent",
+                color: line.kind === "+" ? "var(--moss)" : line.kind === "-" ? "var(--red, #e06c75)" : "var(--ink-3)",
+                whiteSpace: "pre",
+                display: "flex", gap: "6px",
+              }}
+            >
+              <span style={{ opacity: 0.5, userSelect: "none", minWidth: "10px" }}>{line.kind}</span>
+              <span>{line.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   proposal: ProposalData;
   onSceneChange: () => void;
   onClose: () => void;
+  onAllResolved?: () => void;
 }
 
 type ChangeStatus = "staged" | "committing" | "accepted" | "reverting" | "rejected" | "failed";
 
-export default function ProposalsLane({ proposal, onSceneChange, onClose }: Props) {
+export default function ProposalsLane({ proposal, onSceneChange, onClose, onAllResolved }: Props) {
   const [statuses, setStatuses] = useState<Record<string, ChangeStatus>>(
     () => Object.fromEntries(proposal.changes.map(c => [c.id, "staged" as ChangeStatus]))
   );
   const [busy, setBusy] = useState(false);
+
+  const checkAndClearIfDone = (next: Record<string, ChangeStatus>) => {
+    const allDone = proposal.changes.every(c => {
+      const s = next[c.id];
+      return s === "accepted" || s === "rejected";
+    });
+    if (allDone) {
+      invoke("clear_staged_proposal").catch(() => {});
+      onAllResolved?.();
+    }
+  };
 
   const acceptChange = async (changeId: string) => {
     const change = proposal.changes.find(c => c.id === changeId);
@@ -26,13 +128,17 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose }: Prop
         modifiedEntityIds: change.modified_entity_ids,
         scriptPaths: change.new_script_paths,
         scriptBackups: change.script_backups ?? [],
+        changeId: changeId,
       });
       onSceneChange();
-      setStatuses(s => ({ ...s, [changeId]: "accepted" }));
+      setStatuses(s => {
+        const next = { ...s, [changeId]: "accepted" as ChangeStatus };
+        checkAndClearIfDone(next);
+        return next;
+      });
     } catch {
       setStatuses(s => ({ ...s, [changeId]: "failed" }));
     }
-    maybeCleanup({ ...statuses, [changeId]: "accepted" });
   };
 
   const rejectChange = async (changeId: string) => {
@@ -45,21 +151,17 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose }: Prop
         modifiedEntityIds: change.modified_entity_ids,
         scriptPaths: change.new_script_paths,
         scriptBackups: change.script_backups ?? [],
+        changeId: changeId,
       });
       onSceneChange();
-      setStatuses(s => ({ ...s, [changeId]: "rejected" }));
+      setStatuses(s => {
+        const next = { ...s, [changeId]: "rejected" as ChangeStatus };
+        checkAndClearIfDone(next);
+        return next;
+      });
     } catch {
       setStatuses(s => ({ ...s, [changeId]: "failed" }));
     }
-    maybeCleanup({ ...statuses, [changeId]: "rejected" });
-  };
-
-  const maybeCleanup = (nextStatuses: Record<string, ChangeStatus>) => {
-    const allDone = proposal.changes.every(c => {
-      const s = nextStatuses[c.id];
-      return s === "accepted" || s === "rejected";
-    });
-    if (allDone) invoke("clear_staged_proposal").catch(() => {});
   };
 
   const acceptAll = async () => {
@@ -163,6 +265,8 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose }: Prop
               detail={change.detail}
               stagedCount={change.staged_entity_ids.length}
               scriptCount={change.new_script_paths.length}
+              scriptBackups={change.script_backups}
+              scriptNewContents={change.script_new_contents ?? []}
               status={statuses[change.id] ?? "staged"}
               onAccept={() => acceptChange(change.id)}
               onReject={() => rejectChange(change.id)}
@@ -223,11 +327,13 @@ export default function ProposalsLane({ proposal, onSceneChange, onClose }: Prop
   );
 }
 
-function ChangeBlock({ label, detail, stagedCount, scriptCount, status, onAccept, onReject }: {
+function ChangeBlock({ label, detail, stagedCount, scriptCount, scriptBackups, scriptNewContents, status, onAccept, onReject }: {
   label: string;
   detail: string;
   stagedCount: number;
   scriptCount: number;
+  scriptBackups: { path: string; existed: boolean; content: string }[];
+  scriptNewContents: { path: string; content: string }[];
   status: ChangeStatus;
   onAccept: () => void;
   onReject: () => void;
@@ -275,14 +381,22 @@ function ChangeBlock({ label, detail, stagedCount, scriptCount, status, onAccept
       {detail && (
         <div style={{
           fontFamily: "var(--font-ui)", fontSize: "11.5px",
-          color: "var(--ink-3)", lineHeight: 1.45, marginBottom: "10px",
+          color: "var(--ink-3)", lineHeight: 1.45, marginBottom: "6px",
         }}>
           {detail}
         </div>
       )}
 
+      {scriptNewContents.map(nc => {
+        const backup = scriptBackups.find(b => b.path === nc.path);
+        const oldContent = backup?.existed ? backup.content : "";
+        return (
+          <ScriptDiff key={nc.path} path={nc.path} oldContent={oldContent} newContent={nc.content} />
+        );
+      })}
+
       {isPending && (
-        <div style={{ display: "flex", gap: "6px" }}>
+        <div style={{ display: "flex", gap: "6px", marginTop: "10px" }}>
           <button
             onClick={onAccept}
             style={{

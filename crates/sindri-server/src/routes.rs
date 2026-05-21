@@ -626,6 +626,7 @@ pub async fn add_component(
             angular_damping: 0.0,
             collision_layer: 0,
             collision_mask: u32::MAX,
+            gravity_scale: 1.0,
         }),
         "Collider" => Component::Collider(Collider {
             width: 32.0,
