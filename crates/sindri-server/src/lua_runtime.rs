@@ -42,7 +42,7 @@ enum SceneCommand {
     AnimPlay(String),
     AnimSetFlipX(bool),
     AnimSetFlipY(bool),
-    SetTilemapTile { col: u32, row: u32, tile_id: u32 },
+    SetTilemapTile { col: u32, row: u32, tile_id: u32, layer: u32 },
 }
 
 fn resolve_script_path(scripts_root: &Path, script_path: &str) -> PathBuf {
@@ -139,13 +139,15 @@ fn apply_scene_commands(scene: &mut Scene, entity_id: u64, commands: Vec<SceneCo
                     sprite.color = color;
                 }
             }
-            SceneCommand::SetTilemapTile { col, row, tile_id } => {
+            SceneCommand::SetTilemapTile { col, row, tile_id, layer } => {
                 if let Some(tm) = entity.components.iter_mut().find_map(|c| {
                     if let Component::Tilemap(tm) = c { Some(tm) } else { None }
                 }) {
                     let idx = (row * tm.map_cols + col) as usize;
-                    if idx < tm.tiles.len() {
-                        tm.tiles[idx] = tile_id;
+                    if let Some(lyr) = tm.layers.get_mut(layer as usize) {
+                        if idx < lyr.tiles.len() {
+                            lyr.tiles[idx] = tile_id;
+                        }
                     }
                 }
             }
@@ -1246,7 +1248,9 @@ impl LuaRuntime {
                             let th = tm.tile_height;
                             let map_cols = tm.map_cols;
                             let map_rows = tm.map_rows;
-                            let tiles = tm.tiles.clone();
+                            // Collect per-layer tile snapshots for get_tile reads
+                            let layer_tiles: Vec<Vec<u32>> = tm.layers.iter().map(|l| l.tiles.clone()).collect();
+                            let layer_count = tm.layers.len() as u32;
                             let tm_solid = tm.clone();
                             let tm_path = tm.clone();
 
@@ -1254,18 +1258,21 @@ impl LuaRuntime {
                             tbl.set("height", map_rows)?;
                             tbl.set("tile_width", tw)?;
                             tbl.set("tile_height", th)?;
+                            tbl.set("layer_count", layer_count)?;
 
-                            // get_tile(col, row) → encoded u32 cell (0 = empty)
-                            let tiles2 = tiles.clone();
-                            tbl.set("get_tile", lua.create_function(move |_, (_this, col, row): (Table, u32, u32)| {
-                                let id = tiles2.get((row * map_cols + col) as usize).copied().unwrap_or(0);
-                                Ok(id)
+                            // get_tile(col, row [, layer=0]) → encoded u32 cell (0 = empty)
+                            let layer_tiles2 = layer_tiles.clone();
+                            tbl.set("get_tile", lua.create_function(move |_, (_this, col, row, layer): (Table, u32, u32, Option<u32>)| {
+                                let lyr = layer.unwrap_or(0) as usize;
+                                let tiles = layer_tiles2.get(lyr).map(|v| v.as_slice()).unwrap_or(&[]);
+                                Ok(tiles.get((row * map_cols + col) as usize).copied().unwrap_or(0))
                             })?)?;
 
-                            // set_tile(col, row, tile_id)
+                            // set_tile(col, row, tile_id [, layer=0])
                             let cmds = scene_cmds.clone();
-                            tbl.set("set_tile", lua.create_function(move |_, (_this, col, row, tile_id): (Table, u32, u32, u32)| {
-                                cmds.lock().unwrap().push(SceneCommand::SetTilemapTile { col, row, tile_id: tile_id as u32 });
+                            tbl.set("set_tile", lua.create_function(move |_, (_this, col, row, tile_id, layer): (Table, u32, u32, u32, Option<u32>)| {
+                                let layer = layer.unwrap_or(0);
+                                cmds.lock().unwrap().push(SceneCommand::SetTilemapTile { col, row, tile_id: tile_id as u32, layer });
                                 Ok(())
                             })?)?;
 

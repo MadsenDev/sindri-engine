@@ -6,6 +6,35 @@ This document captures what it will take to turn the current Sindri editor from 
 
 Assumption: "fully functional editor" means a credible authoring tool for scenes, assets, prefabs, and play/test iteration, not just a UI shell that can inspect and mutate a runtime `World`.
 
+## Engine ↔ Editor Parity Matrix
+
+### Completely missing from editor (engine-ready)
+
+| Feature | Engine has | Editor status |
+|---|---|---|
+| **Tilemap** | `render/tilemap.rs` — `Tilemap` struct with tile grid, tileset UVs, world↔tile coords | ❌ No component, no inspector, no painter, no scene serialization |
+| **InputMap** | `InputMap` with named actions + axis bindings, `AxisBinding`, `Button` | ❌ No editor UI to configure action bindings |
+| **Pathfinding/Grid** | `grid.rs`, `pathfinding.rs` | ❌ No visualization or config |
+| **HUD/UI** | `HudLayer`, `HudPanel`, `HudText`, `HudSprite`, full layout system | ❌ Nothing |
+
+### Partially supported (gaps)
+
+| Feature | What works | What's missing |
+|---|---|---|
+| **Sprite** | Texture path, color, size | No texture preview in inspector |
+| **AudioSource** | Path, volume fields | No play-preview in editor |
+| **Camera** | Component exists | No viewport frustum visualization |
+| **Script** | Attach/edit | No watch for external file changes |
+
+### Experimental (engine has it, not ready for editor)
+- Particles (`ParticleEmitter`, `ParticleSystem`)
+- Lighting (`PointLight`, `DirectionalLight`)
+
+### Completed
+- ✅ **AnimatedSprite** — component, inspector, clip editor modal, spritesheet slicer, Lua `animated_sprite()` facet, runtime animation
+
+---
+
 ## Current State
 
 The editor already has solid foundations:

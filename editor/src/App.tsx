@@ -83,6 +83,13 @@ export interface TilePalette {
   solid_tiles: number[];
 }
 
+export interface TileLayer {
+  name: string;
+  tiles: number[];
+  visible: boolean;
+  opacity: number;
+}
+
 export type Component =
   | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
   | { type: "Sprite"; texture_path: string; width: number; height: number; flip_x: boolean; flip_y: boolean; color: [number, number, number, number] }
@@ -92,7 +99,7 @@ export type Component =
   | { type: "Script"; path: string }
   | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number }
   | { type: "AudioSource"; path: string; volume: number; looping: boolean; play_on_start: boolean }
-  | { type: "Tilemap"; palettes: TilePalette[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number, number, number, number] };
+  | { type: "Tilemap"; palettes: TilePalette[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number; layers: TileLayer[]; tint: [number, number, number, number] };
 
 export interface Scene {
   name: string;

@@ -964,27 +964,40 @@ pub async fn patch_component(
                 .and_then(|_| patch_f32(&body, "tile_height", &mut t.tile_height))
                 .and_then(|_| patch_color(&body, "tint", &mut t.tint))
                 .and_then(|_| {
-                    // Resize map if map_cols/map_rows changed, preserving existing tile data
+                    // Resize map if map_cols/map_rows changed, preserving tile data in all layers
                     let new_cols = body.get("map_cols").and_then(|v| v.as_u64()).map(|v| v as u32);
                     let new_rows = body.get("map_rows").and_then(|v| v.as_u64()).map(|v| v as u32);
                     if new_cols.is_some() || new_rows.is_some() {
                         let cols = new_cols.unwrap_or(t.map_cols).max(1);
                         let rows = new_rows.unwrap_or(t.map_rows).max(1);
-                        let mut new_tiles = vec![0u32; (cols * rows) as usize];
-                        for row in 0..rows.min(t.map_rows) {
-                            for col in 0..cols.min(t.map_cols) {
-                                new_tiles[(row * cols + col) as usize] =
-                                    t.tiles[(row * t.map_cols + col) as usize];
+                        for layer in &mut t.layers {
+                            let mut new_tiles = vec![0u32; (cols * rows) as usize];
+                            for row in 0..rows.min(t.map_rows) {
+                                for col in 0..cols.min(t.map_cols) {
+                                    new_tiles[(row * cols + col) as usize] =
+                                        layer.tiles[(row * t.map_cols + col) as usize];
+                                }
                             }
+                            layer.tiles = new_tiles;
                         }
                         t.map_cols = cols;
                         t.map_rows = rows;
-                        t.tiles = new_tiles;
                     }
-                    if let Some(tiles_val) = body.get("tiles") {
+                    // Full layers replacement
+                    if let Some(layers_val) = body.get("layers") {
+                        let layers: Vec<sindri::component::TileLayer> =
+                            serde_json::from_value(layers_val.clone())
+                                .map_err(|e| format!("invalid layers: {e}"))?;
+                        t.layers = layers;
+                    }
+                    // Patch a single layer's tiles by index
+                    if let (Some(layer_val), Some(tiles_val)) = (body.get("layer_idx"), body.get("tiles")) {
+                        let layer_idx = layer_val.as_u64().ok_or_else(|| "layer_idx must be an integer".to_string())? as usize;
                         let tiles: Vec<u32> = serde_json::from_value(tiles_val.clone())
                             .map_err(|e| format!("invalid tiles: {e}"))?;
-                        t.tiles = tiles;
+                        if let Some(layer) = t.layers.get_mut(layer_idx) {
+                            layer.tiles = tiles;
+                        }
                     }
                     if let Some(palettes_val) = body.get("palettes") {
                         let palettes: Vec<sindri::component::TilePalette> =

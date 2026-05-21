@@ -784,11 +784,27 @@ function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFil
               <button onClick={() => removePalette(i)} style={{ background: "none", border: "none", color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "14px", cursor: "pointer", padding: "0 2px" }}>×</button>
             </div>
             <BrowseInputField label="tex" value={pal.texture_path} placeholder="(none)" onCommit={v => patchPalette(i, { texture_path: v })} onBrowse={() => setPickingPaletteTex(i)} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "2px", marginTop: "4px" }}>
-              <NumberInputField label="cols" value={pal.tileset_cols} decimals={0} min={1} onCommit={v => patchPalette(i, { tileset_cols: Math.round(v) })} />
-              <NumberInputField label="rows" value={pal.tileset_rows} decimals={0} min={1} onCommit={v => patchPalette(i, { tileset_rows: Math.round(v) })} />
-              <NumberInputField label="margin" value={pal.margin ?? 0} decimals={0} min={0} onCommit={v => patchPalette(i, { margin: Math.round(v) })} />
-              <NumberInputField label="spacing" value={pal.spacing ?? 0} decimals={0} min={0} onCommit={v => patchPalette(i, { spacing: Math.round(v) })} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", marginTop: "6px" }}>
+              {([
+                ["cols", pal.tileset_cols, 1, (v: number) => patchPalette(i, { tileset_cols: Math.round(v) })],
+                ["rows", pal.tileset_rows, 1, (v: number) => patchPalette(i, { tileset_rows: Math.round(v) })],
+                ["margin", pal.margin ?? 0, 0, (v: number) => patchPalette(i, { margin: Math.round(v) })],
+                ["spacing", pal.spacing ?? 0, 0, (v: number) => patchPalette(i, { spacing: Math.round(v) })],
+              ] as [string, number, number, (v: number) => void][]).map(([lbl, val, minVal, commit]) => (
+                <label key={lbl} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--ink-4)", textTransform: "uppercase" }}>{lbl}</span>
+                  <input
+                    type="number"
+                    defaultValue={val}
+                    min={minVal}
+                    step={1}
+                    key={`${lbl}-${val}`}
+                    onBlur={e => { const n = parseInt(e.currentTarget.value, 10); if (!isNaN(n)) commit(Math.max(minVal, n)); }}
+                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    style={{ fontFamily: "var(--font-mono)", fontSize: "11px", background: "var(--paper-2)", border: "1px solid var(--rule-2)", color: "var(--ink)", padding: "2px 4px", width: "100%", boxSizing: "border-box", outline: "none" }}
+                  />
+                </label>
+              ))}
             </div>
             {pal.solid_tiles.length > 0 && (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "rgba(220,100,100,0.8)", marginTop: "3px" }}>
@@ -802,7 +818,7 @@ function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFil
       <div style={{ padding: "0 12px 10px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
-            {comp.map_cols}×{comp.map_rows} tiles
+            {comp.map_cols}×{comp.map_rows} · {comp.layers.length} layer{comp.layers.length !== 1 ? "s" : ""}
           </span>
           <button onClick={() => setPainterOpen(true)} style={{ background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer" }}>
             Paint Tiles

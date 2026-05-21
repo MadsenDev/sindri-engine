@@ -242,9 +242,31 @@ pub fn decode_tile(v: u32) -> (u32, u32) {
     (v >> 16, v & 0xFFFF)
 }
 
-/// A tile-based map component.
+/// A single layer within a Tilemap. Layers are rendered bottom-to-top.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TileLayer {
+    #[serde(default)]
+    pub name: String,
+    /// Flat tile array (row-major). 0 = empty. Use encode_tile/decode_tile.
+    pub tiles: Vec<u32>,
+    #[serde(default = "default_layer_visible")]
+    pub visible: bool,
+    #[serde(default = "default_layer_opacity")]
+    pub opacity: f32,
+}
+
+fn default_layer_visible() -> bool { true }
+fn default_layer_opacity() -> f32 { 1.0 }
+
+impl TileLayer {
+    pub fn new(name: impl Into<String>, tile_count: usize) -> Self {
+        Self { name: name.into(), tiles: vec![0u32; tile_count], visible: true, opacity: 1.0 }
+    }
+}
+
+/// A tile-based map component. Layers are rendered bottom-to-top.
 ///
-/// Each cell stores a u32: upper 16 bits = palette_id (1-indexed, 0 = empty),
+/// Each tile cell stores a u32: upper 16 bits = palette_id (1-indexed, 0 = empty),
 /// lower 16 bits = tile_idx (0-indexed within that palette's tileset).
 /// Use `encode_tile` / `decode_tile` helpers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,23 +283,26 @@ pub struct Tilemap {
     pub map_cols: u32,
     /// Map height in tiles
     pub map_rows: u32,
-    /// Flat tile array (row-major). 0 = empty. Use encode_tile/decode_tile.
-    pub tiles: Vec<u32>,
+    /// Ordered layers rendered bottom-to-top. Each layer has its own tile grid.
+    #[serde(default)]
+    pub layers: Vec<TileLayer>,
     pub tint: [f32; 4],
 }
 
 impl Tilemap {
-    /// Returns true if the tile at (col, row) is solid, based on its palette's solid_tiles.
+    /// Returns true if the tile at (col, row) is solid in any layer.
     pub fn is_tile_solid(&self, col: u32, row: u32) -> bool {
-        let v = self.tiles.get((row * self.map_cols + col) as usize).copied().unwrap_or(0);
-        if v == 0 { return false; }
-        let (palette_id, tile_idx) = decode_tile(v);
-        if palette_id == 0 { return false; }
-        if let Some(pal) = self.palettes.get((palette_id - 1) as usize) {
-            pal.solid_tiles.contains(&(tile_idx as u16))
-        } else {
-            false
+        let idx = (row * self.map_cols + col) as usize;
+        for layer in &self.layers {
+            let v = layer.tiles.get(idx).copied().unwrap_or(0);
+            if v == 0 { continue; }
+            let (palette_id, tile_idx) = decode_tile(v);
+            if palette_id == 0 { continue; }
+            if let Some(pal) = self.palettes.get((palette_id - 1) as usize) {
+                if pal.solid_tiles.contains(&(tile_idx as u16)) { return true; }
+            }
         }
+        false
     }
 
     /// Greedy rectangle merge over solid tiles.
@@ -343,13 +368,14 @@ impl Default for Tilemap {
     fn default() -> Self {
         let map_cols = 20u32;
         let map_rows = 10u32;
+        let tile_count = (map_cols * map_rows) as usize;
         Self {
             palettes: Vec::new(),
             tile_width: 32.0,
             tile_height: 32.0,
             map_cols,
             map_rows,
-            tiles: vec![0u32; (map_cols * map_rows) as usize],
+            layers: vec![TileLayer::new("Ground", tile_count)],
             tint: [1.0, 1.0, 1.0, 1.0],
         }
     }

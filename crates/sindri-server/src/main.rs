@@ -352,30 +352,35 @@ fn draw_scene_contents(
         let pos = Vec2::new(t.x, t.y);
 
         if let Some(tm) = tilemap {
-            for tile_row in 0..tm.map_rows {
-                for tile_col in 0..tm.map_cols {
-                    let cell = tm.tiles.get((tile_row * tm.map_cols + tile_col) as usize).copied().unwrap_or(0);
-                    if cell == 0 { continue; }
-                    let (palette_id, tile_idx) = sindri::component::decode_tile(cell);
-                    if palette_id == 0 { continue; }
-                    let Some(palette) = tm.palettes.get((palette_id - 1) as usize) else { continue };
-                    let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &palette.texture_path) {
-                        Some((h, tw, th)) => (h, tw as f32, th as f32),
-                        None => (white_texture, 1.0, 1.0),
-                    };
-                    let cols = palette.tileset_cols.max(1);
-                    let rows = palette.tileset_rows.max(1);
-                    let ts_col = tile_idx % cols;
-                    let ts_row = tile_idx / cols;
-                    let uv = spritesheet_uv(ts_col, ts_row, cols, rows, palette.margin, palette.spacing, tex_w, tex_h);
-                    let tile_cx = pos.x + (tile_col as f32 + 0.5) * tm.tile_width;
-                    let tile_cy = pos.y + (tile_row as f32 + 0.5) * tm.tile_height;
-                    let tile_transform = Transform2D {
-                        position: Vec2::new(tile_cx, tile_cy),
-                        rotation: t.rotation,
-                        scale: Vec2::new(tm.tile_width / tex_w, tm.tile_height / tex_h),
-                    };
-                    r.draw_texture_region(frame, tex, Some(uv), &tile_transform, tm.tint, false, &camera)?;
+            for layer in &tm.layers {
+                if !layer.visible { continue; }
+                let layer_alpha = layer.opacity.clamp(0.0, 1.0) * tm.tint[3];
+                let tint = [tm.tint[0], tm.tint[1], tm.tint[2], layer_alpha];
+                for tile_row in 0..tm.map_rows {
+                    for tile_col in 0..tm.map_cols {
+                        let cell = layer.tiles.get((tile_row * tm.map_cols + tile_col) as usize).copied().unwrap_or(0);
+                        if cell == 0 { continue; }
+                        let (palette_id, tile_idx) = sindri::component::decode_tile(cell);
+                        if palette_id == 0 { continue; }
+                        let Some(palette) = tm.palettes.get((palette_id - 1) as usize) else { continue };
+                        let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &palette.texture_path) {
+                            Some((h, tw, th)) => (h, tw as f32, th as f32),
+                            None => (white_texture, 1.0, 1.0),
+                        };
+                        let cols = palette.tileset_cols.max(1);
+                        let rows = palette.tileset_rows.max(1);
+                        let ts_col = tile_idx % cols;
+                        let ts_row = tile_idx / cols;
+                        let uv = spritesheet_uv(ts_col, ts_row, cols, rows, palette.margin, palette.spacing, tex_w, tex_h);
+                        let tile_cx = pos.x + (tile_col as f32 + 0.5) * tm.tile_width;
+                        let tile_cy = pos.y + (tile_row as f32 + 0.5) * tm.tile_height;
+                        let tile_transform = Transform2D {
+                            position: Vec2::new(tile_cx, tile_cy),
+                            rotation: t.rotation,
+                            scale: Vec2::new(tm.tile_width / tex_w, tm.tile_height / tex_h),
+                        };
+                        r.draw_texture_region(frame, tex, Some(uv), &tile_transform, tint, false, &camera)?;
+                    }
                 }
             }
         } else if let Some(s) = anim_sprite {
