@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useContextMenu } from "../components/ContextMenu";
+import AnimClipEditor from "../components/AnimClipEditor";
+import type { AnimClip } from "../App";
 
 interface FileNode {
   name: string;
@@ -16,6 +18,19 @@ interface CreateState {
   value: string;
 }
 
+interface AnimatedSpriteComp {
+  texture_path: string;
+  cols: number;
+  rows: number;
+  width: number;
+  height: number;
+  flip_x: boolean;
+  flip_y: boolean;
+  tint: [number, number, number, number];
+  clips: AnimClip[];
+  default_clip: string;
+}
+
 interface Props {
   projectPath: string | null;
   onOpenScript: (path: string) => void;
@@ -24,11 +39,12 @@ interface Props {
 }
 
 const FILE_ICON: Record<string, string> = {
-  script: "⚡",
-  scene:  "◈",
-  image:  "▣",
-  audio:  "♪",
-  other:  "·",
+  script:     "⚡",
+  scene:      "◈",
+  image:      "▣",
+  animclips:  "▶",
+  audio:      "♪",
+  other:      "·",
 };
 
 function flattenTree(node: FileNode): { path: string; kind: string; name: string }[] {
@@ -57,6 +73,8 @@ const toolbarBtnStyle: React.CSSProperties = {
 
 export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onFilesChange }: Props) {
   const [tree, setTree] = useState<FileNode | null>(null);
+  const [spriteEditorPath, setSpriteEditorPath] = useState<string | null>(null);
+  const [spriteEditorComp, setSpriteEditorComp] = useState<AnimatedSpriteComp | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["scripts", "scenes", "assets"]));
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null);
@@ -186,6 +204,18 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
     const items = [
       ...(!node.is_dir && (node.kind === "script" || node.kind === "scene")
         ? [{ label: "Open", icon: "↗", onClick: () => openNode(node) }]
+        : []),
+      ...(!node.is_dir && node.kind === "image"
+        ? [{ label: "Slice Spritesheet…", icon: "▣", onClick: () => {
+            const initial: AnimatedSpriteComp = {
+              texture_path: node.path,
+              cols: 4, rows: 4, width: 64, height: 64,
+              flip_x: false, flip_y: false,
+              tint: [1, 1, 1, 1], clips: [], default_clip: "idle",
+            };
+            setSpriteEditorComp(initial);
+            setSpriteEditorPath(node.path);
+          }}]
         : []),
       ...(node.is_dir ? [
         { label: "New Script", icon: "⚡", onClick: () => startCreate(node.path, "script") },
@@ -380,6 +410,35 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
           </>
         )}
       </div>
+
+      {spriteEditorPath && spriteEditorComp && (
+        <AnimClipEditor
+          comp={spriteEditorComp}
+          saveLabel="Save Animation File"
+          onClose={() => { setSpriteEditorPath(null); setSpriteEditorComp(null); }}
+          onSave={(partial) => setSpriteEditorComp(prev => prev ? { ...prev, ...partial } : prev)}
+          onCommit={async (partial) => {
+            if (!projectPath || !spriteEditorComp) return;
+            const final = { ...spriteEditorComp, ...partial };
+            const baseName = spriteEditorPath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "sprite";
+            const dir = spriteEditorPath.includes("/")
+              ? spriteEditorPath.substring(0, spriteEditorPath.lastIndexOf("/"))
+              : "";
+            const relPath = dir ? `${dir}/${baseName}` : baseName;
+            try {
+              await invoke("write_anim_file", {
+                projectPath,
+                relativePath: relPath,
+                content: JSON.stringify(final, null, 2),
+              });
+            } catch (e) {
+              console.error("Failed to save animation file:", e);
+            }
+            setSpriteEditorPath(null);
+            setSpriteEditorComp(null);
+          }}
+        />
+      )}
     </div>
   );
 }

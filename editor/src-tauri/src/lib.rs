@@ -52,6 +52,9 @@ pub fn run() {
             commands::move_project_entry,
             commands::delete_project_file,
             commands::rename_project_file,
+            commands::write_anim_file,
+            commands::read_text_file,
+            commands::read_project_file,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Entity, Component } from "../App";
 import { useContextMenu } from "../components/ContextMenu";
 import AnimClipEditor from "../components/AnimClipEditor";
+import FilePicker, { type ProjectFile } from "../components/FilePicker";
 
 interface AiSuggestion {
   label: string;
@@ -75,9 +75,11 @@ interface Props {
   onOpenScript: (path: string) => void;
   onAskAI?: (prompt: string, mode: "send" | "prefill") => void;
   suggestionModel?: string | null;
+  projectFiles?: ProjectFile[];
+  projectPath?: string | null;
 }
 
-export default function Inspector({ entity, selectedComponent, onSelectComponent, onSceneChange, onOpenScript, onAskAI, suggestionModel }: Props) {
+export default function Inspector({ entity, selectedComponent, onSelectComponent, onSceneChange, onOpenScript, onAskAI, suggestionModel, projectFiles = [], projectPath }: Props) {
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[] | null>(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -176,6 +178,8 @@ export default function Inspector({ entity, selectedComponent, onSelectComponent
             onBack={() => onSelectComponent(null)}
             onSceneChange={onSceneChange}
             onOpenScript={onOpenScript}
+            projectFiles={projectFiles}
+            projectPath={projectPath}
           />
         ) : (
           <>
@@ -366,13 +370,15 @@ function EmptyInspector({ onAskAI }: { onAskAI?: (prompt: string, mode: "send" |
 
 // ─── Single component view ────────────────────────────────────────────────────
 
-function ComponentView({ entity, component, componentIdx, onBack, onSceneChange, onOpenScript }: {
+function ComponentView({ entity, component, componentIdx, onBack, onSceneChange, onOpenScript, projectFiles, projectPath }: {
   entity: Entity;
   component: Component;
   componentIdx: number;
   onBack: () => void;
   onSceneChange: () => void;
   onOpenScript: (path: string) => void;
+  projectFiles: ProjectFile[];
+  projectPath?: string | null;
 }) {
   const icon = COMPONENT_ICON[component.type] ?? "·";
 
@@ -407,8 +413,8 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
         {component.type === "Transform" && (
           <TransformFields comp={component} entityId={entity.id} onSceneChange={onSceneChange} />
         )}
-        {component.type === "Sprite"          && <SpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
-        {component.type === "AnimatedSprite"  && <AnimatedSpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
+        {component.type === "Sprite"          && <SpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} />}
+        {component.type === "AnimatedSprite"  && <AnimatedSpriteFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} projectPath={projectPath} />}
         {component.type === "PhysicsBody"     && <PhysicsBodyFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "Collider"    && <ColliderFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "Script"      && <ScriptField comp={component} entityId={entity.id} componentIdx={componentIdx} onOpenScript={onOpenScript} onSceneChange={onSceneChange} />}
@@ -466,21 +472,20 @@ function TransformFields({ comp, entityId, onSceneChange }: {
 
 // ─── Sprite ──────────────────────────────────────────────────────────────────
 
-function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
+function SpriteFields({ comp, entityId, componentIdx, onSceneChange, projectFiles }: {
   comp: Extract<Component, { type: "Sprite" }>;
   entityId: number; componentIdx: number; onSceneChange: () => void;
+  projectFiles: ProjectFile[];
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
-  const browseTexture = async () => {
-    const file = await openFileDialog({
-      multiple: false,
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
-    });
-    if (file) patch({ texture_path: file as string });
-  };
+  const [pickingTexture, setPickingTexture] = useState(false);
   return (
     <>
-      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={browseTexture} />
+      {pickingTexture && (
+        <FilePicker title="Pick texture" kinds={["image"]} files={projectFiles}
+          onSelect={p => patch({ texture_path: p })} onClose={() => setPickingTexture(false)} />
+      )}
+      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={() => setPickingTexture(true)} />
       <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
       <NumberInputField label="height" value={comp.height} onCommit={v => patch({ height: v })} />
       <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
@@ -492,24 +497,48 @@ function SpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 // ─── AnimatedSprite ───────────────────────────────────────────────────────────
 
-function AnimatedSpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
+function AnimatedSpriteFields({ comp, entityId, componentIdx, onSceneChange, projectFiles, projectPath }: {
   comp: Extract<Component, { type: "AnimatedSprite" }>;
   entityId: number; componentIdx: number; onSceneChange: () => void;
+  projectFiles: ProjectFile[];
+  projectPath?: string | null;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
+  const [pickingTexture, setPickingTexture] = useState(false);
+  const [pickingClips, setPickingClips] = useState(false);
 
-  const browseTexture = async () => {
-    const file = await openFileDialog({
-      multiple: false,
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
-    });
-    if (file) patch({ texture_path: file as string });
+  const loadAnimClips = async (relativePath: string) => {
+    try {
+      const text = projectPath
+        ? await invoke<string>("read_project_file", { projectPath, relativePath })
+        : await invoke<string>("read_text_file", { path: relativePath });
+      const data = JSON.parse(text);
+      patch({
+        texture_path: data.texture_path ?? comp.texture_path,
+        cols: data.cols ?? comp.cols,
+        rows: data.rows ?? comp.rows,
+        width: data.width ?? comp.width,
+        height: data.height ?? comp.height,
+        clips: data.clips ?? comp.clips,
+        default_clip: data.default_clip ?? comp.default_clip,
+      });
+    } catch (e) {
+      console.error("Failed to load .animclips:", e);
+    }
   };
 
   return (
     <>
-      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={browseTexture} />
+      {pickingTexture && (
+        <FilePicker title="Pick texture" kinds={["image"]} files={projectFiles}
+          onSelect={p => patch({ texture_path: p })} onClose={() => setPickingTexture(false)} />
+      )}
+      {pickingClips && (
+        <FilePicker title="Load animation clips" kinds={["animclips"]} files={projectFiles}
+          onSelect={async p => { await loadAnimClips(p); }} onClose={() => setPickingClips(false)} />
+      )}
+      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={() => setPickingTexture(true)} />
       <NumberInputField label="width" value={comp.width} onCommit={v => patch({ width: v })} />
       <NumberInputField label="height" value={comp.height} onCommit={v => patch({ height: v })} />
       <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
@@ -523,10 +552,16 @@ function AnimatedSpriteFields({ comp, entityId, componentIdx, onSceneChange }: {
             {comp.clips.length} clip{comp.clips.length !== 1 ? "s" : ""}
             {comp.default_clip ? ` · default: ${comp.default_clip}` : ""}
           </span>
-          <button onClick={() => setClipEditorOpen(true)} style={{
-            background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
-            fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer",
-          }}>Edit Clips</button>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button onClick={() => setPickingClips(true)} style={{
+              background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)",
+              fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 8px", cursor: "pointer",
+            }}>Load .animclips</button>
+            <button onClick={() => setClipEditorOpen(true)} style={{
+              background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
+              fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer",
+            }}>Edit Clips</button>
+          </div>
         </div>
         {comp.clips.slice(0, 4).map((c, i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", marginBottom: "2px" }}>

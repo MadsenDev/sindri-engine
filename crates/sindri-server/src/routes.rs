@@ -158,6 +158,28 @@ pub fn normalize_scene_cameras(scene: &mut Scene) {
     }
 }
 
+// GET /assets/*path  — serve files from project_root
+pub async fn get_asset(
+    State(state): State<AppState>,
+    Path(rel): Path<String>,
+) -> impl IntoResponse {
+    let full = state.project_root.join(&rel);
+    match std::fs::read(&full) {
+        Ok(bytes) => {
+            let mime = match full.extension().and_then(|e| e.to_str()).unwrap_or("") {
+                "png"  => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "webp" => "image/webp",
+                "gif"  => "image/gif",
+                "bmp"  => "image/bmp",
+                _      => "application/octet-stream",
+            };
+            (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 // GET /health
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let mode = state

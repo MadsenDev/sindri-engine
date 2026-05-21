@@ -1,132 +1,6 @@
 {
   "name": "Editor Scene Showcase",
   "entities": {
-    "11": {
-      "id": 11,
-      "name": "Player",
-      "parent": null,
-      "children": [],
-      "components": [
-        {
-          "type": "Transform",
-          "x": 400.0,
-          "y": 260.0,
-          "scale_x": 0.9977047,
-          "scale_y": 0.9977047,
-          "rotation": 0.0
-        },
-        {
-          "type": "Sprite",
-          "texture_path": "generated:white",
-          "width": 28.0,
-          "height": 40.0,
-          "flip_x": false,
-          "flip_y": false,
-          "color": [
-            0.3,
-            0.75,
-            0.4,
-            1.0
-          ]
-        },
-        {
-          "type": "PhysicsBody",
-          "body_type": "Dynamic",
-          "lock_rotation": true,
-          "linear_damping": 0.0,
-          "angular_damping": 0.0,
-          "collision_layer": 0,
-          "collision_mask": 4294967295
-        },
-        {
-          "type": "Collider",
-          "width": 28.263327,
-          "height": 40.0,
-          "offset_x": 0.13166624,
-          "offset_y": 1.4210855e-14,
-          "is_trigger": false
-        },
-        {
-          "type": "Script",
-          "path": "player.lua"
-        }
-      ],
-      "active": true,
-      "staged": false
-    },
-    "12": {
-      "id": 12,
-      "name": "Sprite",
-      "parent": null,
-      "children": [],
-      "components": [
-        {
-          "type": "Transform",
-          "x": 405.68747,
-          "y": 368.48468,
-          "scale_x": 1.0,
-          "scale_y": 1.0,
-          "rotation": 0.0
-        },
-        {
-          "type": "Sprite",
-          "texture_path": "generated:white",
-          "width": 64.0,
-          "height": 64.0,
-          "flip_x": false,
-          "flip_y": false,
-          "color": [
-            0.34,
-            0.54,
-            1.0,
-            1.0
-          ]
-        },
-        {
-          "type": "Collider",
-          "width": 66.0,
-          "height": 65.0,
-          "offset_x": 0.0,
-          "offset_y": -0.5,
-          "is_trigger": false
-        }
-      ],
-      "active": true,
-      "staged": false
-    },
-    "5": {
-      "id": 5,
-      "name": "Main Camera",
-      "parent": null,
-      "children": [],
-      "components": [
-        {
-          "type": "Transform",
-          "x": 630.0,
-          "y": 360.0,
-          "scale_x": 1.0,
-          "scale_y": 1.0,
-          "rotation": 0.0
-        },
-        {
-          "type": "Camera",
-          "active": true,
-          "zoom": 1.0,
-          "follow_entity": null,
-          "offset_x": 0.0,
-          "offset_y": 0.0,
-          "bounds_min_x": null,
-          "bounds_min_y": null,
-          "bounds_max_x": null,
-          "bounds_max_y": null,
-          "smoothing": 1.0,
-          "dead_zone_width": 0.0,
-          "dead_zone_height": 0.0
-        }
-      ],
-      "active": true,
-      "staged": false
-    },
     "1": {
       "id": 1,
       "name": "Beacon",
@@ -161,10 +35,50 @@
         },
         {
           "type": "Collider",
-          "width": 34.0,
-          "height": 45.0,
-          "offset_x": 1.0,
-          "offset_y": 6.5,
+          "width": 91.46445,
+          "height": 90.14433,
+          "offset_x": 0.24032116,
+          "offset_y": -0.24117711,
+          "is_trigger": false
+        }
+      ],
+      "active": true,
+      "staged": false
+    },
+    "3": {
+      "id": 3,
+      "name": "Ground",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 640.0,
+          "y": 540.0,
+          "scale_x": 1.0436455,
+          "scale_y": 1.0436455,
+          "rotation": 0.0
+        },
+        {
+          "type": "Sprite",
+          "texture_path": "generated:white",
+          "width": 720.0,
+          "height": 28.0,
+          "flip_x": false,
+          "flip_y": false,
+          "color": [
+            0.18,
+            0.22,
+            0.28,
+            1.0
+          ]
+        },
+        {
+          "type": "Collider",
+          "width": 720.0,
+          "height": 28.0,
+          "offset_x": 0.0,
+          "offset_y": 0.0,
           "is_trigger": false
         }
       ],
@@ -215,40 +129,166 @@
       "active": true,
       "staged": false
     },
-    "3": {
-      "id": 3,
-      "name": "Ground",
+    "19": {
+      "id": 19,
+      "name": "Main Camera",
       "parent": null,
       "children": [],
       "components": [
         {
           "type": "Transform",
-          "x": 640.0,
-          "y": 540.0,
-          "scale_x": 1.0436455,
-          "scale_y": 1.0436455,
+          "x": 649.1436,
+          "y": 309.05737,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0
+        },
+        {
+          "type": "Camera",
+          "active": true,
+          "zoom": 1.0,
+          "follow_entity": null,
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "bounds_min_x": null,
+          "bounds_min_y": null,
+          "bounds_max_x": null,
+          "bounds_max_y": null,
+          "smoothing": 1.0,
+          "dead_zone_width": 0.0,
+          "dead_zone_height": 0.0
+        }
+      ],
+      "active": true,
+      "staged": false
+    },
+    "11": {
+      "id": 11,
+      "name": "Player",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 400.0,
+          "y": 260.0,
+          "scale_x": 1.0262564,
+          "scale_y": 1.0262564,
+          "rotation": 0.0
+        },
+        {
+          "type": "PhysicsBody",
+          "body_type": "Dynamic",
+          "lock_rotation": true,
+          "linear_damping": 0.0,
+          "angular_damping": 0.0,
+          "collision_layer": 0,
+          "collision_mask": 4294967295
+        },
+        {
+          "type": "Collider",
+          "width": 30.26333,
+          "height": 54.0,
+          "offset_x": -0.868334,
+          "offset_y": 7.0,
+          "is_trigger": false
+        },
+        {
+          "type": "Script",
+          "path": "player.lua"
+        },
+        {
+          "type": "AnimatedSprite",
+          "texture_path": "assets/link.png",
+          "cols": 10,
+          "rows": 8,
+          "width": 64.0,
+          "height": 64.0,
+          "flip_x": false,
+          "flip_y": false,
+          "tint": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "clips": [
+            {
+              "name": "idle",
+              "start_frame": 0,
+              "end_frame": 2,
+              "fps": 6.0,
+              "looping": true
+            },
+            {
+              "name": "idle_left",
+              "start_frame": 10,
+              "end_frame": 12,
+              "fps": 6.0,
+              "looping": true
+            },
+            {
+              "name": "idle_right",
+              "start_frame": 30,
+              "end_frame": 32,
+              "fps": 6.0,
+              "looping": true
+            },
+            {
+              "name": "walk_left",
+              "start_frame": 50,
+              "end_frame": 59,
+              "fps": 10.0,
+              "looping": true
+            },
+            {
+              "name": "walk_right",
+              "start_frame": 70,
+              "end_frame": 79,
+              "fps": 10.0,
+              "looping": true
+            }
+          ],
+          "default_clip": "idle"
+        }
+      ],
+      "active": true,
+      "staged": false
+    },
+    "12": {
+      "id": 12,
+      "name": "Sprite",
+      "parent": null,
+      "children": [],
+      "components": [
+        {
+          "type": "Transform",
+          "x": 405.68747,
+          "y": 368.48468,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
           "rotation": 0.0
         },
         {
           "type": "Sprite",
           "texture_path": "generated:white",
-          "width": 720.0,
-          "height": 28.0,
+          "width": 64.0,
+          "height": 64.0,
           "flip_x": false,
           "flip_y": false,
           "color": [
-            0.18,
-            0.22,
-            0.28,
+            0.34,
+            0.54,
+            1.0,
             1.0
           ]
         },
         {
           "type": "Collider",
-          "width": 720.0,
-          "height": 28.0,
+          "width": 66.0,
+          "height": 65.0,
           "offset_x": 0.0,
-          "offset_y": 0.0,
+          "offset_y": -0.5,
           "is_trigger": false
         }
       ],
@@ -256,7 +296,7 @@
       "staged": false
     }
   },
-  "next_id": 13,
+  "next_id": 20,
   "gravity_y": 980.0,
   "gravity_x": 0.0
 }

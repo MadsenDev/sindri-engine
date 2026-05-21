@@ -1,11 +1,11 @@
 use sindri::component::Component;
 use sindri::math::{Camera2D, Transform2D, Vec2};
-use sindri::render::{Renderer, Sprite, TextureHandle};
+use sindri::render::{Renderer, TextureHandle};
 use sindri::scene::Scene;
 use sindri_server::routes::{PlaybackMode, PlaybackState, SharedErrors, SharedGizmos, SharedPlayback};
 use sindri_server::{serve, AppState, SharedScene};
 mod lua_runtime;
-use lua_runtime::LuaRuntime;
+use lua_runtime::{AnimState, LuaRuntime};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -95,6 +95,55 @@ fn component_transform(entity: &sindri::entity::Entity) -> Option<&sindri::compo
 #[derive(Default)]
 struct CameraRuntime {
     positions: HashMap<u64, Vec2>,
+}
+
+struct RenderState {
+    // path -> (handle, width, height)
+    texture_cache: HashMap<String, Option<(TextureHandle, u32, u32)>>,
+    anim_timers: HashMap<u64, (u32, f32)>, // entity_id -> (frame_offset, timer)
+    project_root: std::path::PathBuf,
+    last_frame_time: std::time::Instant,
+}
+
+impl RenderState {
+    fn new(project_root: std::path::PathBuf) -> Self {
+        Self {
+            texture_cache: HashMap::new(),
+            anim_timers: HashMap::new(),
+            project_root,
+            last_frame_time: std::time::Instant::now(),
+        }
+    }
+
+    /// Returns (handle, tex_w, tex_h) or None if the file couldn't be loaded.
+    fn get_or_load(&mut self, renderer: &mut Renderer, path: &str) -> Option<(TextureHandle, u32, u32)> {
+        if let Some(cached) = self.texture_cache.get(path) {
+            return *cached;
+        }
+        let full = self.project_root.join(path);
+        let result = (|| -> anyhow::Result<(TextureHandle, u32, u32)> {
+            let bytes = std::fs::read(&full)?;
+            let img = image::load_from_memory(&bytes)?;
+            let (w, h) = (img.width(), img.height());
+            let handle = renderer.load_texture_from_file(full.to_str().unwrap_or(""))?;
+            Ok((handle, w, h))
+        })().ok();
+        self.texture_cache.insert(path.to_string(), result);
+        result
+    }
+
+    fn tick_anim(&mut self, entity_id: u64, fps: f32, frame_count: u32, dt: f32) -> u32 {
+        let (frame, timer) = self.anim_timers.entry(entity_id).or_insert((0, 0.0));
+        if fps > 0.0 && frame_count > 0 {
+            *timer += dt;
+            let frame_dur = 1.0 / fps;
+            while *timer >= frame_dur {
+                *timer -= frame_dur;
+                *frame = (*frame + 1) % frame_count;
+            }
+        }
+        *frame
+    }
 }
 
 fn camera_bounds(camera: &sindri::component::Camera) -> Option<(Vec2, Vec2)> {
@@ -220,25 +269,29 @@ struct ScreenshotCapture {
     renderer: Renderer,
     camera_runtime: CameraRuntime,
     white_texture: TextureHandle,
+    render_state: RenderState,
 }
 
 impl ScreenshotCapture {
-    fn new() -> anyhow::Result<Self> {
+    fn new(project_root: std::path::PathBuf) -> anyhow::Result<Self> {
         let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT)?;
         let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
         Ok(Self {
             renderer,
             camera_runtime: CameraRuntime::default(),
             white_texture,
+            render_state: RenderState::new(project_root),
         })
     }
 
-    fn capture(&mut self, scene: &Scene) -> anyhow::Result<Vec<u8>> {
+    fn capture(&mut self, scene: &Scene, anim_states: &HashMap<u64, AnimState>) -> anyhow::Result<Vec<u8>> {
         render_scene_png(
             &mut self.renderer,
             scene,
             &mut self.camera_runtime,
             self.white_texture,
+            &mut self.render_state,
+            anim_states,
         )
     }
 }
@@ -249,51 +302,90 @@ fn draw_scene_contents(
     scene: &Scene,
     camera_runtime: &mut CameraRuntime,
     white_texture: TextureHandle,
+    render_state: &mut RenderState,
+    anim_states: &HashMap<u64, AnimState>,
+    dt: f32,
     gizmos: bool,
 ) -> anyhow::Result<()> {
-    r.clear(frame, [0.039, 0.043, 0.051, 1.0])?; // editor bg-0
+    r.clear(frame, [0.039, 0.043, 0.051, 1.0])?;
 
     let camera = scene_camera(scene, camera_runtime);
 
     for entity in scene.entities.values() {
         let transform = entity.components.iter().find_map(|c| {
-            if let Component::Transform(t) = c {
-                Some(t)
-            } else {
-                None
-            }
+            if let Component::Transform(t) = c { Some(t) } else { None }
         });
         let sprite = entity.components.iter().find_map(|c| {
-            if let Component::Sprite(s) = c {
-                Some(s)
-            } else {
-                None
-            }
+            if let Component::Sprite(s) = c { Some(s) } else { None }
+        });
+        let anim_sprite = entity.components.iter().find_map(|c| {
+            if let Component::AnimatedSprite(s) = c { Some(s) } else { None }
         });
         let physics_body = entity.components.iter().find_map(|c| {
-            if let Component::PhysicsBody(body) = c {
-                Some(body)
-            } else {
-                None
-            }
+            if let Component::PhysicsBody(body) = c { Some(body) } else { None }
         });
 
         let Some(t) = transform else { continue };
-        if sprite.is_none() && physics_body.is_none() {
+        if sprite.is_none() && anim_sprite.is_none() && physics_body.is_none() {
             continue;
         }
 
         let pos = Vec2::new(t.x, t.y);
 
-        if let Some(s) = sprite {
-            let mut sprite = Sprite::new(white_texture);
-            sprite.transform = Transform2D {
+        if let Some(s) = anim_sprite {
+            let (clip_name, runtime_frame, flip_x, flip_y) = if let Some(st) = anim_states.get(&entity.id) {
+                (st.current_clip.as_str(), Some(st.frame as u32), st.flip_x, st.flip_y)
+            } else {
+                (s.default_clip.as_str(), None, s.flip_x, s.flip_y)
+            };
+            let clip = s.clips.iter().find(|c| c.name == clip_name)
+                .or_else(|| s.clips.first());
+            let (start_frame, frame_count, fps) = clip
+                .map(|c| (c.start_frame, (c.end_frame - c.start_frame + 1).max(1), c.fps))
+                .unwrap_or((0, 1, 0.0));
+            let frame_offset = if let Some(f) = runtime_frame {
+                f % frame_count
+            } else {
+                render_state.tick_anim(entity.id, fps, frame_count, dt)
+            };
+            let abs_frame = start_frame + frame_offset;
+            let cols = s.cols.max(1);
+            let rows = s.rows.max(1);
+            let col = abs_frame % cols;
+            let row = abs_frame / cols;
+            let uv_rect = [
+                col as f32 / cols as f32,
+                row as f32 / rows as f32,
+                1.0 / cols as f32,
+                1.0 / rows as f32,
+            ];
+
+            let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
+                Some((h, tw, th)) => (h, tw as f32, th as f32),
+                None => (white_texture, 1.0, 1.0),
+            };
+
+            let transform = Transform2D {
                 position: pos,
                 rotation: t.rotation,
-                scale: Vec2::new(s.width * t.scale_x, s.height * t.scale_y),
+                // to_matrix multiplies scale * full_tex_size, so divide by full_tex_size here
+                scale: Vec2::new(
+                    s.width * t.scale_x * (if flip_x { -1.0 } else { 1.0 }) / tex_w,
+                    s.height * t.scale_y * (if flip_y { -1.0 } else { 1.0 }) / tex_h,
+                ),
             };
-            sprite.tint = s.color;
-            r.draw_sprite(frame, &sprite, &camera)?;
+            r.draw_texture_region(frame, tex, Some(uv_rect), &transform, s.tint, false, &camera)?;
+        } else if let Some(s) = sprite {
+            let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
+                Some((h, tw, th)) => (h, tw as f32, th as f32),
+                None => (white_texture, 1.0, 1.0),
+            };
+            let transform = Transform2D {
+                position: pos,
+                rotation: t.rotation,
+                scale: Vec2::new(s.width * t.scale_x / tex_w, s.height * t.scale_y / tex_h),
+            };
+            r.draw_texture_region(frame, tex, None, &transform, s.color, false, &camera)?;
         } else {
             let (hw, hh, color) = if let Some(body) = physics_body {
                 let color = match body.body_type {
@@ -344,9 +436,11 @@ fn render_scene_png(
     scene: &Scene,
     camera_runtime: &mut CameraRuntime,
     white_texture: TextureHandle,
+    render_state: &mut RenderState,
+    anim_states: &HashMap<u64, AnimState>,
 ) -> anyhow::Result<Vec<u8>> {
     let rgba = renderer.render_offscreen_rgba(WIDTH, HEIGHT, |r, frame| {
-        draw_scene_contents(r, frame, scene, camera_runtime, white_texture, false)
+        draw_scene_contents(r, frame, scene, camera_runtime, white_texture, render_state, anim_states, 0.0, false)
     })?;
     Ok(encode_png(&rgba))
 }
@@ -426,6 +520,7 @@ fn run_preview_window(
 
     let mut lua = LuaRuntime::new(errors.clone())?;
     let mut camera_runtime = CameraRuntime::default();
+    let mut render_state = RenderState::new(project_dir.to_path_buf());
     let mut last_tick = std::time::Instant::now();
     let mut was_stopped = true;
 
@@ -458,6 +553,9 @@ fn run_preview_window(
             WindowEvent::RedrawRequested => {
                 let snapshot = shared_scene.blocking_read().clone();
                 let gz = gizmos.load(std::sync::atomic::Ordering::Relaxed);
+                let now = std::time::Instant::now();
+                let dt = now.duration_since(render_state.last_frame_time).as_secs_f32().min(0.1);
+                render_state.last_frame_time = now;
                 match renderer.begin_frame().and_then(|mut frame| {
                     draw_scene_contents(
                         &mut renderer,
@@ -465,6 +563,9 @@ fn run_preview_window(
                         &snapshot,
                         &mut camera_runtime,
                         white_texture,
+                        &mut render_state,
+                        &lua.anim_states,
+                        dt,
                         gz,
                     )?;
                     renderer.end_frame(frame)
@@ -497,6 +598,7 @@ const STREAM_W: u32 = 960;
 const STREAM_H: u32 = 540;
 
 fn run_headless(
+    project_dir: PathBuf,
     scripts_dir: PathBuf,
     shared_scene: SharedScene,
     shared_keys: sindri_server::routes::SharedKeys,
@@ -508,6 +610,7 @@ fn run_headless(
     let mut renderer = Renderer::new_offscreen(STREAM_W, STREAM_H)?;
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     let mut camera_runtime = CameraRuntime::default();
+    let mut render_state = RenderState::new(project_dir);
     let mut lua = LuaRuntime::new(errors.clone())?;
     let mut last_tick = std::time::Instant::now();
     let mut was_stopped = true;
@@ -531,8 +634,11 @@ fn run_headless(
         if frame_tx.receiver_count() > 0 {
             let snapshot = shared_scene.blocking_read().clone();
             let gz = gizmos.load(std::sync::atomic::Ordering::Relaxed);
+            let now = std::time::Instant::now();
+            let dt = now.duration_since(render_state.last_frame_time).as_secs_f32().min(0.1);
+            render_state.last_frame_time = now;
             if let Ok(rgba) = renderer.render_offscreen_rgba(STREAM_W, STREAM_H, |r, frame| {
-                draw_scene_contents(r, frame, &snapshot, &mut camera_runtime, white_texture, gz)
+                draw_scene_contents(r, frame, &snapshot, &mut camera_runtime, white_texture, &mut render_state, &lua.anim_states, dt, gz)
             }) {
                 let _ = frame_tx.send(rgba);
             }
@@ -598,6 +704,7 @@ fn main() -> anyhow::Result<()> {
         let thread_errors = shared_errors.clone();
         let scripts_root = scripts_dir.clone();
         let project_root = project_dir.clone();
+        let project_root_for_capture = project_dir.clone();
         let project_label = project_dir.display().to_string();
         let frame_tx_sv = frame_tx_opt.clone();
         let gizmos_sv = shared_gizmos.clone();
@@ -632,7 +739,7 @@ fn main() -> anyhow::Result<()> {
                     screenshot_fn: Arc::new(move |scene| {
                         let mut capture = screenshot_capture.lock().ok()?;
                         if capture.is_none() {
-                            match ScreenshotCapture::new() {
+                            match ScreenshotCapture::new(project_root_for_capture.clone()) {
                                 Ok(new_capture) => *capture = Some(new_capture),
                                 Err(e) => {
                                     push_error(
@@ -645,7 +752,7 @@ fn main() -> anyhow::Result<()> {
                         }
                         match capture
                             .as_mut()
-                            .and_then(|capture| capture.capture(scene).ok())
+                            .and_then(|capture| capture.capture(scene, &HashMap::new()).ok())
                         {
                             Some(image) => Some(image),
                             None => {
@@ -675,6 +782,7 @@ fn main() -> anyhow::Result<()> {
 
     if headless {
         run_headless(
+            project_dir,
             scripts_dir,
             shared_scene,
             shared_keys,

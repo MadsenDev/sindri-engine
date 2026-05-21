@@ -13,16 +13,17 @@ interface Props {
   onDeleteEntity: (id: number) => Promise<void>;
 }
 
-const COMPONENT_TYPES = ["Transform", "Sprite", "PhysicsBody", "Collider", "Script", "Camera", "AudioSource"];
+const COMPONENT_TYPES = ["Transform", "Sprite", "AnimatedSprite", "PhysicsBody", "Collider", "Script", "Camera", "AudioSource"];
 
 const COMPONENT_ICON: Record<string, string> = {
-  Transform:   "⌖",
-  Sprite:      "▣",
-  PhysicsBody: "●",
-  Collider:    "⬡",
-  Script:      "⚡",
-  Camera:      "◉",
-  AudioSource: "♪",
+  Transform:      "⌖",
+  Sprite:         "▣",
+  AnimatedSprite: "▶",
+  PhysicsBody:    "●",
+  Collider:       "⬡",
+  Script:         "⚡",
+  Camera:         "◉",
+  AudioSource:    "♪",
 };
 
 interface CreatePreset {

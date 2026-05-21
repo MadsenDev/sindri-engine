@@ -214,17 +214,26 @@ export default function App() {
   useEffect(() => {
     if (!engineReady) return;
     let cancelled = false;
+    let failures = 0;
+    const FAILURE_THRESHOLD = 4;
     let interval: ReturnType<typeof setInterval> | null = null;
     const sync = async () => {
       try {
         const status = await invoke<EngineStatus>("get_engine_status");
         if (cancelled) return;
+        failures = 0;
         const playback = status.playback;
         if (playback === "playing" || playback === "paused" || playback === "stopped") {
           setPlaybackState(playback);
         }
       } catch {
-        if (!cancelled) { setEngineReady(false); setPlaybackState("stopped"); }
+        if (!cancelled) {
+          failures++;
+          if (failures >= FAILURE_THRESHOLD) {
+            setEngineReady(false);
+            setPlaybackState("stopped");
+          }
+        }
       }
     };
     interval = setInterval(sync, 1000);
@@ -683,6 +692,8 @@ export default function App() {
                 onSceneChange={handleSceneChange}
                 onOpenScript={handleOpenScript}
                 suggestionModel={suggestionModel}
+                projectFiles={projectFiles}
+                projectPath={projectPath}
                 onAskAI={(prompt, mode) => {
                   setCmdKInit(mode === "send" ? { message: prompt } : { input: prompt });
                   setCmdKOpen(true);

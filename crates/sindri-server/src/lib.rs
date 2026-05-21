@@ -22,6 +22,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
+        .route("/assets/*path", get(routes::get_asset))
         .route("/health", get(routes::health))
         .route("/errors", get(routes::get_errors))
         .route("/scene", get(routes::get_scene).put(routes::put_scene))

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 export interface MenuItemDef {
@@ -64,6 +64,29 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
         document.body,
       )}
     </Ctx.Provider>
+  );
+}
+
+function SubMenu({ items, onClose }: { items: MenuItemDef[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [offset, setOffset] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const overflow = rect.bottom - window.innerHeight + 4;
+    if (overflow > 0) setOffset(-overflow);
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      data-context-menu="1"
+      style={{ position: "absolute", left: "100%", top: `calc(-4px + ${offset}px)`, zIndex: 10000 }}
+    >
+      <MenuPanel items={items} onClose={onClose} />
+    </div>
   );
 }
 
@@ -169,9 +192,7 @@ function MenuItem({ item, onClose }: { item: MenuItemDef; onClose: () => void })
       {hasChildren && <span style={{ color: "var(--ink-4)", fontSize: "10px" }}>▶</span>}
 
       {hasChildren && subOpen && (
-        <div data-context-menu="1" style={{ position: "absolute", left: "100%", top: "-4px", zIndex: 10000 }}>
-          <MenuPanel items={item.children!} onClose={onClose} />
-        </div>
+        <SubMenu items={item.children!} onClose={onClose} />
       )}
     </div>
   );

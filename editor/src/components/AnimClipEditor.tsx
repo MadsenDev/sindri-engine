@@ -18,6 +18,8 @@ interface Props {
   comp: AnimatedSpriteComp;
   onClose: () => void;
   onSave: (updated: Partial<AnimatedSpriteComp>) => void;
+  onCommit?: (updated: Partial<AnimatedSpriteComp>) => void;
+  saveLabel?: string;
 }
 
 function resolveTextureUrl(path: string): string {
@@ -27,7 +29,7 @@ function resolveTextureUrl(path: string): string {
   return `http://localhost:7878/assets/${path}`;
 }
 
-export default function AnimClipEditor({ comp, onClose, onSave }: Props) {
+export default function AnimClipEditor({ comp, onClose, onSave, onCommit, saveLabel }: Props) {
   const [clips, setClips] = useState<AnimClip[]>(
     comp.clips.length > 0 ? comp.clips : [{ name: "idle", start_frame: 0, end_frame: Math.max(0, comp.cols * comp.rows - 1), fps: 10, looping: true }]
   );
@@ -128,8 +130,13 @@ export default function AnimClipEditor({ comp, onClose, onSave }: Props) {
   };
 
   const handleSave = () => {
-    onSave({ clips, default_clip: defaultClip });
-    onClose();
+    const patch = { clips, default_clip: defaultClip };
+    if (onCommit) {
+      onCommit(patch);
+    } else {
+      onSave(patch);
+      onClose();
+    }
   };
 
   // Preview canvas
@@ -147,11 +154,9 @@ export default function AnimClipEditor({ comp, onClose, onSave }: Props) {
 
   // Spritesheet grid cell size for display
   const GRID_MAX_W = 520;
-  const GRID_MAX_H = 340;
   const cellW = Math.min(80, Math.floor(GRID_MAX_W / comp.cols));
   const cellH = img ? Math.round(cellW * (img.naturalHeight / comp.rows) / (img.naturalWidth / comp.cols)) : cellW;
   const gridW = cellW * comp.cols;
-  const gridH = Math.min(cellH * comp.rows, GRID_MAX_H);
 
   const isInClip = (frameIdx: number) => clip && frameIdx >= clip.start_frame && frameIdx <= clip.end_frame;
 
@@ -217,8 +222,6 @@ export default function AnimClipEditor({ comp, onClose, onSave }: Props) {
                   display: "grid",
                   gridTemplateColumns: `repeat(${comp.cols}, ${cellW}px)`,
                   width: `${gridW}px`,
-                  maxHeight: `${gridH}px`,
-                  overflow: "hidden",
                   userSelect: "none",
                   cursor: "crosshair",
                 }}
@@ -240,12 +243,10 @@ export default function AnimClipEditor({ comp, onClose, onSave }: Props) {
                         backgroundImage: `url(${resolveTextureUrl(comp.texture_path)})`,
                         backgroundSize: `${comp.cols * 100}% ${comp.rows * 100}%`,
                         backgroundPosition: `${u / (1 - uw) * 100}% ${v / (1 - uh) * 100}%`,
+                        backgroundRepeat: "no-repeat",
                         outline: inRange ? `2px solid var(--amber)` : "1px solid var(--rule)",
                         outlineOffset: "-1px",
-                        background: inRange
-                          ? `url(${resolveTextureUrl(comp.texture_path)})`
-                          : undefined,
-                        filter: inRange ? "none" : "brightness(0.45)",
+                        opacity: inRange ? 1 : 0.35,
                         boxSizing: "border-box",
                         overflow: "hidden",
                       }}
@@ -474,7 +475,7 @@ export default function AnimClipEditor({ comp, onClose, onSave }: Props) {
           <button onClick={handleSave} style={{
             background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
             fontFamily: "var(--font-ui)", fontSize: "12px", padding: "6px 18px", cursor: "pointer",
-          }}>Save Changes</button>
+          }}>{saveLabel ?? "Save Changes"}</button>
         </div>
       </div>
     </div>

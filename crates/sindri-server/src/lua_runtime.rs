@@ -150,10 +150,12 @@ fn apply_anim_commands(anim_states: &mut HashMap<u64, AnimState>, entity_id: u64
         match command {
             SceneCommand::AnimPlay(name) => {
                 if let Some(state) = anim_states.get_mut(&entity_id) {
-                    state.current_clip = name.clone();
-                    state.frame = 0;
-                    state.timer = 0.0;
-                    state.playing = true;
+                    if &state.current_clip != name {
+                        state.current_clip = name.clone();
+                        state.frame = 0;
+                        state.timer = 0.0;
+                        state.playing = true;
+                    }
                 }
             }
             SceneCommand::AnimSetFlipX(v) => {
@@ -1162,7 +1164,7 @@ impl LuaRuntime {
                     let anim_fn = if let (Some(anim), Some((cur_clip, cur_frame, playing, flip_x, flip_y))) = (anim_for_facet, anim_state_snap) {
                         self.lua.create_function(move |lua, _: mlua::MultiValue| {
                             let tbl = lua.create_table()?;
-                            let clips = anim.clips.clone();
+                            let _clips = anim.clips.clone();
                             let default_clip = cur_clip.clone();
                             let cmds = scene_cmds.clone();
                             tbl.set("current_clip", lua.create_function(move |_, _: Table| {
@@ -1174,11 +1176,8 @@ impl LuaRuntime {
                             tbl.set("flip_y", flip_y)?;
                             // play(clip_name) — switch clip; resets frame to 0
                             let cmds2 = cmds.clone();
-                            let clips2 = clips.clone();
                             tbl.set("play", lua.create_function(move |_, (_this, name): (Table, String)| {
-                                if clips2.iter().any(|c| c.name == name) {
-                                    cmds2.lock().unwrap().push(SceneCommand::AnimPlay(name));
-                                }
+                                cmds2.lock().unwrap().push(SceneCommand::AnimPlay(name));
                                 Ok(())
                             })?)?;
                             // set_flip_x / set_flip_y

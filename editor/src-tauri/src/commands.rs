@@ -1067,7 +1067,7 @@ Rules:
 - When creating a player and a ground/platform, place the player above the ground, not beside it. Use explicit edit_transform actions for both entities.
 - Physics needs both PhysicsBody and Collider. Use PhysicsBody body_type "Dynamic" for moving players/enemies, "Fixed" for ground/walls/platforms, and "Kinematic" for scripted moving platforms. Add Collider for collision shape/trigger data.
 - For platformer-style players, set PhysicsBody lock_rotation=true.
-- Supported scene component types are exactly: Transform, Sprite, PhysicsBody, Collider, Script, Camera, AudioSource. You may add, remove, and patch these scene components.
+- Supported scene component types are exactly: Transform, Sprite, AnimatedSprite, PhysicsBody, Collider, Script, Camera, AudioSource. You may add, remove, and patch these scene components.
 - PLAYER ENTITY TEMPLATE — when creating a player, ALWAYS include ALL of these actions: (1) create_entity "Player", (2) add_component Transform, (3) add_component Sprite + patch color/size, (4) add_component PhysicsBody + patch body_type Dynamic lock_rotation true, (5) add_component Collider + patch width/height to match sprite, (6) attach_script with movement Lua code. An entity with only create_entity and no components is useless.
 - Do NOT create unsupported engine-only components such as Tilemap, Animation, ParticleEmitter, PointLight, DirectionalLight, HUD, PathfindingGrid, or gameplay marker components through AI actions. If asked for one of these, explain that editor/AI scene support is not implemented yet and suggest Lua/scripted or Rust-side alternatives.
 - `patch_component` data fields: Sprite supports texture_path, width, height, flip_x, flip_y, color [r,g,b,a]; Collider supports width, height, offset_x, offset_y, is_trigger; PhysicsBody supports body_type, lock_rotation, linear_damping, angular_damping, collision_layer, collision_mask; Script supports path; Camera supports active, zoom, follow_entity, offset_x, offset_y, bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, smoothing, dead_zone_width, dead_zone_height; AudioSource supports path, volume, looping, play_on_start.
@@ -1079,6 +1079,7 @@ Rules:
 - PhysicsFacet: `p:velocity()` → Vec2, `p:set_velocity(vec2(vx,vy))`, `p:apply_impulse(vec2(ix,iy))`, `p:contacts()` → table of entity name strings currently touching this entity (e.g. `{{"Player","Ground"}}`). Nil if entity has no PhysicsBody component.
 - Global `entity_transform(name)` → `{{x, y, rotation}}` or nil. Returns the named entity's transform as a snapshot for this frame. Example: `local t = entity_transform("Drone"); if t then local dx = t.x - self.x end`.
 - SpriteFacet: `spr:set_tint({{r,g,b,a}})`, `spr:set_visible(bool)`. Nil if no Sprite component.
+- AnimatedSpriteFacet: `local anim = self:animated_sprite()` — nil if no AnimatedSprite component. Methods: `anim:play("clip_name")` (switches clip, no-op if already playing), `anim:set_flip_x(bool)`, `anim:set_flip_y(bool)`, `anim:current_clip()` → string. Use `play` every frame based on state; it is idempotent. Example walk pattern: `local anim = self:animated_sprite(); if anim ~= nil then if h > 0.1 then anim:play("walk_right") elseif h < -0.1 then anim:play("walk_left") else anim:play("idle") end end`
 - Correct platformer movement: `local h = input:axis("A","D"); phys:set_velocity(vec2(h * speed, phys:velocity().y))`
 - ATTACH/FOLLOW PATTERN — to ride/follow another entity, use `contacts()` to detect the touch, then `entity_transform("Name")` to get its position/rotation: `local contacts = self:physics():contacts(); for _, name in ipairs(contacts) do if name == "Drone" then local dt = entity_transform("Drone"); if dt then self:transform():set_rotation(dt.rotation); self:transform():set_position(vec2(dt.x, dt.y - 32)); end end end`
 - WRONG (do not use): `love.keyboard.isDown`, `Input.GetKey`, `key_down()` global, `self.x`/`self.y` field access, `self:move_and_slide()`
@@ -1284,8 +1285,9 @@ Rules:
 - Use entity_name for entities created in the same change; use entity_id for existing entities.
 - Coordinate system: +X right, +Y down.
 - Physics needs both PhysicsBody and Collider. body_type: "Dynamic" (players/enemies), "Fixed" (ground/walls), "Kinematic" (scripted platforms). lock_rotation=true for platformer players.
-- Supported component types: Transform, Sprite, PhysicsBody, Collider, Script, Camera, AudioSource.
+- Supported component types: Transform, Sprite, AnimatedSprite, PhysicsBody, Collider, Script, Camera, AudioSource.
 - Scripts use the REAL Sindri Lua API — NOT globals like key_down(). Use: self:input():is_key_down("A"), self:transform():set_position(vec2(x,y)), self:physics():set_velocity(vec2(vx,vy)), self:sprite():set_tint({{r,g,b,a}}). Always nil-check facets before use.
+- AnimatedSpriteFacet: `local anim = self:animated_sprite()` — nil if no AnimatedSprite component. `anim:play("clip_name")` switches the active clip (idempotent — safe to call every frame). `anim:set_flip_x(bool)`, `anim:set_flip_y(bool)`, `anim:current_clip()` → string. Walk pattern: `local anim = self:animated_sprite(); if anim ~= nil then if h > 0.1 then anim:play("walk_right") elseif h < -0.1 then anim:play("walk_left") else anim:play("idle") end end`
 - Cross-entity queries: `entity_transform("Name")` → `{{x, y, rotation}}` or nil (snapshot from this frame). `self:physics():contacts()` → array of entity name strings currently touching this entity's collider.
 - ATTACH/FOLLOW PATTERN — to make entity A ride/follow entity B: in A's script, check `self:physics():contacts()` for B's name, then use `entity_transform("B")` to read B's position/rotation, then `self:transform():set_position(...)` and `self:transform():set_rotation(...)` to snap A onto B with an offset. Example: `local contacts = self:physics():contacts(); for _, name in ipairs(contacts) do if name == "Drone" then local dt_b = entity_transform("Drone"); if dt_b then self:transform():set_rotation(dt_b.rotation); self:transform():set_position(vec2(dt_b.x, dt_b.y - 32)); end end end`
 - PLAYER TEMPLATE — "actions" must include: create_entity, add+patch Transform, add+patch Sprite (color/size), add+patch PhysicsBody (Dynamic, lock_rotation true), add+patch Collider (same size as sprite), attach_script with full Lua movement code.
@@ -2650,6 +2652,7 @@ fn file_kind_from_ext(ext: &str) -> &'static str {
     match ext {
         "lua" => "script",
         "sindri" => "scene",
+        "animclips" => "animclips",
         "png" | "jpg" | "jpeg" | "webp" | "bmp" => "image",
         "ogg" | "wav" | "mp3" | "flac" => "audio",
         _ => "other",
@@ -2892,6 +2895,34 @@ pub async fn delete_project_file(
     } else {
         std::fs::remove_file(&full).map_err(|e| e.to_string())
     }
+}
+
+#[tauri::command]
+pub async fn write_anim_file(
+    project_path: String,
+    relative_path: String,
+    content: String,
+) -> Result<String, String> {
+    let path = if relative_path.ends_with(".animclips") {
+        relative_path
+    } else {
+        format!("{}.animclips", relative_path)
+    };
+    let full = std::path::Path::new(&project_path).join(&path);
+    std::fs::create_dir_all(full.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&full, &content).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn read_project_file(project_path: String, relative_path: String) -> Result<String, String> {
+    let full = std::path::Path::new(&project_path).join(&relative_path);
+    std::fs::read_to_string(&full).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
