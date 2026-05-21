@@ -200,14 +200,59 @@ impl Default for AnimatedSprite {
     }
 }
 
-/// A tile-based map component. Tiles reference a tileset texture by 1-based index (0 = empty).
+/// A single palette (tileset texture + metadata) used by a Tilemap.
+/// Matches the `.tilepallet` file format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TilePalette {
+    /// Display name (used in the painter palette tabs)
+    #[serde(default)]
+    pub name: String,
+    pub texture_path: String,
+    /// Columns in the tileset texture
+    pub tileset_cols: u32,
+    /// Rows in the tileset texture
+    pub tileset_rows: u32,
+    /// Pixel border around the tileset edge
+    #[serde(default)]
+    pub margin: u32,
+    /// Pixel gap between tiles
+    #[serde(default)]
+    pub spacing: u32,
+    /// 0-based tile indices within this palette that are solid (for physics/pathfinding)
+    #[serde(default)]
+    pub solid_tiles: Vec<u16>,
+}
+
+impl TilePalette {
+    pub fn tile_count(&self) -> u32 {
+        self.tileset_cols * self.tileset_rows
+    }
+}
+
+/// Encode a (palette_id, tile_idx) pair into a u32 cell value.
+/// palette_id is 1-indexed (1 = first palette); tile_idx is 0-indexed within the palette.
+/// Returns 0 (empty) if palette_id is 0.
+pub fn encode_tile(palette_id: u32, tile_idx: u32) -> u32 {
+    (palette_id << 16) | (tile_idx & 0xFFFF)
+}
+
+/// Decode a u32 cell value into (palette_id, tile_idx).
+/// Returns (0, 0) for empty cells.
+pub fn decode_tile(v: u32) -> (u32, u32) {
+    (v >> 16, v & 0xFFFF)
+}
+
+/// A tile-based map component.
+///
+/// Each cell stores a u32: upper 16 bits = palette_id (1-indexed, 0 = empty),
+/// lower 16 bits = tile_idx (0-indexed within that palette's tileset).
+/// Use `encode_tile` / `decode_tile` helpers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tilemap {
-    pub texture_path: String,
-    /// Columns of tiles in the tileset texture
-    pub tileset_cols: u32,
-    /// Rows of tiles in the tileset texture
-    pub tileset_rows: u32,
+    /// Ordered list of tile palettes available to this map.
+    /// palette_id 1 in a cell refers to palettes[0], palette_id 2 to palettes[1], etc.
+    #[serde(default)]
+    pub palettes: Vec<TilePalette>,
     /// Width of each tile in world units
     pub tile_width: f32,
     /// Height of each tile in world units
@@ -216,26 +261,23 @@ pub struct Tilemap {
     pub map_cols: u32,
     /// Map height in tiles
     pub map_rows: u32,
-    /// Flat tile array (row-major). 0 = empty, 1-based index into tileset.
-    pub tiles: Vec<u16>,
+    /// Flat tile array (row-major). 0 = empty. Use encode_tile/decode_tile.
+    pub tiles: Vec<u32>,
     pub tint: [f32; 4],
-    /// Pixel border around the edge of the tileset texture
-    #[serde(default)]
-    pub margin: u32,
-    /// Pixel gap between tiles in the tileset texture
-    #[serde(default)]
-    pub spacing: u32,
-    /// Tile IDs (1-based) that act as solid collision surfaces.
-    /// Physics bridge auto-generates static colliders for these tiles on play start.
-    #[serde(default)]
-    pub solid_tiles: Vec<u16>,
 }
 
 impl Tilemap {
-    /// Returns true if the tile at (col, row) is solid.
+    /// Returns true if the tile at (col, row) is solid, based on its palette's solid_tiles.
     pub fn is_tile_solid(&self, col: u32, row: u32) -> bool {
-        let id = self.tiles.get((row * self.map_cols + col) as usize).copied().unwrap_or(0);
-        id != 0 && self.solid_tiles.contains(&id)
+        let v = self.tiles.get((row * self.map_cols + col) as usize).copied().unwrap_or(0);
+        if v == 0 { return false; }
+        let (palette_id, tile_idx) = decode_tile(v);
+        if palette_id == 0 { return false; }
+        if let Some(pal) = self.palettes.get((palette_id - 1) as usize) {
+            pal.solid_tiles.contains(&(tile_idx as u16))
+        } else {
+            false
+        }
     }
 
     /// Greedy rectangle merge over solid tiles.
@@ -247,10 +289,7 @@ impl Tilemap {
         let th = self.tile_height;
 
         let solid: Vec<bool> = (0..rows).flat_map(|r| {
-            (0..cols).map(move |c| {
-                let id = self.tiles.get(r * cols + c).copied().unwrap_or(0);
-                id != 0 && self.solid_tiles.contains(&id)
-            })
+            (0..cols).map(move |c| self.is_tile_solid(c as u32, r as u32))
         }).collect();
 
         let mut consumed = vec![false; cols * rows];
@@ -267,7 +306,6 @@ impl Tilemap {
                     }
                     let run_end = col;
 
-                    // Extend the run downward as far as possible
                     let mut run_height = 1;
                     'down: loop {
                         let next_row = row + run_height;
@@ -306,18 +344,13 @@ impl Default for Tilemap {
         let map_cols = 20u32;
         let map_rows = 10u32;
         Self {
-            texture_path: String::new(),
-            tileset_cols: 8,
-            tileset_rows: 8,
+            palettes: Vec::new(),
             tile_width: 32.0,
             tile_height: 32.0,
             map_cols,
             map_rows,
-            tiles: vec![0; (map_cols * map_rows) as usize],
+            tiles: vec![0u32; (map_cols * map_rows) as usize],
             tint: [1.0, 1.0, 1.0, 1.0],
-            margin: 0,
-            spacing: 0,
-            solid_tiles: Vec::new(),
         }
     }
 }

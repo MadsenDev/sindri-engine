@@ -697,7 +697,7 @@ function drawEntity(
     | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; tint: [number,number,number,number]; clips: { name: string; start_frame: number; end_frame: number; fps: number; looping: boolean }[]; default_clip: string; flip_x: boolean; flip_y: boolean }
     | undefined;
   const tilemap = entity.components.find(c => c.type === "Tilemap") as
-    | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number,number,number,number]; margin?: number; spacing?: number; solid_tiles?: number[] }
+    | { type: "Tilemap"; palettes: { name: string; texture_path: string; tileset_cols: number; tileset_rows: number; margin: number; spacing: number; solid_tiles: number[] }[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number,number,number,number] }
     | undefined;
   const collider = entity.components.find(c => c.type === "Collider") as
     | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
@@ -736,61 +736,80 @@ function drawEntity(
     const tilePxW = tilemap.tile_width * cam.zoom;
     const tilePxH = tilemap.tile_height * cam.zoom;
 
-    const tsColCount = Math.max(1, tilemap.tileset_cols);
-    const tsRowCount = Math.max(1, tilemap.tileset_rows);
-    const margin = tilemap.margin ?? 0;
-    const spacing = tilemap.spacing ?? 0;
-
-    let tmImg = imgCache?.get(tilemap.texture_path);
-    if (tmImg === undefined && tilemap.texture_path && imgCache) {
-      const el = new Image();
-      el.onload = () => imgCache.set(tilemap.texture_path, el);
-      el.onerror = () => imgCache.set(tilemap.texture_path, null);
-      imgCache.set(tilemap.texture_path, null);
-      el.src = tilemap.texture_path.startsWith("/") ? tilemap.texture_path : `http://localhost:7878/assets/${tilemap.texture_path}`;
-      tmImg = null;
+    // Ensure all palette textures are loaded into imgCache
+    if (imgCache) {
+      for (const pal of tilemap.palettes) {
+        if (!pal.texture_path) continue;
+        const cacheKey = pal.texture_path;
+        if (imgCache.get(cacheKey) === undefined) {
+          const el = new Image();
+          el.onload = () => imgCache.set(cacheKey, el);
+          el.onerror = () => imgCache.set(cacheKey, null);
+          imgCache.set(cacheKey, null);
+          el.src = pal.texture_path.startsWith("/") ? pal.texture_path : `http://localhost:7878/assets/${pal.texture_path}`;
+        }
+      }
     }
 
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(activeTransform.rotation);
 
-    if (tmImg) {
-      const iw = tmImg.naturalWidth;
-      const ih = tmImg.naturalHeight;
-      const m = margin, s = spacing;
-      const cellW = (iw - 2 * m - s * (tsColCount - 1)) / tsColCount;
-      const cellH = (ih - 2 * m - s * (tsRowCount - 1)) / tsRowCount;
-      const t = tilemap.tint;
-      ctx.globalAlpha = t[3];
-      for (let r = 0; r < tilemap.map_rows; r++) {
-        for (let c = 0; c < tilemap.map_cols; c++) {
-          const tileId = tilemap.tiles[r * tilemap.map_cols + c] ?? 0;
-          if (tileId === 0) continue;
-          const tsIdx = tileId - 1;
-          const tc = tsIdx % tsColCount;
-          const tr = Math.floor(tsIdx / tsColCount);
-          const srcX = m + tc * (cellW + s);
-          const srcY = m + tr * (cellH + s);
-          const dstX = c * tilePxW;
-          const dstY = r * tilePxH;
-          ctx.drawImage(tmImg, srcX, srcY, cellW, cellH, dstX, dstY, tilePxW, tilePxH);
+    const tint = tilemap.tint;
+    let anyTile = false;
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = tint[3];
+    for (let r = 0; r < tilemap.map_rows; r++) {
+      for (let c = 0; c < tilemap.map_cols; c++) {
+        const cell = tilemap.tiles[r * tilemap.map_cols + c] ?? 0;
+        if (cell === 0) continue;
+        const paletteId = (cell >>> 16) & 0xffff;
+        const tileIdx = cell & 0xffff;
+        if (paletteId === 0) continue;
+        const pal = tilemap.palettes[paletteId - 1];
+        if (!pal) continue;
+        const img = imgCache?.get(pal.texture_path);
+        if (!img) { anyTile = true; continue; }
+        const cols = Math.max(1, pal.tileset_cols);
+        const rows = Math.max(1, pal.tileset_rows);
+        const m = pal.margin ?? 0;
+        const s = pal.spacing ?? 0;
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+        let srcX: number, srcY: number, srcW: number, srcH: number;
+        if (m === 0 && s === 0) {
+          srcW = iw / cols; srcH = ih / rows;
+          srcX = (tileIdx % cols) * srcW;
+          srcY = Math.floor(tileIdx / cols) * srcH;
+        } else {
+          srcW = (iw - 2 * m - s * (cols - 1)) / cols;
+          srcH = (ih - 2 * m - s * (rows - 1)) / rows;
+          srcX = m + (tileIdx % cols) * (srcW + s);
+          srcY = m + Math.floor(tileIdx / cols) * (srcH + s);
         }
+        anyTile = true;
+        ctx.drawImage(img, srcX, srcY, srcW, srcH, c * tilePxW, r * tilePxH, tilePxW, tilePxH);
       }
-      ctx.globalAlpha = 1;
-    } else {
+    }
+    ctx.globalAlpha = 1;
+
+    if (!anyTile && tilemap.palettes.length === 0) {
       ctx.fillStyle = "rgba(77,120,180,0.20)";
       ctx.fillRect(0, 0, screenTmW, screenTmH);
     }
 
-    // Solid tile overlay (shown when gizmos active)
-    if (gizmos && tilemap.solid_tiles && tilemap.solid_tiles.length > 0) {
-      const solidSet = new Set(tilemap.solid_tiles);
+    // Solid tile overlay (gizmos)
+    if (gizmos) {
       ctx.fillStyle = "rgba(220,60,60,0.35)";
       for (let r = 0; r < tilemap.map_rows; r++) {
         for (let c = 0; c < tilemap.map_cols; c++) {
-          const tileId = tilemap.tiles[r * tilemap.map_cols + c] ?? 0;
-          if (tileId !== 0 && solidSet.has(tileId)) {
+          const cell = tilemap.tiles[r * tilemap.map_cols + c] ?? 0;
+          if (cell === 0) continue;
+          const paletteId = (cell >>> 16) & 0xffff;
+          const tileIdx = cell & 0xffff;
+          if (paletteId === 0) continue;
+          const pal = tilemap.palettes[paletteId - 1];
+          if (pal?.solid_tiles.includes(tileIdx)) {
             ctx.fillRect(c * tilePxW, r * tilePxH, tilePxW, tilePxH);
           }
         }

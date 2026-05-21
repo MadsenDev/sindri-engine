@@ -733,39 +733,80 @@ function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFil
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
   const [painterOpen, setPainterOpen] = useState(false);
-  const [pickingTexture, setPickingTexture] = useState(false);
+  const [pickingPaletteTex, setPickingPaletteTex] = useState<number | null>(null);
+
+  const addPalette = () => {
+    const newPalette = { name: `Palette ${comp.palettes.length + 1}`, texture_path: "", tileset_cols: 4, tileset_rows: 4, margin: 0, spacing: 0, solid_tiles: [] };
+    patch({ palettes: [...comp.palettes, newPalette] });
+  };
+
+  const removePalette = (i: number) => {
+    const next = comp.palettes.filter((_, idx) => idx !== i);
+    patch({ palettes: next });
+  };
+
+  const patchPalette = (i: number, fields: Partial<typeof comp.palettes[0]>) => {
+    const next = comp.palettes.map((p, idx) => idx === i ? { ...p, ...fields } : p);
+    patch({ palettes: next });
+  };
 
   return (
     <>
-      {pickingTexture && (
-        <FilePicker title="Pick tileset" kinds={["image"]} files={projectFiles}
-          onSelect={p => patch({ texture_path: p })} onClose={() => setPickingTexture(false)} />
+      {pickingPaletteTex !== null && (
+        <FilePicker title="Pick tileset texture" kinds={["image"]} files={projectFiles}
+          onSelect={p => { patchPalette(pickingPaletteTex!, { texture_path: p }); setPickingPaletteTex(null); }}
+          onClose={() => setPickingPaletteTex(null)} />
       )}
-      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={() => setPickingTexture(true)} />
+
       <NumberInputField label="tile w" value={comp.tile_width} onCommit={v => patch({ tile_width: v })} />
       <NumberInputField label="tile h" value={comp.tile_height} onCommit={v => patch({ tile_height: v })} />
       <NumberInputField label="map cols" value={comp.map_cols} decimals={0} min={1} onCommit={v => patch({ map_cols: Math.round(v) })} />
       <NumberInputField label="map rows" value={comp.map_rows} decimals={0} min={1} onCommit={v => patch({ map_rows: Math.round(v) })} />
-      <NumberInputField label="ts cols" value={comp.tileset_cols} decimals={0} min={1} onCommit={v => patch({ tileset_cols: Math.round(v) })} />
-      <NumberInputField label="ts rows" value={comp.tileset_rows} decimals={0} min={1} onCommit={v => patch({ tileset_rows: Math.round(v) })} />
-      <NumberInputField label="margin" value={comp.margin ?? 0} decimals={0} min={0} onCommit={v => patch({ margin: Math.round(v) })} />
-      <NumberInputField label="spacing" value={comp.spacing ?? 0} decimals={0} min={0} onCommit={v => patch({ spacing: Math.round(v) })} />
       <ColorField label="tint" value={comp.tint} onCommit={v => patch({ tint: v })} />
 
-      <div style={{ padding: "8px 22px", borderTop: "1px solid var(--rule)" }}>
+      {/* Palette list */}
+      <div style={{ padding: "8px 12px", borderTop: "1px solid var(--rule)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-          <span style={{ fontSize: "11px", color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-            {comp.map_cols}×{comp.map_rows} tiles · tileset {comp.tileset_cols}×{comp.tileset_rows}
-            {(comp.solid_tiles?.length ?? 0) > 0 && (
-              <span style={{ color: "rgba(220,100,100,0.9)", marginLeft: "8px" }}>
-                {comp.solid_tiles!.length} solid type{comp.solid_tiles!.length !== 1 ? "s" : ""}
-              </span>
-            )}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
+            PALETTES ({comp.palettes.length})
           </span>
-          <button onClick={() => setPainterOpen(true)} style={{
-            background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
-            fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer",
-          }}>Paint Tiles</button>
+          <button onClick={addPalette} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>+ Add</button>
+        </div>
+        {comp.palettes.map((pal, i) => (
+          <div key={i} style={{ marginBottom: "8px", padding: "6px 8px", border: "1px solid var(--rule)", background: "rgba(0,0,0,0.15)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+              <input
+                defaultValue={pal.name}
+                placeholder={`Palette ${i + 1}`}
+                onBlur={e => patchPalette(i, { name: e.currentTarget.value })}
+                style={{ fontFamily: "var(--font-mono)", fontSize: "10px", background: "none", border: "none", borderBottom: "1px solid var(--rule-2)", color: "var(--ink-2)", width: "120px", outline: "none", padding: "1px 2px" }}
+              />
+              <button onClick={() => removePalette(i)} style={{ background: "none", border: "none", color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "14px", cursor: "pointer", padding: "0 2px" }}>×</button>
+            </div>
+            <BrowseInputField label="tex" value={pal.texture_path} placeholder="(none)" onCommit={v => patchPalette(i, { texture_path: v })} onBrowse={() => setPickingPaletteTex(i)} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "2px", marginTop: "4px" }}>
+              <NumberInputField label="cols" value={pal.tileset_cols} decimals={0} min={1} onCommit={v => patchPalette(i, { tileset_cols: Math.round(v) })} />
+              <NumberInputField label="rows" value={pal.tileset_rows} decimals={0} min={1} onCommit={v => patchPalette(i, { tileset_rows: Math.round(v) })} />
+              <NumberInputField label="margin" value={pal.margin ?? 0} decimals={0} min={0} onCommit={v => patchPalette(i, { margin: Math.round(v) })} />
+              <NumberInputField label="spacing" value={pal.spacing ?? 0} decimals={0} min={0} onCommit={v => patchPalette(i, { spacing: Math.round(v) })} />
+            </div>
+            {pal.solid_tiles.length > 0 && (
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "rgba(220,100,100,0.8)", marginTop: "3px" }}>
+                {pal.solid_tiles.length} solid tile{pal.solid_tiles.length !== 1 ? "s" : ""}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: "0 12px 10px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
+            {comp.map_cols}×{comp.map_rows} tiles
+          </span>
+          <button onClick={() => setPainterOpen(true)} style={{ background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer" }}>
+            Paint Tiles
+          </button>
         </div>
       </div>
 

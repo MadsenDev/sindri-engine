@@ -42,7 +42,7 @@ enum SceneCommand {
     AnimPlay(String),
     AnimSetFlipX(bool),
     AnimSetFlipY(bool),
-    SetTilemapTile { col: u32, row: u32, tile_id: u16 },
+    SetTilemapTile { col: u32, row: u32, tile_id: u32 },
 }
 
 fn resolve_script_path(scripts_root: &Path, script_path: &str) -> PathBuf {
@@ -768,22 +768,19 @@ impl LuaRuntime {
                 if let Component::Transform(t) = c { Some(t) } else { None }
             }) else { continue };
 
-            // Auto-generate static colliders from Tilemap solid_tiles
+            // Auto-generate static colliders from Tilemap solid tiles
             if let Some(tilemap) = entity.components.iter().find_map(|c| {
                 if let Component::Tilemap(tm) = c { Some(tm) } else { None }
             }) {
-                if !tilemap.solid_tiles.is_empty() {
-                    for (rect_idx, (cx, cy, hw, hh)) in tilemap.solid_rects().into_iter().enumerate() {
-                        // Synthetic ID: tilemap entity IDs occupy a high range
-                        let synthetic_id = entity_id.wrapping_mul(100_000).wrapping_add(rect_idx as u64 + 1);
-                        let eid = EntityId(synthetic_id as u32);
-                        let world_pos = Vec2::new(transform.x + cx, transform.y + cy);
-                        if self.physics.create_body(eid, PhysicsBodyType::Fixed, world_pos, 0.0).is_err() {
-                            continue;
-                        }
-                        let shape = ColliderShape::Box { hx: hw, hy: hh };
-                        let _ = self.physics.add_collider_with_material(eid, shape, Vec2::new(0.0, 0.0), 1.0, 0.3, 0.0);
+                for (rect_idx, (cx, cy, hw, hh)) in tilemap.solid_rects().into_iter().enumerate() {
+                    let synthetic_id = entity_id.wrapping_mul(100_000).wrapping_add(rect_idx as u64 + 1);
+                    let eid = EntityId(synthetic_id as u32);
+                    let world_pos = Vec2::new(transform.x + cx, transform.y + cy);
+                    if self.physics.create_body(eid, PhysicsBodyType::Fixed, world_pos, 0.0).is_err() {
+                        continue;
                     }
+                    let shape = ColliderShape::Box { hx: hw, hy: hh };
+                    let _ = self.physics.add_collider_with_material(eid, shape, Vec2::new(0.0, 0.0), 1.0, 0.3, 0.0);
                 }
                 continue; // Tilemap entities don't also get a regular collider body
             }
@@ -1250,33 +1247,31 @@ impl LuaRuntime {
                             let map_cols = tm.map_cols;
                             let map_rows = tm.map_rows;
                             let tiles = tm.tiles.clone();
-                            let solid_tiles = tm.solid_tiles.clone();
+                            let tm_solid = tm.clone();
+                            let tm_path = tm.clone();
 
                             tbl.set("width", map_cols)?;
                             tbl.set("height", map_rows)?;
                             tbl.set("tile_width", tw)?;
                             tbl.set("tile_height", th)?;
 
-                            // get_tile(col, row) → tile_id (0 = empty)
+                            // get_tile(col, row) → encoded u32 cell (0 = empty)
                             let tiles2 = tiles.clone();
                             tbl.set("get_tile", lua.create_function(move |_, (_this, col, row): (Table, u32, u32)| {
                                 let id = tiles2.get((row * map_cols + col) as usize).copied().unwrap_or(0);
-                                Ok(id as u32)
+                                Ok(id)
                             })?)?;
 
                             // set_tile(col, row, tile_id)
                             let cmds = scene_cmds.clone();
                             tbl.set("set_tile", lua.create_function(move |_, (_this, col, row, tile_id): (Table, u32, u32, u32)| {
-                                cmds.lock().unwrap().push(SceneCommand::SetTilemapTile { col, row, tile_id: tile_id as u16 });
+                                cmds.lock().unwrap().push(SceneCommand::SetTilemapTile { col, row, tile_id: tile_id as u32 });
                                 Ok(())
                             })?)?;
 
                             // is_solid(col, row) → bool
-                            let tiles3 = tiles.clone();
-                            let solid2 = solid_tiles.clone();
                             tbl.set("is_solid", lua.create_function(move |_, (_this, col, row): (Table, u32, u32)| {
-                                let id = tiles3.get((row * map_cols + col) as usize).copied().unwrap_or(0);
-                                Ok(id != 0 && solid2.contains(&id))
+                                Ok(tm_solid.is_tile_solid(col, row))
                             })?)?;
 
                             // world_to_tile(wx, wy) → col, row
@@ -1294,16 +1289,12 @@ impl LuaRuntime {
                             })?)?;
 
                             // find_path(wx, wy, gx, gy) → array of {x,y} or nil
-                            let tiles4 = tiles.clone();
-                            let solid3 = solid_tiles.clone();
                             tbl.set("find_path", lua.create_function(move |lua, (_this, wx, wy, gx, gy): (Table, f32, f32, f32, f32)| {
                                 use sindri::pathfinding::{AStarPathfinder, PathfindingGrid, GridNode};
                                 let mut grid = PathfindingGrid::new(map_cols as usize, map_rows as usize, tw);
                                 for r in 0..map_rows {
                                     for c in 0..map_cols {
-                                        let id = tiles4.get((r * map_cols + c) as usize).copied().unwrap_or(0);
-                                        let passable = id == 0 || !solid3.contains(&id);
-                                        if !passable {
+                                        if tm_path.is_tile_solid(c, r) {
                                             grid.set_walkable(GridNode::new(c as i32, r as i32), false);
                                         }
                                     }

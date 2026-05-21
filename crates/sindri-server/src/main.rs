@@ -352,20 +352,22 @@ fn draw_scene_contents(
         let pos = Vec2::new(t.x, t.y);
 
         if let Some(tm) = tilemap {
-            let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &tm.texture_path) {
-                Some((h, tw, th)) => (h, tw as f32, th as f32),
-                None => (white_texture, 1.0, 1.0),
-            };
-            let cols = tm.tileset_cols.max(1);
-            let rows = tm.tileset_rows.max(1);
             for tile_row in 0..tm.map_rows {
                 for tile_col in 0..tm.map_cols {
-                    let tile_id = tm.tiles.get((tile_row * tm.map_cols + tile_col) as usize).copied().unwrap_or(0);
-                    if tile_id == 0 { continue; }
-                    let ts_idx = tile_id as u32 - 1;
-                    let ts_col = ts_idx % cols;
-                    let ts_row = ts_idx / cols;
-                    let uv = spritesheet_uv(ts_col, ts_row, cols, rows, tm.margin, tm.spacing, tex_w, tex_h);
+                    let cell = tm.tiles.get((tile_row * tm.map_cols + tile_col) as usize).copied().unwrap_or(0);
+                    if cell == 0 { continue; }
+                    let (palette_id, tile_idx) = sindri::component::decode_tile(cell);
+                    if palette_id == 0 { continue; }
+                    let Some(palette) = tm.palettes.get((palette_id - 1) as usize) else { continue };
+                    let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &palette.texture_path) {
+                        Some((h, tw, th)) => (h, tw as f32, th as f32),
+                        None => (white_texture, 1.0, 1.0),
+                    };
+                    let cols = palette.tileset_cols.max(1);
+                    let rows = palette.tileset_rows.max(1);
+                    let ts_col = tile_idx % cols;
+                    let ts_row = tile_idx / cols;
+                    let uv = spritesheet_uv(ts_col, ts_row, cols, rows, palette.margin, palette.spacing, tex_w, tex_h);
                     let tile_cx = pos.x + (tile_col as f32 + 0.5) * tm.tile_width;
                     let tile_cy = pos.y + (tile_row as f32 + 0.5) * tm.tile_height;
                     let tile_transform = Transform2D {

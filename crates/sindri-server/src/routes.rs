@@ -960,22 +960,17 @@ pub async fn patch_component(
                 })
         }
         sindri::component::Component::Tilemap(t) => {
-            patch_string(&body, "texture_path", &mut t.texture_path)
-                .and_then(|_| patch_u32(&body, "tileset_cols", &mut t.tileset_cols))
-                .and_then(|_| patch_u32(&body, "tileset_rows", &mut t.tileset_rows))
-                .and_then(|_| patch_f32(&body, "tile_width", &mut t.tile_width))
+            patch_f32(&body, "tile_width", &mut t.tile_width)
                 .and_then(|_| patch_f32(&body, "tile_height", &mut t.tile_height))
-                .and_then(|_| patch_u32(&body, "margin", &mut t.margin))
-                .and_then(|_| patch_u32(&body, "spacing", &mut t.spacing))
                 .and_then(|_| patch_color(&body, "tint", &mut t.tint))
                 .and_then(|_| {
-                    // Resize map if map_cols/map_rows changed
+                    // Resize map if map_cols/map_rows changed, preserving existing tile data
                     let new_cols = body.get("map_cols").and_then(|v| v.as_u64()).map(|v| v as u32);
                     let new_rows = body.get("map_rows").and_then(|v| v.as_u64()).map(|v| v as u32);
                     if new_cols.is_some() || new_rows.is_some() {
                         let cols = new_cols.unwrap_or(t.map_cols).max(1);
                         let rows = new_rows.unwrap_or(t.map_rows).max(1);
-                        let mut new_tiles = vec![0u16; (cols * rows) as usize];
+                        let mut new_tiles = vec![0u32; (cols * rows) as usize];
                         for row in 0..rows.min(t.map_rows) {
                             for col in 0..cols.min(t.map_cols) {
                                 new_tiles[(row * cols + col) as usize] =
@@ -987,14 +982,15 @@ pub async fn patch_component(
                         t.tiles = new_tiles;
                     }
                     if let Some(tiles_val) = body.get("tiles") {
-                        let tiles: Vec<u16> = serde_json::from_value(tiles_val.clone())
+                        let tiles: Vec<u32> = serde_json::from_value(tiles_val.clone())
                             .map_err(|e| format!("invalid tiles: {e}"))?;
                         t.tiles = tiles;
                     }
-                    if let Some(solid_val) = body.get("solid_tiles") {
-                        let solid: Vec<u16> = serde_json::from_value(solid_val.clone())
-                            .map_err(|e| format!("invalid solid_tiles: {e}"))?;
-                        t.solid_tiles = solid;
+                    if let Some(palettes_val) = body.get("palettes") {
+                        let palettes: Vec<sindri::component::TilePalette> =
+                            serde_json::from_value(palettes_val.clone())
+                                .map_err(|e| format!("invalid palettes: {e}"))?;
+                        t.palettes = palettes;
                     }
                     Ok(())
                 })
