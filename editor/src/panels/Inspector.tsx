@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Entity, Component } from "../App";
 import { useContextMenu } from "../components/ContextMenu";
 import AnimClipEditor from "../components/AnimClipEditor";
+import TilePainter from "../components/TilePainter";
 import FilePicker, { type ProjectFile } from "../components/FilePicker";
 
 interface AiSuggestion {
@@ -60,6 +61,7 @@ const COMPONENT_ICON: Record<string, string> = {
   Transform:      "⌖",
   Sprite:         "▣",
   AnimatedSprite: "▶",
+  Tilemap:        "⊞",
   PhysicsBody:    "●",
   Collider:       "⬡",
   Script:         "⚡",
@@ -420,6 +422,7 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
         {component.type === "Script"      && <ScriptField comp={component} entityId={entity.id} componentIdx={componentIdx} onOpenScript={onOpenScript} onSceneChange={onSceneChange} />}
         {component.type === "Camera"      && <CameraFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "AudioSource" && <AudioFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
+        {component.type === "Tilemap"     && <TilemapFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} projectPath={projectPath} />}
       </div>
     </>
   );
@@ -544,6 +547,8 @@ function AnimatedSpriteFields({ comp, entityId, componentIdx, onSceneChange, pro
       <BoolField label="flip x" value={comp.flip_x} onChange={v => patch({ flip_x: v })} />
       <BoolField label="flip y" value={comp.flip_y} onChange={v => patch({ flip_y: v })} />
       <ColorField label="tint" value={comp.tint} onCommit={v => patch({ tint: v })} />
+      <NumberInputField label="margin" value={comp.margin ?? 0} decimals={0} min={0} onCommit={v => patch({ margin: Math.round(v) })} />
+      <NumberInputField label="spacing" value={comp.spacing ?? 0} decimals={0} min={0} onCommit={v => patch({ spacing: Math.round(v) })} />
 
       {/* Clip summary + open button */}
       <div style={{ padding: "8px 22px", borderTop: "1px solid var(--rule)" }}>
@@ -714,6 +719,60 @@ function AudioFields({ comp, entityId, componentIdx, onSceneChange }: {
       <NumberInputField label="volume" value={comp.volume} min={0} onCommit={v => patch({ volume: v })} />
       <BoolField label="loop" value={comp.looping} onChange={v => patch({ looping: v })} />
       <BoolField label="autoplay" value={comp.play_on_start} onChange={v => patch({ play_on_start: v })} />
+    </>
+  );
+}
+
+// ─── Tilemap ──────────────────────────────────────────────────────────────────
+
+function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles }: {
+  comp: Extract<Component, { type: "Tilemap" }>;
+  entityId: number; componentIdx: number; onSceneChange: () => void;
+  projectFiles: ProjectFile[];
+  projectPath?: string | null;
+}) {
+  const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
+  const [painterOpen, setPainterOpen] = useState(false);
+  const [pickingTexture, setPickingTexture] = useState(false);
+
+  return (
+    <>
+      {pickingTexture && (
+        <FilePicker title="Pick tileset" kinds={["image"]} files={projectFiles}
+          onSelect={p => patch({ texture_path: p })} onClose={() => setPickingTexture(false)} />
+      )}
+      <BrowseInputField label="texture" value={comp.texture_path} placeholder="(none)" onCommit={v => patch({ texture_path: v })} onBrowse={() => setPickingTexture(true)} />
+      <NumberInputField label="tile w" value={comp.tile_width} onCommit={v => patch({ tile_width: v })} />
+      <NumberInputField label="tile h" value={comp.tile_height} onCommit={v => patch({ tile_height: v })} />
+      <NumberInputField label="map cols" value={comp.map_cols} decimals={0} min={1} onCommit={v => patch({ map_cols: Math.round(v) })} />
+      <NumberInputField label="map rows" value={comp.map_rows} decimals={0} min={1} onCommit={v => patch({ map_rows: Math.round(v) })} />
+      <NumberInputField label="ts cols" value={comp.tileset_cols} decimals={0} min={1} onCommit={v => patch({ tileset_cols: Math.round(v) })} />
+      <NumberInputField label="ts rows" value={comp.tileset_rows} decimals={0} min={1} onCommit={v => patch({ tileset_rows: Math.round(v) })} />
+      <NumberInputField label="margin" value={comp.margin ?? 0} decimals={0} min={0} onCommit={v => patch({ margin: Math.round(v) })} />
+      <NumberInputField label="spacing" value={comp.spacing ?? 0} decimals={0} min={0} onCommit={v => patch({ spacing: Math.round(v) })} />
+      <ColorField label="tint" value={comp.tint} onCommit={v => patch({ tint: v })} />
+
+      <div style={{ padding: "8px 22px", borderTop: "1px solid var(--rule)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+          <span style={{ fontSize: "11px", color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+            {comp.map_cols}×{comp.map_rows} tiles
+            {" · "}tileset {comp.tileset_cols}×{comp.tileset_rows}
+          </span>
+          <button onClick={() => setPainterOpen(true)} style={{
+            background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
+            fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 10px", cursor: "pointer",
+          }}>Paint Tiles</button>
+        </div>
+      </div>
+
+      {painterOpen && (
+        <TilePainter
+          comp={comp}
+          entityId={entityId}
+          componentIdx={componentIdx}
+          onClose={() => { setPainterOpen(false); onSceneChange(); }}
+        />
+      )}
     </>
   );
 }

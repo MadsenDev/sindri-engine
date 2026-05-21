@@ -27,8 +27,8 @@ format cannot preserve it, or the AI can generate invalid partial state.
 | Lua ScriptComponent | Yes | Yes | Partial | Partial | Yes | Yes | Yes | Partial | Yes | Partial | Active |
 | Camera | Yes | Yes | Partial | Yes | Yes | Yes | Yes | Partial | Yes | Partial | Active |
 | AudioSource | Yes | Yes | Partial | Yes | Yes | Yes | Yes | No | Yes | Partial | Active |
-| Tilemap | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
-| Animation | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
+| Tilemap | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | Yes | Partial | Active |
+| Animation (AnimatedSprite) | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Active |
 | Particles | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |
 | Lighting | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |
 | Pathfinding/Grid | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
@@ -49,8 +49,8 @@ format cannot preserve it, or the AI can generate invalid partial state.
 This matrix is grounded in the current repo state:
 
 - Engine coverage comes from crate exports and implementations in `crates/sindri/src`, including built-in components, renderer systems, physics, scripting, scene APIs, command history, grids/pathfinding, HUD, audio, and camera systems.
-- Editor/server scene JSON currently supports `Transform`, `Sprite`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource` through `sindri::component::Component`.
-- Editor hierarchy can add/remove those seven scene JSON components, and the server patch route can update all seven. The inspector exposes editable fields for each of them.
+- Editor/server scene JSON currently supports `Transform`, `Sprite`, `AnimatedSprite`, `Tilemap`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource` through `sindri::component::Component`.
+- Editor hierarchy can add/remove all nine scene JSON components, and the server patch route can update all of them. The inspector exposes editable fields for each of them, including a tile painter modal for Tilemap.
 - The viewport understands `Transform`, `Sprite`, and `Collider` for preview/selection. It does not visualize engine tilemaps, particles, lights, animation, audio, pathfinding, HUD, or gameplay marker components.
 - The Scene view now supports basic direct manipulation for `Transform` through Move, Scale, and Rotate tools, including simple gizmo hints, Shift snapping, and transform undo/redo. It does not yet have full axis-handle hit testing, multi-select, or prefab-style editing.
 - Scene editing has an explicit save command and dirty indicator in the editor shell, alongside server autosave while playback is stopped.

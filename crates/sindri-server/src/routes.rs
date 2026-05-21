@@ -656,6 +656,7 @@ pub async fn add_component(
             looping: false,
             play_on_start: false,
         }),
+        "Tilemap" => Component::Tilemap(sindri::component::Tilemap::default()),
         _ => return (StatusCode::BAD_REQUEST, "unknown component type").into_response(),
     };
     let mut scene = state.scene.write().await;
@@ -696,6 +697,7 @@ pub async fn remove_component(
                     sindri::component::Component::Transform(_) => "Transform",
                     sindri::component::Component::Sprite(_) => "Sprite",
                     sindri::component::Component::AnimatedSprite(_) => "AnimatedSprite",
+                    sindri::component::Component::Tilemap(_) => "Tilemap",
                     sindri::component::Component::PhysicsBody(_) => "PhysicsBody",
                     sindri::component::Component::Collider(_) => "Collider",
                     sindri::component::Component::Script(_) => "Script",
@@ -945,12 +947,49 @@ pub async fn patch_component(
                 .and_then(|_| patch_bool(&body, "flip_y", &mut a.flip_y))
                 .and_then(|_| patch_color(&body, "tint", &mut a.tint))
                 .and_then(|_| patch_string(&body, "default_clip", &mut a.default_clip))
+                .and_then(|_| patch_u32(&body, "margin", &mut a.margin))
+                .and_then(|_| patch_u32(&body, "spacing", &mut a.spacing))
                 .and_then(|_| {
                     if let Some(clips_val) = body.get("clips") {
                         let clips: Vec<sindri::component::AnimClip> =
                             serde_json::from_value(clips_val.clone())
                                 .map_err(|e| format!("invalid clips: {e}"))?;
                         a.clips = clips;
+                    }
+                    Ok(())
+                })
+        }
+        sindri::component::Component::Tilemap(t) => {
+            patch_string(&body, "texture_path", &mut t.texture_path)
+                .and_then(|_| patch_u32(&body, "tileset_cols", &mut t.tileset_cols))
+                .and_then(|_| patch_u32(&body, "tileset_rows", &mut t.tileset_rows))
+                .and_then(|_| patch_f32(&body, "tile_width", &mut t.tile_width))
+                .and_then(|_| patch_f32(&body, "tile_height", &mut t.tile_height))
+                .and_then(|_| patch_u32(&body, "margin", &mut t.margin))
+                .and_then(|_| patch_u32(&body, "spacing", &mut t.spacing))
+                .and_then(|_| patch_color(&body, "tint", &mut t.tint))
+                .and_then(|_| {
+                    // Resize map if map_cols/map_rows changed
+                    let new_cols = body.get("map_cols").and_then(|v| v.as_u64()).map(|v| v as u32);
+                    let new_rows = body.get("map_rows").and_then(|v| v.as_u64()).map(|v| v as u32);
+                    if new_cols.is_some() || new_rows.is_some() {
+                        let cols = new_cols.unwrap_or(t.map_cols).max(1);
+                        let rows = new_rows.unwrap_or(t.map_rows).max(1);
+                        let mut new_tiles = vec![0u16; (cols * rows) as usize];
+                        for row in 0..rows.min(t.map_rows) {
+                            for col in 0..cols.min(t.map_cols) {
+                                new_tiles[(row * cols + col) as usize] =
+                                    t.tiles[(row * t.map_cols + col) as usize];
+                            }
+                        }
+                        t.map_cols = cols;
+                        t.map_rows = rows;
+                        t.tiles = new_tiles;
+                    }
+                    if let Some(tiles_val) = body.get("tiles") {
+                        let tiles: Vec<u16> = serde_json::from_value(tiles_val.clone())
+                            .map_err(|e| format!("invalid tiles: {e}"))?;
+                        t.tiles = tiles;
                     }
                     Ok(())
                 })

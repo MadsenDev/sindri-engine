@@ -12,6 +12,8 @@ interface AnimatedSpriteComp {
   tint: [number, number, number, number];
   clips: AnimClip[];
   default_clip: string;
+  margin?: number;
+  spacing?: number;
 }
 
 interface Props {

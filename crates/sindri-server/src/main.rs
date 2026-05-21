@@ -296,6 +296,21 @@ impl ScreenshotCapture {
     }
 }
 
+/// Compute UV rect [u, v, w, h] for a cell in a spritesheet/tileset,
+/// accounting for a pixel border (margin) around the image and gaps between cells (spacing).
+fn spritesheet_uv(col: u32, row: u32, cols: u32, rows: u32, margin: u32, spacing: u32, tex_w: f32, tex_h: f32) -> [f32; 4] {
+    if margin == 0 && spacing == 0 {
+        return [col as f32 / cols as f32, row as f32 / rows as f32, 1.0 / cols as f32, 1.0 / rows as f32];
+    }
+    let m = margin as f32;
+    let s = spacing as f32;
+    let cell_w = (tex_w - 2.0 * m - s * (cols.saturating_sub(1)) as f32) / cols as f32;
+    let cell_h = (tex_h - 2.0 * m - s * (rows.saturating_sub(1)) as f32) / rows as f32;
+    let x = m + col as f32 * (cell_w + s);
+    let y = m + row as f32 * (cell_h + s);
+    [x / tex_w, y / tex_h, cell_w / tex_w, cell_h / tex_h]
+}
+
 fn draw_scene_contents(
     r: &mut Renderer,
     frame: &mut sindri::render::Frame,
@@ -325,14 +340,43 @@ fn draw_scene_contents(
             if let Component::PhysicsBody(body) = c { Some(body) } else { None }
         });
 
+        let tilemap = entity.components.iter().find_map(|c| {
+            if let Component::Tilemap(tm) = c { Some(tm) } else { None }
+        });
+
         let Some(t) = transform else { continue };
-        if sprite.is_none() && anim_sprite.is_none() && physics_body.is_none() {
+        if sprite.is_none() && anim_sprite.is_none() && physics_body.is_none() && tilemap.is_none() {
             continue;
         }
 
         let pos = Vec2::new(t.x, t.y);
 
-        if let Some(s) = anim_sprite {
+        if let Some(tm) = tilemap {
+            let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &tm.texture_path) {
+                Some((h, tw, th)) => (h, tw as f32, th as f32),
+                None => (white_texture, 1.0, 1.0),
+            };
+            let cols = tm.tileset_cols.max(1);
+            let rows = tm.tileset_rows.max(1);
+            for tile_row in 0..tm.map_rows {
+                for tile_col in 0..tm.map_cols {
+                    let tile_id = tm.tiles.get((tile_row * tm.map_cols + tile_col) as usize).copied().unwrap_or(0);
+                    if tile_id == 0 { continue; }
+                    let ts_idx = tile_id as u32 - 1;
+                    let ts_col = ts_idx % cols;
+                    let ts_row = ts_idx / cols;
+                    let uv = spritesheet_uv(ts_col, ts_row, cols, rows, tm.margin, tm.spacing, tex_w, tex_h);
+                    let tile_cx = pos.x + (tile_col as f32 + 0.5) * tm.tile_width;
+                    let tile_cy = pos.y + (tile_row as f32 + 0.5) * tm.tile_height;
+                    let tile_transform = Transform2D {
+                        position: Vec2::new(tile_cx, tile_cy),
+                        rotation: t.rotation,
+                        scale: Vec2::new(tm.tile_width / tex_w, tm.tile_height / tex_h),
+                    };
+                    r.draw_texture_region(frame, tex, Some(uv), &tile_transform, tm.tint, false, &camera)?;
+                }
+            }
+        } else if let Some(s) = anim_sprite {
             let (clip_name, runtime_frame, flip_x, flip_y) = if let Some(st) = anim_states.get(&entity.id) {
                 (st.current_clip.as_str(), Some(st.frame as u32), st.flip_x, st.flip_y)
             } else {
@@ -353,17 +397,12 @@ fn draw_scene_contents(
             let rows = s.rows.max(1);
             let col = abs_frame % cols;
             let row = abs_frame / cols;
-            let uv_rect = [
-                col as f32 / cols as f32,
-                row as f32 / rows as f32,
-                1.0 / cols as f32,
-                1.0 / rows as f32,
-            ];
 
             let (tex, tex_w, tex_h) = match render_state.get_or_load(r, &s.texture_path) {
                 Some((h, tw, th)) => (h, tw as f32, th as f32),
                 None => (white_texture, 1.0, 1.0),
             };
+            let uv_rect = spritesheet_uv(col, row, cols, rows, s.margin, s.spacing, tex_w, tex_h);
 
             let transform = Transform2D {
                 position: pos,

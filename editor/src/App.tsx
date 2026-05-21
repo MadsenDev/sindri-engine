@@ -76,12 +76,13 @@ export interface AnimClip {
 export type Component =
   | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
   | { type: "Sprite"; texture_path: string; width: number; height: number; flip_x: boolean; flip_y: boolean; color: [number, number, number, number] }
-  | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; flip_x: boolean; flip_y: boolean; tint: [number, number, number, number]; clips: AnimClip[]; default_clip: string }
+  | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; flip_x: boolean; flip_y: boolean; tint: [number, number, number, number]; clips: AnimClip[]; default_clip: string; margin?: number; spacing?: number }
   | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number }
   | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number; is_trigger: boolean }
   | { type: "Script"; path: string }
   | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number }
-  | { type: "AudioSource"; path: string; volume: number; looping: boolean; play_on_start: boolean };
+  | { type: "AudioSource"; path: string; volume: number; looping: boolean; play_on_start: boolean }
+  | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number, number, number, number]; margin?: number; spacing?: number };
 
 export interface Scene {
   name: string;

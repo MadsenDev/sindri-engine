@@ -609,8 +609,17 @@ function hitTest(scene: Scene, wx: number, wy: number): number | null {
     const transform = getTransform(entity);
     const sprite = entity.components.find(c => c.type === "Sprite") as { type: "Sprite"; width: number; height: number } | undefined;
     const anim = entity.components.find(c => c.type === "AnimatedSprite") as { type: "AnimatedSprite"; width: number; height: number } | undefined;
+    const tm = entity.components.find(c => c.type === "Tilemap") as { type: "Tilemap"; map_cols: number; map_rows: number; tile_width: number; tile_height: number } | undefined;
     const camera = entity.components.find(c => c.type === "Camera") as { type: "Camera"; zoom: number } | undefined;
     if (!transform) continue;
+    if (tm) {
+      const tmW = tm.map_cols * tm.tile_width;
+      const tmH = tm.map_rows * tm.tile_height;
+      if (wx >= transform.x && wx <= transform.x + tmW && wy >= transform.y && wy <= transform.y + tmH) {
+        hit = entity.id;
+      }
+      continue;
+    }
     const visW = sprite?.width ?? anim?.width;
     const visH = sprite?.height ?? anim?.height;
     const hw = visW ? Math.abs(visW * transform.scale_x) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_x) * 16, 12);
@@ -681,6 +690,9 @@ function drawEntity(
   const animSprite = entity.components.find(c => c.type === "AnimatedSprite") as
     | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; tint: [number,number,number,number]; clips: { name: string; start_frame: number; end_frame: number; fps: number; looping: boolean }[]; default_clip: string; flip_x: boolean; flip_y: boolean }
     | undefined;
+  const tilemap = entity.components.find(c => c.type === "Tilemap") as
+    | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number,number,number,number]; margin?: number; spacing?: number }
+    | undefined;
   const collider = entity.components.find(c => c.type === "Collider") as
     | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
     | undefined;
@@ -707,7 +719,73 @@ function drawEntity(
 
   if (cameraComp) {
     drawCameraFrame(ctx, entity.name, sx, sy, activeTransform.rotation, cameraComp.zoom, cam.zoom, cameraComp.active ?? true, isSelected);
-    if (!sprite && !animSprite && !collider) return;
+    if (!sprite && !animSprite && !tilemap && !collider) return;
+  }
+
+  if (tilemap) {
+    const tmW = tilemap.map_cols * tilemap.tile_width;
+    const tmH = tilemap.map_rows * tilemap.tile_height;
+    const screenTmW = tmW * cam.zoom;
+    const screenTmH = tmH * cam.zoom;
+    const tilePxW = tilemap.tile_width * cam.zoom;
+    const tilePxH = tilemap.tile_height * cam.zoom;
+
+    const tsColCount = Math.max(1, tilemap.tileset_cols);
+    const tsRowCount = Math.max(1, tilemap.tileset_rows);
+    const margin = tilemap.margin ?? 0;
+    const spacing = tilemap.spacing ?? 0;
+
+    let tmImg = imgCache?.get(tilemap.texture_path);
+    if (tmImg === undefined && tilemap.texture_path && imgCache) {
+      const el = new Image();
+      el.onload = () => imgCache.set(tilemap.texture_path, el);
+      el.onerror = () => imgCache.set(tilemap.texture_path, null);
+      imgCache.set(tilemap.texture_path, null);
+      el.src = tilemap.texture_path.startsWith("/") ? tilemap.texture_path : `http://localhost:7878/assets/${tilemap.texture_path}`;
+      tmImg = null;
+    }
+
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(activeTransform.rotation);
+
+    if (tmImg) {
+      const iw = tmImg.naturalWidth;
+      const ih = tmImg.naturalHeight;
+      const m = margin, s = spacing;
+      const cellW = (iw - 2 * m - s * (tsColCount - 1)) / tsColCount;
+      const cellH = (ih - 2 * m - s * (tsRowCount - 1)) / tsRowCount;
+      const t = tilemap.tint;
+      ctx.globalAlpha = t[3];
+      for (let r = 0; r < tilemap.map_rows; r++) {
+        for (let c = 0; c < tilemap.map_cols; c++) {
+          const tileId = tilemap.tiles[r * tilemap.map_cols + c] ?? 0;
+          if (tileId === 0) continue;
+          const tsIdx = tileId - 1;
+          const tc = tsIdx % tsColCount;
+          const tr = Math.floor(tsIdx / tsColCount);
+          const srcX = m + tc * (cellW + s);
+          const srcY = m + tr * (cellH + s);
+          const dstX = c * tilePxW;
+          const dstY = r * tilePxH;
+          ctx.drawImage(tmImg, srcX, srcY, cellW, cellH, dstX, dstY, tilePxW, tilePxH);
+        }
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = "rgba(77,120,180,0.20)";
+      ctx.fillRect(0, 0, screenTmW, screenTmH);
+    }
+
+    ctx.strokeStyle = isSelected ? SELECTED_COLOR : "rgba(77,120,180,0.5)";
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeRect(0, 0, screenTmW, screenTmH);
+    ctx.restore();
+
+    if (isSelected && activeTool && activeTool !== "select") {
+      drawToolGizmo(ctx, sx, sy, activeTool, cam.zoom);
+    }
+    return;
   }
 
   const visW = sprite?.width ?? animSprite?.width;
