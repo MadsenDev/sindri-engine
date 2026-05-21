@@ -225,6 +225,80 @@ pub struct Tilemap {
     /// Pixel gap between tiles in the tileset texture
     #[serde(default)]
     pub spacing: u32,
+    /// Tile IDs (1-based) that act as solid collision surfaces.
+    /// Physics bridge auto-generates static colliders for these tiles on play start.
+    #[serde(default)]
+    pub solid_tiles: Vec<u16>,
+}
+
+impl Tilemap {
+    /// Returns true if the tile at (col, row) is solid.
+    pub fn is_tile_solid(&self, col: u32, row: u32) -> bool {
+        let id = self.tiles.get((row * self.map_cols + col) as usize).copied().unwrap_or(0);
+        id != 0 && self.solid_tiles.contains(&id)
+    }
+
+    /// Greedy rectangle merge over solid tiles.
+    /// Returns a list of (cx, cy, half_w, half_h) in local tilemap space (origin at top-left).
+    pub fn solid_rects(&self) -> Vec<(f32, f32, f32, f32)> {
+        let cols = self.map_cols as usize;
+        let rows = self.map_rows as usize;
+        let tw = self.tile_width;
+        let th = self.tile_height;
+
+        let solid: Vec<bool> = (0..rows).flat_map(|r| {
+            (0..cols).map(move |c| {
+                let id = self.tiles.get(r * cols + c).copied().unwrap_or(0);
+                id != 0 && self.solid_tiles.contains(&id)
+            })
+        }).collect();
+
+        let mut consumed = vec![false; cols * rows];
+        let mut rects = Vec::new();
+
+        for row in 0..rows {
+            let mut col = 0;
+            while col < cols {
+                let idx = row * cols + col;
+                if solid[idx] && !consumed[idx] {
+                    let run_start = col;
+                    while col < cols && solid[row * cols + col] && !consumed[row * cols + col] {
+                        col += 1;
+                    }
+                    let run_end = col;
+
+                    // Extend the run downward as far as possible
+                    let mut run_height = 1;
+                    'down: loop {
+                        let next_row = row + run_height;
+                        if next_row >= rows { break; }
+                        for c in run_start..run_end {
+                            if !solid[next_row * cols + c] || consumed[next_row * cols + c] {
+                                break 'down;
+                            }
+                        }
+                        run_height += 1;
+                    }
+
+                    for r in row..row + run_height {
+                        for c in run_start..run_end {
+                            consumed[r * cols + c] = true;
+                        }
+                    }
+
+                    let hw = (run_end - run_start) as f32 * tw * 0.5;
+                    let hh = run_height as f32 * th * 0.5;
+                    let cx = run_start as f32 * tw + hw;
+                    let cy = row as f32 * th + hh;
+                    rects.push((cx, cy, hw, hh));
+                } else {
+                    col += 1;
+                }
+            }
+        }
+
+        rects
+    }
 }
 
 impl Default for Tilemap {
@@ -243,6 +317,7 @@ impl Default for Tilemap {
             tint: [1.0, 1.0, 1.0, 1.0],
             margin: 0,
             spacing: 0,
+            solid_tiles: Vec::new(),
         }
     }
 }

@@ -82,7 +82,7 @@ export type Component =
   | { type: "Script"; path: string }
   | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number }
   | { type: "AudioSource"; path: string; volume: number; looping: boolean; play_on_start: boolean }
-  | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number, number, number, number]; margin?: number; spacing?: number };
+  | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number, number, number, number]; margin?: number; spacing?: number; solid_tiles?: number[] };
 
 export interface Scene {
   name: string;

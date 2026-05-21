@@ -42,6 +42,7 @@ enum SceneCommand {
     AnimPlay(String),
     AnimSetFlipX(bool),
     AnimSetFlipY(bool),
+    SetTilemapTile { col: u32, row: u32, tile_id: u16 },
 }
 
 fn resolve_script_path(scripts_root: &Path, script_path: &str) -> PathBuf {
@@ -136,6 +137,16 @@ fn apply_scene_commands(scene: &mut Scene, entity_id: u64, commands: Vec<SceneCo
                     }
                 }) {
                     sprite.color = color;
+                }
+            }
+            SceneCommand::SetTilemapTile { col, row, tile_id } => {
+                if let Some(tm) = entity.components.iter_mut().find_map(|c| {
+                    if let Component::Tilemap(tm) = c { Some(tm) } else { None }
+                }) {
+                    let idx = (row * tm.map_cols + col) as usize;
+                    if idx < tm.tiles.len() {
+                        tm.tiles[idx] = tile_id;
+                    }
                 }
             }
             SceneCommand::AnimPlay(_) | SceneCommand::AnimSetFlipX(_) | SceneCommand::AnimSetFlipY(_) => {
@@ -757,6 +768,26 @@ impl LuaRuntime {
                 if let Component::Transform(t) = c { Some(t) } else { None }
             }) else { continue };
 
+            // Auto-generate static colliders from Tilemap solid_tiles
+            if let Some(tilemap) = entity.components.iter().find_map(|c| {
+                if let Component::Tilemap(tm) = c { Some(tm) } else { None }
+            }) {
+                if !tilemap.solid_tiles.is_empty() {
+                    for (rect_idx, (cx, cy, hw, hh)) in tilemap.solid_rects().into_iter().enumerate() {
+                        // Synthetic ID: tilemap entity IDs occupy a high range
+                        let synthetic_id = entity_id.wrapping_mul(100_000).wrapping_add(rect_idx as u64 + 1);
+                        let eid = EntityId(synthetic_id as u32);
+                        let world_pos = Vec2::new(transform.x + cx, transform.y + cy);
+                        if self.physics.create_body(eid, PhysicsBodyType::Fixed, world_pos, 0.0).is_err() {
+                            continue;
+                        }
+                        let shape = ColliderShape::Box { hx: hw, hy: hh };
+                        let _ = self.physics.add_collider_with_material(eid, shape, Vec2::new(0.0, 0.0), 1.0, 0.3, 0.0);
+                    }
+                }
+                continue; // Tilemap entities don't also get a regular collider body
+            }
+
             let Some(collider) = entity.components.iter().find_map(|c| {
                 if let Component::Collider(col) = c { Some(col) } else { None }
             }) else { continue };
@@ -908,6 +939,9 @@ impl LuaRuntime {
             let has_physics = entity.components.iter().any(|c| matches!(c, Component::PhysicsBody(_)));
             let anim_comp = entity.components.iter().find_map(|c| {
                 if let Component::AnimatedSprite(a) = c { Some(a.clone()) } else { None }
+            });
+            let tilemap_comp = entity.components.iter().find_map(|c| {
+                if let Component::Tilemap(tm) = c { Some(tm.clone()) } else { None }
             });
 
             // Advance animation state
@@ -1201,6 +1235,104 @@ impl LuaRuntime {
                     match anim_fn {
                         Ok(f) => { let _ = self_tbl.set("animated_sprite", f); }
                         Err(e) => self.report_error(format!("[lua] animated_sprite method error ({script_path}): {e}")),
+                    }
+                }
+
+                // tilemap() facet
+                {
+                    let tm_snap = tilemap_comp.clone();
+                    let scene_cmds = scene_commands.clone();
+                    let tm_fn = if let Some(tm) = tm_snap {
+                        self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                            let tbl = lua.create_table()?;
+                            let tw = tm.tile_width;
+                            let th = tm.tile_height;
+                            let map_cols = tm.map_cols;
+                            let map_rows = tm.map_rows;
+                            let tiles = tm.tiles.clone();
+                            let solid_tiles = tm.solid_tiles.clone();
+
+                            tbl.set("width", map_cols)?;
+                            tbl.set("height", map_rows)?;
+                            tbl.set("tile_width", tw)?;
+                            tbl.set("tile_height", th)?;
+
+                            // get_tile(col, row) → tile_id (0 = empty)
+                            let tiles2 = tiles.clone();
+                            tbl.set("get_tile", lua.create_function(move |_, (_this, col, row): (Table, u32, u32)| {
+                                let id = tiles2.get((row * map_cols + col) as usize).copied().unwrap_or(0);
+                                Ok(id as u32)
+                            })?)?;
+
+                            // set_tile(col, row, tile_id)
+                            let cmds = scene_cmds.clone();
+                            tbl.set("set_tile", lua.create_function(move |_, (_this, col, row, tile_id): (Table, u32, u32, u32)| {
+                                cmds.lock().unwrap().push(SceneCommand::SetTilemapTile { col, row, tile_id: tile_id as u16 });
+                                Ok(())
+                            })?)?;
+
+                            // is_solid(col, row) → bool
+                            let tiles3 = tiles.clone();
+                            let solid2 = solid_tiles.clone();
+                            tbl.set("is_solid", lua.create_function(move |_, (_this, col, row): (Table, u32, u32)| {
+                                let id = tiles3.get((row * map_cols + col) as usize).copied().unwrap_or(0);
+                                Ok(id != 0 && solid2.contains(&id))
+                            })?)?;
+
+                            // world_to_tile(wx, wy) → col, row
+                            tbl.set("world_to_tile", lua.create_function(move |_, (_this, wx, wy): (Table, f32, f32)| {
+                                let col = (wx / tw).floor() as i32;
+                                let row = (wy / th).floor() as i32;
+                                Ok((col, row))
+                            })?)?;
+
+                            // tile_to_world(col, row) → wx, wy  (center of tile)
+                            tbl.set("tile_to_world", lua.create_function(move |_, (_this, col, row): (Table, f32, f32)| {
+                                let wx = (col + 0.5) * tw;
+                                let wy = (row + 0.5) * th;
+                                Ok((wx, wy))
+                            })?)?;
+
+                            // find_path(wx, wy, gx, gy) → array of {x,y} or nil
+                            let tiles4 = tiles.clone();
+                            let solid3 = solid_tiles.clone();
+                            tbl.set("find_path", lua.create_function(move |lua, (_this, wx, wy, gx, gy): (Table, f32, f32, f32, f32)| {
+                                use sindri::pathfinding::{AStarPathfinder, PathfindingGrid, GridNode};
+                                let mut grid = PathfindingGrid::new(map_cols as usize, map_rows as usize, tw);
+                                for r in 0..map_rows {
+                                    for c in 0..map_cols {
+                                        let id = tiles4.get((r * map_cols + c) as usize).copied().unwrap_or(0);
+                                        let passable = id == 0 || !solid3.contains(&id);
+                                        if !passable {
+                                            grid.set_walkable(GridNode::new(c as i32, r as i32), false);
+                                        }
+                                    }
+                                }
+                                match AStarPathfinder::find_path(&grid, sindri::math::Vec2::new(wx, wy), sindri::math::Vec2::new(gx, gy)) {
+                                    Some(path) => {
+                                        let t = lua.create_table()?;
+                                        for (i, p) in path.iter().enumerate() {
+                                            let pt = lua.create_table()?;
+                                            pt.set("x", p.x)?;
+                                            pt.set("y", p.y)?;
+                                            t.set(i + 1, pt)?;
+                                        }
+                                        Ok(mlua::Value::Table(t))
+                                    }
+                                    None => Ok(mlua::Value::Nil),
+                                }
+                            })?)?;
+
+                            Ok(Some(tbl))
+                        })
+                    } else {
+                        self.lua.create_function(|_, _: mlua::MultiValue| {
+                            Ok::<Option<Table>, mlua::Error>(None)
+                        })
+                    };
+                    match tm_fn {
+                        Ok(f) => { let _ = self_tbl.set("tilemap", f); }
+                        Err(e) => self.report_error(format!("[lua] tilemap method error ({script_path}): {e}")),
                     }
                 }
 

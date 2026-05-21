@@ -27,7 +27,7 @@ format cannot preserve it, or the AI can generate invalid partial state.
 | Lua ScriptComponent | Yes | Yes | Partial | Partial | Yes | Yes | Yes | Partial | Yes | Partial | Active |
 | Camera | Yes | Yes | Partial | Yes | Yes | Yes | Yes | Partial | Yes | Partial | Active |
 | AudioSource | Yes | Yes | Partial | Yes | Yes | Yes | Yes | No | Yes | Partial | Active |
-| Tilemap | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | Yes | Partial | Active |
+| Tilemap | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Active |
 | Animation (AnimatedSprite) | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Active |
 | Particles | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |
 | Lighting | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |

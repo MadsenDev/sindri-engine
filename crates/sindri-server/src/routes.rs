@@ -991,6 +991,11 @@ pub async fn patch_component(
                             .map_err(|e| format!("invalid tiles: {e}"))?;
                         t.tiles = tiles;
                     }
+                    if let Some(solid_val) = body.get("solid_tiles") {
+                        let solid: Vec<u16> = serde_json::from_value(solid_val.clone())
+                            .map_err(|e| format!("invalid solid_tiles: {e}"))?;
+                        t.solid_tiles = solid;
+                    }
                     Ok(())
                 })
         }

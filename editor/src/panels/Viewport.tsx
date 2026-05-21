@@ -108,6 +108,7 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
             activeTool={activeTool}
             onTransformCommit={onTransformCommit}
             onColliderCommit={onColliderCommit}
+            gizmos={gizmos}
           />
         ) : (
           <GameView engineReady={engineReady} isPlaying={isPlaying} />
@@ -166,6 +167,7 @@ function SceneView({
   activeTool,
   onTransformCommit,
   onColliderCommit,
+  gizmos,
 }: {
   scene: Scene | null;
   selectedId: number | null;
@@ -173,6 +175,7 @@ function SceneView({
   activeTool: ActiveTool;
   onTransformCommit: (change: TransformChange) => void;
   onColliderCommit: (change: ColliderChange) => void;
+  gizmos?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,6 +186,7 @@ function SceneView({
   const selectedRef = useRef(selectedId);
   const rafRef = useRef<number>(0);
   const activeToolRef = useRef(activeTool);
+  const gizmosRef = useRef(gizmos);
   const dragRef = useRef<DragState | null>(null);
   const draftRef = useRef<Map<number, TransformDraft>>(new Map());
   const colliderDragRef = useRef<ColliderDragState | null>(null);
@@ -194,6 +198,7 @@ function SceneView({
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { gizmosRef.current = gizmos; }, [gizmos]);
 
   const worldToScreen = (wx: number, wy: number, cw: number, ch: number) => ({
     sx: (wx - cameraRef.current.x) * cameraRef.current.zoom + cw / 2,
@@ -288,7 +293,7 @@ function SceneView({
     // — Entities —
     if (sc) {
       for (const entity of Object.values(sc.entities)) {
-        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt);
+        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt, gizmosRef.current);
       }
     }
 
@@ -680,6 +685,7 @@ function drawEntity(
   imgCache?: Map<string, HTMLImageElement | null>,
   animState?: Map<number, { frame: number; timer: number }>,
   dt?: number,
+  gizmos?: boolean,
 ) {
   const transform = entity.components.find(c => c.type === "Transform") as
     | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
@@ -691,7 +697,7 @@ function drawEntity(
     | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; tint: [number,number,number,number]; clips: { name: string; start_frame: number; end_frame: number; fps: number; looping: boolean }[]; default_clip: string; flip_x: boolean; flip_y: boolean }
     | undefined;
   const tilemap = entity.components.find(c => c.type === "Tilemap") as
-    | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number,number,number,number]; margin?: number; spacing?: number }
+    | { type: "Tilemap"; texture_path: string; tileset_cols: number; tileset_rows: number; tile_width: number; tile_height: number; map_cols: number; map_rows: number; tiles: number[]; tint: [number,number,number,number]; margin?: number; spacing?: number; solid_tiles?: number[] }
     | undefined;
   const collider = entity.components.find(c => c.type === "Collider") as
     | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number }
@@ -775,6 +781,20 @@ function drawEntity(
     } else {
       ctx.fillStyle = "rgba(77,120,180,0.20)";
       ctx.fillRect(0, 0, screenTmW, screenTmH);
+    }
+
+    // Solid tile overlay (shown when gizmos active)
+    if (gizmos && tilemap.solid_tiles && tilemap.solid_tiles.length > 0) {
+      const solidSet = new Set(tilemap.solid_tiles);
+      ctx.fillStyle = "rgba(220,60,60,0.35)";
+      for (let r = 0; r < tilemap.map_rows; r++) {
+        for (let c = 0; c < tilemap.map_cols; c++) {
+          const tileId = tilemap.tiles[r * tilemap.map_cols + c] ?? 0;
+          if (tileId !== 0 && solidSet.has(tileId)) {
+            ctx.fillRect(c * tilePxW, r * tilePxH, tilePxW, tilePxH);
+          }
+        }
+      }
     }
 
     ctx.strokeStyle = isSelected ? SELECTED_COLOR : "rgba(77,120,180,0.5)";

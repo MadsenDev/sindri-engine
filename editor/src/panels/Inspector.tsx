@@ -755,8 +755,12 @@ function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFil
       <div style={{ padding: "8px 22px", borderTop: "1px solid var(--rule)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
           <span style={{ fontSize: "11px", color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-            {comp.map_cols}×{comp.map_rows} tiles
-            {" · "}tileset {comp.tileset_cols}×{comp.tileset_rows}
+            {comp.map_cols}×{comp.map_rows} tiles · tileset {comp.tileset_cols}×{comp.tileset_rows}
+            {(comp.solid_tiles?.length ?? 0) > 0 && (
+              <span style={{ color: "rgba(220,100,100,0.9)", marginLeft: "8px" }}>
+                {comp.solid_tiles!.length} solid type{comp.solid_tiles!.length !== 1 ? "s" : ""}
+              </span>
+            )}
           </span>
           <button onClick={() => setPainterOpen(true)} style={{
             background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
