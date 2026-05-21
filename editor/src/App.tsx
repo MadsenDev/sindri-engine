@@ -11,6 +11,7 @@ import FileBrowser from "./panels/FileBrowser";
 import WelcomeScreen from "./screens/WelcomeScreen";
 import { ContextMenuProvider } from "./components/ContextMenu";
 import CmdK from "./components/CmdK";
+import SettingsModal from "./components/SettingsModal";
 
 const SUGGESTION_MODEL_LABEL = "qwen2.5:0.5b";
 
@@ -97,7 +98,7 @@ export type Component =
   | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number }
   | { type: "Collider"; width: number; height: number; offset_x: number; offset_y: number; is_trigger: boolean }
   | { type: "Script"; path: string }
-  | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number }
+  | { type: "Camera"; active?: boolean; zoom: number; follow_entity: number | null; offset_x?: number; offset_y?: number; bounds_min_x?: number | null; bounds_min_y?: number | null; bounds_max_x?: number | null; bounds_max_y?: number | null; smoothing?: number; dead_zone_width?: number; dead_zone_height?: number; pixel_perfect?: boolean }
   | { type: "AudioSource"; path: string; volume: number; looping: boolean; play_on_start: boolean }
   | { type: "Tilemap"; palettes: TilePalette[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number; layers: TileLayer[]; tint: [number, number, number, number] };
 
@@ -165,6 +166,8 @@ export default function App() {
   );
   const [providerStatuses, setProviderStatuses] = useState<AiProviderStatus[]>([]);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [projectSettings, setProjectSettings] = useState<{ name: string; resolution_width: number; resolution_height: number; pixel_art_mode: boolean } | null>(null);
   const [playbackState, setPlaybackState] = useState<PlaybackState>("stopped");
   const [leftTab, setLeftTab] = useState<"scene" | "files" | "history">("scene");
   const [projectFiles, setProjectFiles] = useState<{ path: string; kind: string; name: string }[]>([]);
@@ -204,6 +207,10 @@ export default function App() {
         }
         clearInterval(healthInterval);
         await refreshScene();
+        if (projectPath) {
+          invoke<{ name: string; resolution_width: number; resolution_height: number; pixel_art_mode: boolean }>("get_project_settings", { projectPath })
+            .then(s => setProjectSettings(s)).catch(() => {});
+        }
         // Restore staged proposal from disk if any staged entities exist.
         try {
           const pending = await invoke<ProposalData | null>("get_pending_proposal");
@@ -595,6 +602,8 @@ export default function App() {
           onUndo={undoTransform}
           onRedo={redoTransform}
           onOpenAiSettings={() => setAiSettingsOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          resolution={projectSettings ? `${projectSettings.resolution_width} × ${projectSettings.resolution_height}` : "1280 × 720"}
         />
 
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -679,6 +688,7 @@ export default function App() {
               onColliderCommit={handleColliderCommit}
               engineReady={engineReady}
               isPlaying={playbackState === "playing"}
+              resolution={projectSettings ? `${projectSettings.resolution_width} × ${projectSettings.resolution_height}` : "1280 × 720"}
             />
             <ScriptEditor
               openScript={openScript}
@@ -754,6 +764,13 @@ export default function App() {
         />
       )}
 
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        projectPath={projectPath}
+        engineReady={engineReady}
+      />
+
       {aiSettingsOpen && (
         <AiSettingsModal
           provider={selectedProvider}
@@ -807,6 +824,8 @@ interface TopbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onOpenAiSettings: () => void;
+  onOpenSettings: () => void;
+  resolution: string;
 }
 
 function Topbar({
@@ -815,7 +834,7 @@ function Topbar({
   onOpenCmdK, aiStatusDot, aiStatusText,
   activeTool, setActiveTool,
   canUndo, canRedo, onUndo, onRedo,
-  onOpenAiSettings,
+  onOpenAiSettings, onOpenSettings, resolution,
 }: TopbarProps) {
   const tools: { key: ActiveTool; icon: string; label: string }[] = [
     { key: "select",   icon: "↖", label: "Select" },
@@ -941,10 +960,10 @@ function Topbar({
         </div>
       </div>
 
-      {/* Right: AI status pill */}
+      {/* Right: resolution + settings + AI */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "flex-end",
-        padding: "0 22px", gap: "12px", height: "100%",
+        padding: "0 16px", gap: "8px", height: "100%",
       }}>
         {/* Compose link */}
         <button
@@ -958,6 +977,37 @@ function Topbar({
           <SparkleIcon size={13} /> Compose
         </button>
 
+        <div style={{ width: "1px", height: "18px", background: "var(--rule-2)" }} />
+
+        {/* Resolution */}
+        <button
+          onClick={onOpenSettings}
+          title="Project settings"
+          style={{
+            fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)",
+            background: "none", border: "none", cursor: "pointer", padding: "0 4px",
+          }}
+        >
+          {resolution}
+        </button>
+
+        {/* Settings button */}
+        <button
+          onClick={onOpenSettings}
+          title="Project & editor settings"
+          style={{
+            width: "28px", height: "28px",
+            background: "transparent",
+            border: "1px solid var(--rule)",
+            color: "var(--ink-3)",
+            cursor: "pointer",
+            fontFamily: "var(--font-mono)",
+            fontSize: "14px",
+          }}
+        >⊞</button>
+
+        <div style={{ width: "1px", height: "18px", background: "var(--rule-2)" }} />
+
         {/* AI status pill */}
         <div style={{
           display: "flex", alignItems: "center", gap: "8px",
@@ -966,7 +1016,7 @@ function Topbar({
           padding: "5px 10px",
           border: "1px solid var(--rule)",
           background: "var(--paper-2)",
-          maxWidth: "220px",
+          maxWidth: "200px",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
         }}>
           <span style={{ width: "6px", height: "6px", background: aiStatusDot, flexShrink: 0 }} />

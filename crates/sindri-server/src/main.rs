@@ -5,7 +5,9 @@ use sindri::scene::Scene;
 use sindri_server::routes::{PlaybackMode, PlaybackState, SharedErrors, SharedGizmos, SharedPlayback};
 use sindri_server::{serve, AppState, SharedScene};
 mod lua_runtime;
+mod project_settings;
 use lua_runtime::{AnimState, LuaRuntime};
+use project_settings::ProjectSettings;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -61,6 +63,7 @@ fn default_scene() -> Scene {
             smoothing: 1.0,
             dead_zone_width: 0.0,
             dead_zone_height: 0.0,
+            pixel_perfect: true,
             runtime_target_zoom: None,
             runtime_zoom_speed: 0.0,
             runtime_shake_intensity: 0.0,
@@ -262,6 +265,7 @@ fn scene_camera(scene: &Scene, runtime: &mut CameraRuntime) -> Camera2D {
     let mut camera_2d = Camera2D::new(position).with_rotation(camera_transform.rotation);
     camera_2d.zoom = camera.zoom.max(0.01);
     camera_2d.bounds = camera_bounds(camera);
+    camera_2d.pixel_perfect = camera.pixel_perfect;
     camera_2d
 }
 
@@ -560,7 +564,9 @@ fn run_preview_window(
     window_attributes.inner_size = Some(LogicalSize::new(WIDTH, HEIGHT).into());
     let window = event_loop.create_window(window_attributes)?;
 
+    let project_settings = ProjectSettings::load(project_dir);
     let mut renderer = Renderer::new(&window, true)?;
+    renderer.set_pixel_art_mode(project_settings.pixel_art_mode);
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     println!("native play window ready");
 
@@ -653,7 +659,9 @@ fn run_headless(
     gizmos: SharedGizmos,
     frame_tx: tokio::sync::broadcast::Sender<Vec<u8>>,
 ) -> anyhow::Result<()> {
+    let project_settings = ProjectSettings::load(&project_dir);
     let mut renderer = Renderer::new_offscreen(STREAM_W, STREAM_H)?;
+    renderer.set_pixel_art_mode(project_settings.pixel_art_mode);
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     let mut camera_runtime = CameraRuntime::default();
     let mut render_state = RenderState::new(project_dir);

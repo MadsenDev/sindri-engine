@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::SystemTime;
 use futures_util::StreamExt;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 const ENGINE_BASE: &str = "http://127.0.0.1:7878";
 const KEYCHAIN_SERVICE: &str = "sindri-editor-ai";
@@ -2946,4 +2946,84 @@ pub async fn rename_project_file(
     } else {
         format!("{}/{}", parent_prefix, new_name)
     })
+}
+
+// ─── Project Settings ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectSettings {
+    pub name: String,
+    pub resolution_width: u32,
+    pub resolution_height: u32,
+    pub pixel_art_mode: bool,
+}
+
+impl Default for ProjectSettings {
+    fn default() -> Self {
+        Self {
+            name: "My Game".into(),
+            resolution_width: 1280,
+            resolution_height: 720,
+            pixel_art_mode: true,
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn get_project_settings(project_path: String) -> Result<ProjectSettings, String> {
+    let path = std::path::Path::new(&project_path).join("sindri_project.json");
+    if !path.exists() {
+        return Ok(ProjectSettings::default());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_project_settings(
+    project_path: String,
+    settings: ProjectSettings,
+) -> Result<(), String> {
+    let path = std::path::Path::new(&project_path).join("sindri_project.json");
+    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+// ─── Editor Preferences ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorPrefs {
+    #[serde(default = "default_auto_save_secs")]
+    pub auto_save_interval_secs: u32,
+}
+
+fn default_auto_save_secs() -> u32 { 5 }
+
+impl Default for EditorPrefs {
+    fn default() -> Self {
+        Self { auto_save_interval_secs: default_auto_save_secs() }
+    }
+}
+
+fn editor_prefs_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("editor_prefs.json"))
+}
+
+#[tauri::command]
+pub async fn get_editor_prefs(app: tauri::AppHandle) -> Result<EditorPrefs, String> {
+    let path = editor_prefs_path(&app)?;
+    if !path.exists() {
+        return Ok(EditorPrefs::default());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_editor_prefs(app: tauri::AppHandle, prefs: EditorPrefs) -> Result<(), String> {
+    let path = editor_prefs_path(&app)?;
+    let json = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
 }

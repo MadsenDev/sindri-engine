@@ -215,6 +215,8 @@ pub struct Camera2D {
     shake_seed: f32,
     /// World bounds (min, max) - camera will be clamped to these bounds
     pub bounds: Option<(Vec2, Vec2)>,
+    /// Snap camera position to the pixel grid before building the view matrix.
+    pub pixel_perfect: bool,
 }
 
 impl Camera2D {
@@ -230,6 +232,7 @@ impl Camera2D {
             shake_timer: 0.0,
             shake_seed: 0.0,
             bounds: None,
+            pixel_perfect: true,
         }
     }
 
@@ -447,8 +450,16 @@ impl Camera2D {
     pub fn view_projection(&self, width: u32, height: u32) -> Mat4 {
         let projection = Mat4::orthographic_rh_gl(0.0, width as f32, height as f32, 0.0, -1.0, 1.0);
 
-        // Get effective position (includes offset and shake)
-        let effective_pos = self.effective_position();
+        let raw_pos = self.effective_position();
+        // Snap to pixel grid when pixel_perfect is on, eliminating sub-pixel sprite shimmer.
+        let effective_pos = if self.pixel_perfect {
+            Vec2::new(
+                (raw_pos.x * self.zoom).round() / self.zoom,
+                (raw_pos.y * self.zoom).round() / self.zoom,
+            )
+        } else {
+            raw_pos
+        };
 
         let half_width = width as f32 / 2.0;
         let half_height = height as f32 / 2.0;
@@ -548,6 +559,7 @@ impl Default for Camera2D {
             shake_timer: 0.0,
             shake_seed: 0.0,
             bounds: None,
+            pixel_perfect: true,
         }
     }
 }

@@ -55,6 +55,10 @@ pub fn run() {
             commands::write_anim_file,
             commands::read_text_file,
             commands::read_project_file,
+            commands::get_project_settings,
+            commands::save_project_settings,
+            commands::get_editor_prefs,
+            commands::save_editor_prefs,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

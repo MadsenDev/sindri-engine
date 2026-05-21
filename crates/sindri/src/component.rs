@@ -110,21 +110,16 @@ pub struct Camera {
     pub runtime_shake_intensity: f32,
     #[serde(skip)]
     pub runtime_shake_timer: f32,
+    #[serde(default = "default_camera_pixel_perfect")]
+    pub pixel_perfect: bool,
     #[serde(skip)]
     pub runtime_shake_seed: f32,
 }
 
-fn default_camera_active() -> bool {
-    true
-}
-
-fn default_camera_zoom() -> f32 {
-    1.0
-}
-
-fn default_camera_smoothing() -> f32 {
-    1.0
-}
+fn default_camera_active() -> bool { true }
+fn default_camera_zoom() -> f32 { 1.0 }
+fn default_camera_smoothing() -> f32 { 1.0 }
+fn default_camera_pixel_perfect() -> bool { true }
 
 /// A named animation clip: a contiguous range of frames on the spritesheet.
 #[derive(Debug, Clone, Serialize, Deserialize)]

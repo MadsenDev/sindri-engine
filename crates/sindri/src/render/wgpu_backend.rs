@@ -163,6 +163,11 @@ impl Renderer {
         self.backend.surface_size()
     }
 
+    /// Set nearest-neighbor (true) or bilinear (false) filtering for subsequently loaded textures.
+    pub fn set_pixel_art_mode(&mut self, enabled: bool) {
+        self.backend.pixel_art_mode = enabled;
+    }
+
     /// Load a font from bytes (TTF/OTF format).
     pub fn load_font_from_bytes(&mut self, bytes: &[u8]) -> Result<FontHandle> {
         self.backend.load_font_from_bytes(bytes)
@@ -502,6 +507,8 @@ struct WgpuBackend {
     text_renderer: TextRenderer,
     /// Reusable staging buffer for GPU→CPU readback. Avoids per-frame allocation.
     readback_buffer: Option<(wgpu::Buffer, u64)>,
+    /// Use nearest-neighbor filtering for all game textures (pixel art mode).
+    pixel_art_mode: bool,
 }
 
 #[repr(C)]
@@ -682,6 +689,7 @@ impl WgpuBackend {
             bind_group_cache: HashMap::new(),
             text_renderer: TextRenderer::new(),
             readback_buffer: None,
+            pixel_art_mode: true,
         })
     }
 
@@ -738,6 +746,7 @@ impl WgpuBackend {
             bind_group_cache: HashMap::new(),
             text_renderer: TextRenderer::new(),
             readback_buffer: None,
+            pixel_art_mode: true,
         })
     }
 
@@ -1844,8 +1853,7 @@ impl WgpuBackend {
     fn load_texture_from_bytes(&mut self, bytes: &[u8]) -> Result<TextureHandle> {
         let image = image::load_from_memory(bytes)?.to_rgba8();
         let dimensions = image.dimensions();
-        // Regular image textures use linear filtering
-        self.load_texture_from_rgba(&image, dimensions.0, dimensions.1, false)
+        self.load_texture_from_rgba(&image, dimensions.0, dimensions.1, self.pixel_art_mode)
     }
 
     /// Load a texture from raw RGBA8 data (for glyphs, etc.)

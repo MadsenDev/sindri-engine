@@ -644,6 +644,7 @@ pub async fn add_component(
             smoothing: 1.0,
             dead_zone_width: 0.0,
             dead_zone_height: 0.0,
+            pixel_perfect: true,
             runtime_target_zoom: None,
             runtime_zoom_speed: 0.0,
             runtime_shake_intensity: 0.0,

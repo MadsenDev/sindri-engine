@@ -18,6 +18,7 @@ interface Props {
   onColliderCommit: (change: ColliderChange) => void;
   engineReady: boolean;
   isPlaying: boolean;
+  resolution?: string;
 }
 
 interface Camera {
@@ -36,7 +37,7 @@ const COLLIDER_COLOR = "rgba(155,176,112,0.35)";  // moss
 const CAMERA_COLOR = "#6dbcdb";      // cyan
 const LABEL_COLOR = "#8a8580";       // ink-3
 
-export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, onColliderCommit, engineReady, isPlaying }: Props) {
+export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, onColliderCommit, engineReady, isPlaying, resolution = "1280 × 720" }: Props) {
   const [tab, setTab] = useState<"scene" | "game">("scene");
   const [gizmos, setGizmos] = useState(false);
 
@@ -96,7 +97,7 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
         >
           gizmos
         </button>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>1280 × 720</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>{resolution}</span>
       </div>
 
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -226,6 +227,7 @@ function SceneView({
 
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, cw, ch);
+    ctx.imageSmoothingEnabled = false;
 
     // — Grid —
     const rawStep = 100;
@@ -756,7 +758,8 @@ function drawEntity(
     ctx.rotate(activeTransform.rotation);
 
     const tint = tilemap.tint;
-    ctx.imageSmoothingEnabled = false;
+    const tileDrawW = Math.round(tilePxW);
+    const tileDrawH = Math.round(tilePxH);
 
     // Render all layers bottom-to-top
     for (const layer of (tilemap.layers ?? [])) {
@@ -786,7 +789,7 @@ function drawEntity(
             srcW = (iw - 2 * m - s * (cols - 1)) / cols; srcH = (ih - 2 * m - s * (rows - 1)) / rows;
             srcX = m + (tileIdx % cols) * (srcW + s); srcY = m + Math.floor(tileIdx / cols) * (srcH + s);
           }
-          ctx.drawImage(img, srcX, srcY, srcW, srcH, c * tilePxW, r * tilePxH, tilePxW, tilePxH);
+          ctx.drawImage(img, srcX, srcY, srcW, srcH, Math.round(c * tilePxW), Math.round(r * tilePxH), tileDrawW, tileDrawH);
         }
       }
     }

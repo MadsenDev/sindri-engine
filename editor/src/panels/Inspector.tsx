@@ -691,6 +691,7 @@ function CameraFields({ comp, entityId, componentIdx, onSceneChange }: {
   return (
     <>
       <BoolField label="active" value={comp.active ?? true} onChange={v => patch({ active: v })} />
+      <BoolField label="pixel perfect" value={comp.pixel_perfect ?? true} onChange={v => patch({ pixel_perfect: v })} />
       <NumberInputField label="zoom" value={comp.zoom} min={0.01} onCommit={v => patch({ zoom: v })} />
       <OptionalEntityField label="follow" value={comp.follow_entity} onCommit={v => patch({ follow_entity: v })} />
       <NumberInputField label="offset x" value={comp.offset_x ?? 0} onCommit={v => patch({ offset_x: v })} />
