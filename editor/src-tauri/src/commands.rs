@@ -663,6 +663,21 @@ async fn request_openai_text(
         .ok_or_else(|| format!("OpenAI response did not include choices[0].message.content: {value}"))
 }
 
+/// Extract a readable message from an OpenRouter error response.
+/// Priority: error.metadata.raw > error.message > raw text.
+async fn openrouter_error(resp: reqwest::Response) -> String {
+    let text = resp.text().await.unwrap_or_default();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Some(raw) = v["error"]["metadata"]["raw"].as_str() {
+            return raw.to_string();
+        }
+        if let Some(msg) = v["error"]["message"].as_str() {
+            return msg.to_string();
+        }
+    }
+    text
+}
+
 async fn request_openrouter_text(
     client: &reqwest::Client,
     model: &str,
@@ -683,7 +698,7 @@ async fn request_openrouter_text(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(resp.text().await.unwrap_or_default());
+        return Err(openrouter_error(resp).await);
     }
     let value: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     value["choices"][0]["message"]["content"]
@@ -898,7 +913,7 @@ async fn stream_openrouter_text(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(resp.text().await.unwrap_or_default());
+        return Err(openrouter_error(resp).await);
     }
     let mut full = String::new();
     let mut buffer = String::new();
