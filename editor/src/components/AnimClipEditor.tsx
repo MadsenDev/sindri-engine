@@ -27,7 +27,6 @@ interface Props {
 function resolveTextureUrl(path: string): string {
   if (!path) return "";
   if (path.startsWith("http") || path.startsWith("data:")) return path;
-  if (path.startsWith("/")) return path;
   return `http://localhost:7878/assets/${path}`;
 }
 
@@ -36,16 +35,15 @@ export default function AnimClipEditor({ comp, onClose, onSave, onCommit, saveLa
     comp.clips.length > 0 ? comp.clips : [{ name: "idle", start_frame: 0, end_frame: Math.max(0, comp.cols * comp.rows - 1), fps: 10, looping: true }]
   );
   const [defaultClip, setDefaultClip] = useState(comp.default_clip);
-  const [selectedClipIdx, setSelectedClipIdx] = useState(0);
+  const [selectedIdx, setSelectedIdx] = useState(0);
   const [selectStart, setSelectStart] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Preview animation state
   const [previewFrame, setPreviewFrame] = useState(0);
   const [previewPlaying, setPreviewPlaying] = useState(true);
   const previewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Image loading
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   useEffect(() => {
     if (!comp.texture_path) return;
@@ -55,21 +53,25 @@ export default function AnimClipEditor({ comp, onClose, onSave, onCommit, saveLa
     el.src = resolveTextureUrl(comp.texture_path);
   }, [comp.texture_path]);
 
-  const clip = clips[selectedClipIdx] ?? clips[0];
+  const clip = clips[selectedIdx] ?? clips[0];
+  const totalFrames = comp.cols * comp.rows;
 
-  // Preview playback
+  const frameUV = (idx: number) => {
+    const col = idx % comp.cols;
+    const row = Math.floor(idx / comp.cols);
+    return { u: col / comp.cols, v: row / comp.rows, uw: 1 / comp.cols, uh: 1 / comp.rows };
+  };
+
   const restartPreview = useCallback((c: AnimClip) => {
     if (previewIntervalRef.current) clearInterval(previewIntervalRef.current);
     setPreviewFrame(0);
-    if (!c || c.fps <= 0) return;
-    const ms = 1000 / c.fps;
     const frameCount = c.end_frame - c.start_frame + 1;
-    if (frameCount <= 0) return;
+    if (!c || c.fps <= 0 || frameCount <= 0) return;
     let f = 0;
     previewIntervalRef.current = setInterval(() => {
       f = (f + 1) % frameCount;
       setPreviewFrame(f);
-    }, ms);
+    }, 1000 / c.fps);
   }, []);
 
   useEffect(() => {
@@ -77,72 +79,6 @@ export default function AnimClipEditor({ comp, onClose, onSave, onCommit, saveLa
     return () => { if (previewIntervalRef.current) clearInterval(previewIntervalRef.current); };
   }, [clip, previewPlaying, restartPreview]);
 
-  const totalFrames = comp.cols * comp.rows;
-
-  // Frame UV helpers
-  const frameUV = (frameIdx: number) => {
-    const col = frameIdx % comp.cols;
-    const row = Math.floor(frameIdx / comp.cols);
-    return { col, row, u: col / comp.cols, v: row / comp.rows, uw: 1 / comp.cols, uh: 1 / comp.rows };
-  };
-
-  // Selection handling
-  const handleFrameMouseDown = (frameIdx: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    setSelectStart(frameIdx);
-    setIsDragging(true);
-    setClips(prev => prev.map((c, i) => i === selectedClipIdx
-      ? { ...c, start_frame: frameIdx, end_frame: frameIdx }
-      : c
-    ));
-  };
-
-  const handleFrameMouseEnter = (frameIdx: number) => {
-    if (!isDragging || selectStart === null) return;
-    const lo = Math.min(selectStart, frameIdx);
-    const hi = Math.max(selectStart, frameIdx);
-    setClips(prev => prev.map((c, i) => i === selectedClipIdx
-      ? { ...c, start_frame: lo, end_frame: hi }
-      : c
-    ));
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    setSelectStart(null);
-  };
-
-  const updateClip = (idx: number, fields: Partial<AnimClip>) => {
-    setClips(prev => prev.map((c, i) => i === idx ? { ...c, ...fields } : c));
-  };
-
-  const addClip = () => {
-    const newClip: AnimClip = { name: `clip${clips.length + 1}`, start_frame: 0, end_frame: 0, fps: 10, looping: true };
-    const next = [...clips, newClip];
-    setClips(next);
-    setSelectedClipIdx(next.length - 1);
-  };
-
-  const removeClip = (i: number) => {
-    if (clips.length <= 1) return;
-    const next = clips.filter((_, ci) => ci !== i);
-    setClips(next);
-    setSelectedClipIdx(Math.min(selectedClipIdx, next.length - 1));
-    if (defaultClip === clips[i].name) setDefaultClip(next[0].name);
-  };
-
-  const handleSave = () => {
-    const patch = { clips, default_clip: defaultClip };
-    if (onCommit) {
-      onCommit(patch);
-    } else {
-      onSave(patch);
-      onClose();
-    }
-  };
-
-  // Preview canvas
-  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = previewCanvasRef.current;
     if (!canvas || !img || !clip) return;
@@ -154,301 +90,246 @@ export default function AnimClipEditor({ comp, onClose, onSave, onCommit, saveLa
     ctx.drawImage(img, u * img.naturalWidth, v * img.naturalHeight, uw * img.naturalWidth, uh * img.naturalHeight, 0, 0, canvas.width, canvas.height);
   }, [img, clip, previewFrame]);
 
-  // Spritesheet grid cell size for display
-  const GRID_MAX_W = 520;
-  const cellW = Math.min(80, Math.floor(GRID_MAX_W / comp.cols));
-  const cellH = img ? Math.round(cellW * (img.naturalHeight / comp.rows) / (img.naturalWidth / comp.cols)) : cellW;
-  const gridW = cellW * comp.cols;
+  const CELL = Math.min(72, Math.max(32, Math.floor(540 / comp.cols)));
+  const CELL_H = img ? Math.round(CELL * (img.naturalHeight / comp.rows) / (img.naturalWidth / comp.cols)) : CELL;
 
-  const isInClip = (frameIdx: number) => clip && frameIdx >= clip.start_frame && frameIdx <= clip.end_frame;
+  const updateClip = (idx: number, fields: Partial<AnimClip>) =>
+    setClips(prev => prev.map((c, i) => i === idx ? { ...c, ...fields } : c));
+
+  const addClip = () => {
+    const nc: AnimClip = { name: `clip_${clips.length + 1}`, start_frame: 0, end_frame: 0, fps: 10, looping: true };
+    const next = [...clips, nc];
+    setClips(next);
+    setSelectedIdx(next.length - 1);
+  };
+
+  const removeClip = (i: number) => {
+    if (clips.length <= 1) return;
+    const next = clips.filter((_, ci) => ci !== i);
+    setClips(next);
+    setSelectedIdx(Math.min(selectedIdx, next.length - 1));
+    if (defaultClip === clips[i].name) setDefaultClip(next[0].name);
+  };
+
+  const handleFrameMouseDown = (i: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    setSelectStart(i);
+    setIsDragging(true);
+    updateClip(selectedIdx, { start_frame: i, end_frame: i });
+  };
+
+  const handleFrameMouseEnter = (i: number) => {
+    if (!isDragging || selectStart === null) return;
+    updateClip(selectedIdx, { start_frame: Math.min(selectStart, i), end_frame: Math.max(selectStart, i) });
+  };
+
+  const handleSave = () => {
+    const patch = { clips, default_clip: defaultClip };
+    if (onCommit) { onCommit(patch); } else { onSave(patch); onClose(); }
+  };
+
+  const thumbBg = (frameIdx: number) => {
+    if (!comp.texture_path) return {};
+    const { u, v, uw, uh } = frameUV(frameIdx);
+    return {
+      backgroundImage: `url(${resolveTextureUrl(comp.texture_path)})`,
+      backgroundSize: `${comp.cols * 100}% ${comp.rows * 100}%`,
+      backgroundPosition: `${uw > 0 ? u / (1 - uw) * 100 : 0}% ${uh > 0 ? v / (1 - uh) * 100 : 0}%`,
+      backgroundRepeat: "no-repeat" as const,
+    };
+  };
 
   return (
     <div
-      style={{
-        position: "fixed", inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        zIndex: 300,
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={onClose}
-      onMouseUp={handleMouseUp}
+      onMouseUp={() => { setIsDragging(false); setSelectStart(null); }}
     >
       <div
-        style={{
-          width: "900px", maxWidth: "calc(100vw - 40px)",
-          maxHeight: "calc(100vh - 60px)",
-          background: "var(--paper)",
-          border: "1px solid var(--rule-2)",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.5)",
-          display: "flex", flexDirection: "column",
-          overflow: "hidden",
-        }}
+        style={{ width: "960px", maxWidth: "calc(100vw - 32px)", height: "620px", maxHeight: "calc(100vh - 48px)", background: "var(--paper)", border: "1px solid var(--rule-2)", boxShadow: "0 32px 80px rgba(0,0,0,0.55)", display: "flex", flexDirection: "column", overflow: "hidden" }}
         onClick={e => e.stopPropagation()}
-        onMouseUp={handleMouseUp}
+        onMouseUp={() => { setIsDragging(false); setSelectStart(null); }}
       >
-        {/* Header */}
-        <div style={{
-          height: "44px", display: "flex", alignItems: "center",
-          padding: "0 20px", gap: "12px",
-          borderBottom: "1px solid var(--rule)",
-          flexShrink: 0,
-        }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--amber)" }}>▶</span>
-          <span style={{ fontFamily: "var(--font-ui)", fontSize: "14px", color: "var(--ink)" }}>
-            Animation Clips
-          </span>
+
+        {/* ── Header ────────────────────────────────────────────────── */}
+        <div style={{ height: "46px", display: "flex", alignItems: "center", gap: "10px", padding: "0 18px", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
+          <span style={{ color: "var(--amber)", fontSize: "11px" }}>▶</span>
+          <span style={{ fontFamily: "var(--font-ui)", fontSize: "14px", color: "var(--ink)", fontWeight: 500 }}>Animation Clips</span>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-4)" }}>
-            — {comp.texture_path ? comp.texture_path.split("/").pop() : "(no texture)"} · {comp.cols}×{comp.rows} grid · {totalFrames} frames
+            {comp.texture_path ? comp.texture_path.split("/").pop() : "(no texture)"}
           </span>
+          <div style={{ width: "1px", height: "16px", background: "var(--rule-2)" }} />
+          {/* Grid controls — moved to header */}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>grid</span>
+          <GridSpinner label="cols" value={comp.cols} onChange={v => onSave({ cols: v })} />
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>×</span>
+          <GridSpinner label="rows" value={comp.rows} onChange={v => onSave({ rows: v })} />
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>= {totalFrames} frames</span>
           <div style={{ flex: 1 }} />
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--ink-4)", cursor: "pointer", fontSize: "16px", lineHeight: 1, padding: "0 4px" }}>×</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--ink-4)", cursor: "pointer", fontSize: "18px", lineHeight: 1, padding: "0 2px" }}>×</button>
         </div>
 
-        {/* Body */}
-        <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
+        {/* ── Body ──────────────────────────────────────────────────── */}
+        <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
 
           {/* Left: Spritesheet grid */}
-          <div style={{
-            flex: 1, overflow: "auto",
-            padding: "16px",
-            borderRight: "1px solid var(--rule)",
-            display: "flex", flexDirection: "column", gap: "10px",
-          }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
-              click to set start frame · drag to select range
-            </span>
-
+          <div style={{ flex: 1, overflow: "auto", padding: "14px 16px", borderRight: "1px solid var(--rule)" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", marginBottom: "10px" }}>
+              click to set start · drag to select range
+            </div>
             {comp.texture_path && img ? (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${comp.cols}, ${cellW}px)`,
-                  width: `${gridW}px`,
-                  userSelect: "none",
-                  cursor: "crosshair",
-                }}
-              >
-                {Array.from({ length: totalFrames }, (_, i) => {
-                  const { u, v, uw, uh } = frameUV(i);
-                  const inRange = isInClip(i);
-                  const isStart = clip && i === clip.start_frame;
-                  const isEnd = clip && i === clip.end_frame;
-                  return (
-                    <div
-                      key={i}
-                      onMouseDown={e => handleFrameMouseDown(i, e)}
-                      onMouseEnter={() => handleFrameMouseEnter(i)}
-                      style={{
-                        position: "relative",
-                        width: `${cellW}px`,
-                        height: `${cellH}px`,
-                        backgroundImage: `url(${resolveTextureUrl(comp.texture_path)})`,
-                        backgroundSize: `${comp.cols * 100}% ${comp.rows * 100}%`,
-                        backgroundPosition: `${u / (1 - uw) * 100}% ${v / (1 - uh) * 100}%`,
-                        backgroundRepeat: "no-repeat",
-                        outline: inRange ? `2px solid var(--amber)` : "1px solid var(--rule)",
-                        outlineOffset: "-1px",
-                        opacity: inRange ? 1 : 0.35,
-                        boxSizing: "border-box",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {/* Frame number */}
-                      <span style={{
-                        position: "absolute", bottom: "2px", right: "3px",
-                        fontFamily: "var(--font-mono)", fontSize: "9px",
-                        color: inRange ? "var(--amber)" : "rgba(255,255,255,0.5)",
-                        textShadow: "0 1px 2px rgba(0,0,0,0.9)",
-                        pointerEvents: "none",
-                      }}>{i}</span>
-                      {/* Start/end markers */}
-                      {(isStart || isEnd) && (
-                        <span style={{
-                          position: "absolute", top: "2px", left: "3px",
-                          fontFamily: "var(--font-mono)", fontSize: "8px",
-                          color: "var(--amber)",
-                          textShadow: "0 1px 2px rgba(0,0,0,0.9)",
-                          pointerEvents: "none",
-                        }}>{isStart && isEnd ? "S/E" : isStart ? "S" : "E"}</span>
-                      )}
+              <div style={{ display: "flex", gap: 0 }}>
+                {/* Row number labels */}
+                <div style={{ display: "flex", flexDirection: "column", marginRight: "6px", userSelect: "none" }}>
+                  {Array.from({ length: comp.rows }, (_, r) => (
+                    <div key={r} style={{ height: `${CELL_H}px`, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: "4px" }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--ink-4)" }}>{r}</span>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+                {/* Grid */}
+                <div
+                  style={{ display: "grid", gridTemplateColumns: `repeat(${comp.cols}, ${CELL}px)`, userSelect: "none", cursor: "crosshair" }}
+                >
+                  {Array.from({ length: totalFrames }, (_, i) => {
+                    const inClip = clip && i >= clip.start_frame && i <= clip.end_frame;
+                    const isStart = clip && i === clip.start_frame;
+                    const isEnd = clip && i === clip.end_frame;
+                    const { u, v, uw, uh } = frameUV(i);
+                    return (
+                      <div
+                        key={i}
+                        onMouseDown={e => handleFrameMouseDown(i, e)}
+                        onMouseEnter={() => handleFrameMouseEnter(i)}
+                        style={{
+                          width: `${CELL}px`, height: `${CELL_H}px`, position: "relative", boxSizing: "border-box",
+                          backgroundImage: `url(${resolveTextureUrl(comp.texture_path)})`,
+                          backgroundSize: `${comp.cols * 100}% ${comp.rows * 100}%`,
+                          backgroundPosition: `${uw > 0 ? u / (1 - uw) * 100 : 0}% ${uh > 0 ? v / (1 - uh) * 100 : 0}%`,
+                          backgroundRepeat: "no-repeat",
+                          outline: inClip ? "2px solid var(--amber)" : "1px solid rgba(255,255,255,0.06)",
+                          outlineOffset: "-1px",
+                          opacity: inClip ? 1 : 0.3,
+                          transition: "opacity 0.08s",
+                        }}
+                      >
+                        <span style={{ position: "absolute", bottom: "2px", right: "3px", fontFamily: "var(--font-mono)", fontSize: "8px", color: inClip ? "var(--amber)" : "rgba(255,255,255,0.4)", textShadow: "0 1px 2px #000", pointerEvents: "none" }}>{i}</span>
+                        {(isStart || isEnd) && (
+                          <span style={{ position: "absolute", top: "2px", left: "3px", fontFamily: "var(--font-mono)", fontSize: "8px", color: "var(--amber)", textShadow: "0 1px 2px #000", pointerEvents: "none" }}>
+                            {isStart && isEnd ? "S/E" : isStart ? "S" : "E"}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
-              <div style={{
-                width: `${gridW}px`, height: "160px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                border: "1px solid var(--rule)", color: "var(--ink-4)",
-                fontFamily: "var(--font-mono)", fontSize: "11px",
-              }}>
+              <div style={{ width: "100%", height: "200px", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--rule)", color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "11px" }}>
                 {comp.texture_path ? "loading texture…" : "no texture set"}
               </div>
             )}
-
-            {/* Grid size controls */}
-            <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>grid</span>
-              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-3)" }}>
-                cols
-                <input
-                  type="number" min={1} value={comp.cols}
-                  onChange={e => onSave({ cols: Math.max(1, parseInt(e.target.value) || 1) })}
-                  style={{ width: "40px", background: "var(--paper)", border: "1px solid var(--rule)", color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "2px 4px", textAlign: "center" }}
-                />
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-3)" }}>
-                rows
-                <input
-                  type="number" min={1} value={comp.rows}
-                  onChange={e => onSave({ rows: Math.max(1, parseInt(e.target.value) || 1) })}
-                  style={{ width: "40px", background: "var(--paper)", border: "1px solid var(--rule)", color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "2px 4px", textAlign: "center" }}
-                />
-              </label>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>= {totalFrames} frames</span>
-            </div>
           </div>
 
           {/* Right: Clips + Editor + Preview */}
-          <div style={{ width: "280px", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
+          <div style={{ width: "272px", flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
 
-            {/* Clips list */}
-            <div style={{ padding: "12px 14px 8px", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>CLIPS</span>
-                <button onClick={addClip} style={{
-                  background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)",
-                  fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer",
-                }}>+ add</button>
+            {/* Clip list — scrollable */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, borderBottom: "1px solid var(--rule)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px 6px", flexShrink: 0 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", letterSpacing: "0.05em" }}>CLIPS</span>
+                <button onClick={addClip} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>+ add</button>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+              <div style={{ overflowY: "auto", flex: 1, padding: "0 8px 8px" }}>
                 {clips.map((c, i) => (
-                  <div
+                  <ClipRow
                     key={i}
-                    onClick={() => setSelectedClipIdx(i)}
-                    style={{
-                      display: "flex", alignItems: "center", gap: "6px",
-                      padding: "5px 8px", cursor: "pointer",
-                      background: i === selectedClipIdx ? "rgba(240,192,80,0.1)" : "transparent",
-                      border: `1px solid ${i === selectedClipIdx ? "var(--amber)" : "transparent"}`,
-                    }}
-                  >
-                    <span style={{
-                      fontFamily: "var(--font-mono)", fontSize: "11px",
-                      color: i === selectedClipIdx ? "var(--amber)" : "var(--ink-3)",
-                      flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {c.name === defaultClip ? "★ " : ""}{c.name}
-                    </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", flexShrink: 0 }}>
-                      {c.start_frame}–{c.end_frame}
-                    </span>
-                    {clips.length > 1 && (
-                      <button onClick={e => { e.stopPropagation(); removeClip(i); }} style={{
-                        background: "none", border: "none", color: "var(--ink-4)", cursor: "pointer",
-                        fontSize: "12px", padding: "0 2px", lineHeight: 1, flexShrink: 0,
-                      }}>×</button>
-                    )}
-                  </div>
+                    clip={c}
+                    selected={i === selectedIdx}
+                    isDefault={c.name === defaultClip}
+                    thumbBg={comp.texture_path && img ? thumbBg(c.start_frame) : undefined}
+                    onClick={() => setSelectedIdx(i)}
+                    onRemove={clips.length > 1 ? () => removeClip(i) : undefined}
+                  />
                 ))}
               </div>
             </div>
 
-            {/* Selected clip editor */}
+            {/* Clip editor */}
             {clip && (
               <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", display: "block", marginBottom: "8px" }}>EDIT CLIP</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", letterSpacing: "0.05em", display: "block", marginBottom: "10px" }}>EDIT CLIP</span>
 
-                <ClipField label="name">
+                <EditorRow label="name">
                   <input
                     value={clip.name}
-                    onChange={e => updateClip(selectedClipIdx, { name: e.target.value })}
-                    style={fieldInputStyle}
+                    onChange={e => updateClip(selectedIdx, { name: e.target.value })}
+                    style={inputSt}
                   />
-                </ClipField>
+                </EditorRow>
 
-                <ClipField label="frames">
+                <EditorRow label="frames">
                   <div style={{ display: "flex", alignItems: "center", gap: "4px", flex: 1 }}>
-                    <input
-                      type="number" min={0} max={totalFrames - 1}
-                      value={clip.start_frame}
-                      onChange={e => updateClip(selectedClipIdx, { start_frame: Math.min(clip.end_frame, Math.max(0, parseInt(e.target.value) || 0)) })}
-                      style={{ ...fieldInputStyle, width: "40px", textAlign: "center" }}
-                    />
+                    <input type="number" min={0} max={totalFrames - 1} value={clip.start_frame}
+                      onChange={e => updateClip(selectedIdx, { start_frame: Math.min(clip.end_frame, Math.max(0, +e.target.value || 0)) })}
+                      style={{ ...inputSt, width: "38px", textAlign: "center", padding: "3px 2px" }} />
                     <span style={{ color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "11px" }}>→</span>
-                    <input
-                      type="number" min={0} max={totalFrames - 1}
-                      value={clip.end_frame}
-                      onChange={e => updateClip(selectedClipIdx, { end_frame: Math.max(clip.start_frame, Math.max(0, parseInt(e.target.value) || 0)) })}
-                      style={{ ...fieldInputStyle, width: "40px", textAlign: "center" }}
-                    />
-                    <span style={{ color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "10px", marginLeft: "2px" }}>
-                      ({clip.end_frame - clip.start_frame + 1}f)
+                    <input type="number" min={0} max={totalFrames - 1} value={clip.end_frame}
+                      onChange={e => updateClip(selectedIdx, { end_frame: Math.max(clip.start_frame, Math.max(0, +e.target.value || 0)) })}
+                      style={{ ...inputSt, width: "38px", textAlign: "center", padding: "3px 2px" }} />
+                    <span style={{ color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "10px", marginLeft: "2px", flexShrink: 0 }}>
+                      {clip.end_frame - clip.start_frame + 1}f
                     </span>
                   </div>
-                </ClipField>
+                </EditorRow>
 
-                <ClipField label="fps">
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: 1 }}>
-                    <input
-                      type="range" min={1} max={60} step={1}
-                      value={clip.fps}
-                      onChange={e => updateClip(selectedClipIdx, { fps: parseFloat(e.target.value) })}
-                      style={{ flex: 1, accentColor: "var(--amber)" }}
-                    />
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink)", width: "24px", textAlign: "right" }}>{clip.fps}</span>
-                  </div>
-                </ClipField>
+                <EditorRow label="fps">
+                  <input type="range" min={1} max={60} step={1} value={clip.fps}
+                    onChange={e => updateClip(selectedIdx, { fps: +e.target.value })}
+                    style={{ flex: 1, accentColor: "var(--amber)", minWidth: 0 }} />
+                  <input type="number" min={1} max={60} value={clip.fps}
+                    onChange={e => updateClip(selectedIdx, { fps: Math.max(1, Math.min(60, +e.target.value || 1)) })}
+                    style={{ ...inputSt, width: "34px", textAlign: "center", padding: "3px 2px", marginLeft: "4px" }} />
+                </EditorRow>
 
-                <ClipField label="loop">
-                  <input
-                    type="checkbox" checked={clip.looping}
-                    onChange={e => updateClip(selectedClipIdx, { looping: e.target.checked })}
-                    style={{ accentColor: "var(--amber)" }}
-                  />
-                </ClipField>
+                <EditorRow label="loop">
+                  <input type="checkbox" checked={clip.looping}
+                    onChange={e => updateClip(selectedIdx, { looping: e.target.checked })}
+                    style={{ accentColor: "var(--amber)", width: "14px", height: "14px" }} />
+                </EditorRow>
 
                 <button
                   onClick={() => setDefaultClip(clip.name)}
                   style={{
-                    marginTop: "8px", width: "100%",
-                    background: clip.name === defaultClip ? "var(--amber)" : "transparent",
+                    marginTop: "10px", width: "100%",
+                    background: clip.name === defaultClip ? "rgba(240,192,80,0.12)" : "transparent",
                     border: `1px solid ${clip.name === defaultClip ? "var(--amber)" : "var(--rule-2)"}`,
-                    color: clip.name === defaultClip ? "var(--paper)" : "var(--ink-4)",
-                    fontFamily: "var(--font-mono)", fontSize: "10px",
-                    padding: "4px 0", cursor: "pointer",
+                    color: clip.name === defaultClip ? "var(--amber)" : "var(--ink-4)",
+                    fontFamily: "var(--font-mono)", fontSize: "10px", padding: "5px 0", cursor: "pointer",
+                    letterSpacing: "0.03em",
                   }}
-                >
-                  {clip.name === defaultClip ? "★ default clip" : "set as default"}
-                </button>
+                >{clip.name === defaultClip ? "★ default clip" : "set as default"}</button>
               </div>
             )}
 
             {/* Preview */}
-            <div style={{ padding: "12px 14px", flex: 1 }}>
+            <div style={{ padding: "12px 14px", flexShrink: 0 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>PREVIEW</span>
-                <button
-                  onClick={() => setPreviewPlaying(p => !p)}
-                  style={{ background: "none", border: "1px solid var(--rule)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}
-                >
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", letterSpacing: "0.05em" }}>PREVIEW</span>
+                <button onClick={() => setPreviewPlaying(p => !p)}
+                  style={{ background: "none", border: "1px solid var(--rule)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>
                   {previewPlaying ? "⏸" : "▶"}
                 </button>
               </div>
               <div style={{
-                width: "100%", aspectRatio: "1",
-                background: "repeating-conic-gradient(rgba(255,255,255,0.04) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px",
+                width: "100%", aspectRatio: "1", maxHeight: "100px",
+                background: "repeating-conic-gradient(rgba(255,255,255,0.04) 0% 25%, transparent 0% 50%) 0 0 / 14px 14px",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                border: "1px solid var(--rule)",
-                overflow: "hidden",
+                border: "1px solid var(--rule)", overflow: "hidden",
               }}>
                 {img && clip ? (
-                  <canvas
-                    ref={previewCanvasRef}
-                    width={128}
-                    height={128}
-                    style={{ imageRendering: "pixelated", maxWidth: "100%", maxHeight: "100%" }}
-                  />
+                  <canvas ref={previewCanvasRef} width={128} height={128}
+                    style={{ imageRendering: "pixelated", maxWidth: "100%", maxHeight: "100%" }} />
                 ) : (
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
                     {comp.texture_path ? "…" : "no texture"}
@@ -456,44 +337,89 @@ export default function AnimClipEditor({ comp, onClose, onSave, onCommit, saveLa
                 )}
               </div>
               {clip && (
-                <div style={{ marginTop: "6px", fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", textAlign: "center" }}>
-                  frame {clip.start_frame + (previewFrame % Math.max(1, clip.end_frame - clip.start_frame + 1))} · {clip.fps} fps · {clip.looping ? "loop" : "once"}
+                <div style={{ marginTop: "5px", fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", textAlign: "center" }}>
+                  {clip.start_frame + (previewFrame % Math.max(1, clip.end_frame - clip.start_frame + 1))} · {clip.fps}fps · {clip.looping ? "loop" : "once"}
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{
-          height: "50px", display: "flex", alignItems: "center", justifyContent: "flex-end",
-          padding: "0 20px", gap: "10px",
-          borderTop: "1px solid var(--rule)", flexShrink: 0,
-        }}>
-          <button onClick={onClose} style={{
-            background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)",
-            fontFamily: "var(--font-ui)", fontSize: "12px", padding: "6px 18px", cursor: "pointer",
-          }}>Cancel</button>
-          <button onClick={handleSave} style={{
-            background: "var(--amber)", border: "1px solid var(--amber)", color: "var(--paper)",
-            fontFamily: "var(--font-ui)", fontSize: "12px", padding: "6px 18px", cursor: "pointer",
-          }}>{saveLabel ?? "Save Changes"}</button>
+        {/* ── Footer ────────────────────────────────────────────────── */}
+        <div style={{ height: "50px", display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "0 18px", gap: "10px", borderTop: "1px solid var(--rule)", flexShrink: 0 }}>
+          <button onClick={onClose} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-ui)", fontSize: "12px", padding: "6px 18px", cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleSave} style={{ background: "var(--amber)", border: "none", color: "var(--paper)", fontFamily: "var(--font-ui)", fontSize: "12px", padding: "6px 18px", cursor: "pointer", fontWeight: 500 }}>{saveLabel ?? "Save Changes"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-const fieldInputStyle: React.CSSProperties = {
-  flex: 1, background: "var(--paper)", border: "1px solid var(--rule)",
-  color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "3px 6px",
-};
+// ── Sub-components ────────────────────────────────────────────────
 
-function ClipField({ label, children }: { label: string; children: React.ReactNode }) {
+function ClipRow({ clip, selected, isDefault, thumbBg, onClick, onRemove }: {
+  clip: AnimClip; selected: boolean; isDefault: boolean;
+  thumbBg?: React.CSSProperties; onClick: () => void; onRemove?: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", minHeight: "26px" }}>
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", width: "44px", flexShrink: 0 }}>{label}</span>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: "8px",
+        padding: "5px 6px", cursor: "pointer", borderRadius: "2px",
+        background: selected ? "rgba(240,192,80,0.1)" : hovered ? "rgba(255,255,255,0.03)" : "transparent",
+        border: `1px solid ${selected ? "var(--amber)" : "transparent"}`,
+        marginBottom: "2px",
+      }}
+    >
+      {/* Thumbnail */}
+      <div style={{
+        width: "22px", height: "22px", flexShrink: 0, border: "1px solid var(--rule)",
+        imageRendering: "pixelated", overflow: "hidden",
+        ...(thumbBg ?? { background: "var(--paper-2)" }),
+      }} />
+      {/* Name */}
+      <span style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "11px", color: selected ? "var(--amber)" : "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {isDefault ? "★ " : ""}{clip.name}
+      </span>
+      {/* Range */}
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", flexShrink: 0 }}>
+        {clip.start_frame}–{clip.end_frame}
+      </span>
+      {/* Remove */}
+      {onRemove && (
+        <button
+          onClick={e => { e.stopPropagation(); onRemove(); }}
+          style={{ background: "none", border: "none", color: hovered ? "var(--ink-3)" : "transparent", cursor: "pointer", fontSize: "13px", padding: "0 1px", lineHeight: 1, flexShrink: 0, transition: "color 0.1s" }}
+        >×</button>
+      )}
+    </div>
+  );
+}
+
+function GridSpinner({ label: _label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <input
+      type="number" min={1} value={value}
+      onChange={e => onChange(Math.max(1, parseInt(e.target.value) || 1))}
+      style={{ width: "40px", background: "var(--paper-2)", border: "1px solid var(--rule)", color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "2px 4px", textAlign: "center" }}
+    />
+  );
+}
+
+function EditorRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "7px", minHeight: "24px" }}>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)", width: "40px", flexShrink: 0 }}>{label}</span>
       {children}
     </div>
   );
 }
+
+const inputSt: React.CSSProperties = {
+  flex: 1, background: "var(--paper)", border: "1px solid var(--rule)",
+  color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "3px 6px",
+};

@@ -723,15 +723,24 @@ fn anthropic_content_from_openai(content: &serde_json::Value) -> serde_json::Val
             })),
             Some("image_url") => {
                 if let Some(url) = item["image_url"]["url"].as_str() {
-                    if let Some(data) = url.strip_prefix("data:image/png;base64,") {
-                        blocks.push(serde_json::json!({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": data
-                            }
-                        }));
+                    let prefixes = [
+                        ("data:image/png;base64,", "image/png"),
+                        ("data:image/jpeg;base64,", "image/jpeg"),
+                        ("data:image/webp;base64,", "image/webp"),
+                        ("data:image/gif;base64,", "image/gif"),
+                    ];
+                    for (prefix, mime) in &prefixes {
+                        if let Some(data) = url.strip_prefix(prefix) {
+                            blocks.push(serde_json::json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime,
+                                    "data": data
+                                }
+                            }));
+                            break;
+                        }
                     }
                 }
             }
@@ -1168,7 +1177,7 @@ Rules:
 - Supported scene component types are exactly: Transform, Sprite, AnimatedSprite, Tilemap, PhysicsBody, Collider, Script, Camera, AudioSource. You may add, remove, and patch these scene components.
 - PLAYER ENTITY TEMPLATE — when creating a player, ALWAYS include ALL of these actions: (1) create_entity "Player", (2) add_component Transform, (3) add_component Sprite + patch color/size, (4) add_component PhysicsBody + patch body_type Dynamic lock_rotation true, (5) add_component Collider + patch width/height to match sprite, (6) attach_script with movement Lua code. An entity with only create_entity and no components is useless.
 - Do NOT create unsupported engine-only components such as ParticleEmitter, PointLight, DirectionalLight, HUD, PathfindingGrid, or gameplay marker components through AI actions. If asked for one of these, explain that editor/AI scene support is not implemented yet and suggest Lua/scripted or Rust-side alternatives.
-- `patch_component` data fields: Sprite supports texture_path, width, height, flip_x, flip_y, color [r,g,b,a]; AnimatedSprite supports texture_path, cols, rows, width, height, flip_x, flip_y, tint, margin, spacing, clips (array of clip objects), default_clip; Tilemap supports palettes (array of TilePalette objects: {{name, texture_path, tileset_cols, tileset_rows, margin, spacing, solid_tiles (0-based tile indices within this palette that are solid)}}), tile_width, tile_height, map_cols, map_rows, tiles (flat u32 array: 0=empty, upper 16 bits=palette_id (1-indexed), lower 16 bits=tile_idx (0-indexed)), tint; solid tiles per palette auto-generate static physics colliders on play; Collider supports width, height, offset_x, offset_y, is_trigger; PhysicsBody supports body_type, lock_rotation, linear_damping, angular_damping, collision_layer, collision_mask; Script supports path; Camera supports active, zoom, follow_entity, offset_x, offset_y, bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, smoothing, dead_zone_width, dead_zone_height; AudioSource supports path, volume, looping, play_on_start.
+- `patch_component` data fields: Sprite supports texture_path, width, height, flip_x, flip_y, color [r,g,b,a]; AnimatedSprite supports texture_path, cols, rows, width, height, flip_x, flip_y, tint, margin, spacing, clips (array of clip objects — each clip: {{name, start_frame, end_frame, fps, looping}}; frames are 0-indexed, left-to-right row-by-row across the spritesheet), default_clip; example AnimatedSprite patch: {{"texture_path":"textures/player.png","cols":8,"rows":4,"width":48,"height":48,"default_clip":"idle_down","clips":[{{"name":"idle_down","start_frame":0,"end_frame":3,"fps":8,"looping":true}},{{"name":"walk_down","start_frame":8,"end_frame":15,"fps":10,"looping":true}},{{"name":"walk_right","start_frame":16,"end_frame":23,"fps":10,"looping":true}}]}}; Tilemap supports palettes (array of TilePalette objects: {{name, texture_path, tileset_cols, tileset_rows, margin, spacing, solid_tiles (0-based tile indices within this palette that are solid)}}), tile_width, tile_height, map_cols, map_rows, tiles (flat u32 array: 0=empty, upper 16 bits=palette_id (1-indexed), lower 16 bits=tile_idx (0-indexed)), tint; solid tiles per palette auto-generate static physics colliders on play; Collider supports width, height, offset_x, offset_y, is_trigger; PhysicsBody supports body_type, lock_rotation, linear_damping, angular_damping, collision_layer, collision_mask, gravity_scale; Script supports path; Camera supports active, zoom, follow_entity, offset_x, offset_y, bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, smoothing, dead_zone_width, dead_zone_height; AudioSource supports path, volume, looping, play_on_start.
 - Scripts are Lua 5.4 with a CUSTOM Sindri engine API. Do NOT use LÖVE2D (`love.*`), Unity, Godot, or any other engine's API.
 - `self` is an engine userdata object — NOT a plain table. Access everything through method calls.
 - Sindri script API summary: hooks are `on_start(self)` / `on_update(self, dt)`. Key facets: `self:input()` → InputFacet, `self:transform()` → TransformFacet|nil, `self:physics()` → PhysicsFacet|nil, `self:sprite()` → SpriteFacet|nil. Global: `vec2(x,y)`.
@@ -1284,6 +1293,169 @@ pub struct ProposalChange {
     pub script_new_contents: Vec<ScriptNewContent>,
 }
 
+struct SpritesheetAnalysis {
+    tex_path: String,
+    cols: u32,
+    rows: u32,
+    frame_width: u32,
+    frame_height: u32,
+    /// Number of non-empty frames detected in each row.
+    frames_per_row: Vec<u32>,
+}
+
+/// Locate and pixel-analyse a spritesheet relevant to the user's message.
+async fn analyze_spritesheet_for_message(
+    message: &str,
+    scene: Option<&str>,
+) -> Option<SpritesheetAnalysis> {
+    // Get project root.
+    let scene_path = reqwest::get(engine_url("/scene/path")).await.ok()?.text().await.ok()?;
+    let scene_path = scene_path.trim_matches('"').to_string();
+    let project_root = std::path::Path::new(&scene_path).parent()?.to_path_buf();
+
+    // Collect texture candidates: first from AnimatedSprite components in the scene,
+    // then from keyword-matched files in the textures/ folder.
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(scene_json) = scene {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(scene_json) {
+            if let Some(entities) = v["entities"].as_object() {
+                for ent in entities.values() {
+                    for comp in ent["components"].as_array().into_iter().flatten() {
+                        if comp["type"].as_str() == Some("AnimatedSprite") {
+                            if let Some(p) = comp["texture_path"].as_str() {
+                                if !p.is_empty() && !candidates.contains(&p.to_string()) {
+                                    candidates.push(p.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let keywords: Vec<String> = message
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| w.len() >= 3)
+        .collect();
+
+    let textures_dir = project_root.join("textures");
+    if let Ok(entries) = std::fs::read_dir(&textures_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let is_image = name.ends_with(".png") || name.ends_with(".jpg") || name.ends_with(".jpeg");
+            if is_image && keywords.iter().any(|kw| name.contains(kw.as_str())) {
+                let rel = format!("textures/{}", entry.file_name().to_string_lossy());
+                if !candidates.contains(&rel) {
+                    candidates.insert(0, rel);
+                }
+            }
+        }
+    }
+
+    let best = if candidates.len() == 1 {
+        candidates.into_iter().next()?
+    } else {
+        candidates.into_iter().find(|p| {
+            let lower = p.to_lowercase();
+            keywords.iter().any(|kw| lower.contains(kw.as_str()))
+        })?
+    };
+
+    let file_path = project_root.join(&best);
+    analyse_spritesheet_pixels(&file_path, best)
+}
+
+fn analyse_spritesheet_pixels(path: &std::path::Path, tex_path: String) -> Option<SpritesheetAnalysis> {
+    let img = image::open(path).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 { return None; }
+
+    // Determine the background / empty colour.
+    // Sample all four edges and take the most common colour.
+    let mut edge_counts: std::collections::HashMap<[u8; 4], u32> = std::collections::HashMap::new();
+    let sample = |x: u32, y: u32| -> [u8; 4] { img.get_pixel(x, y).0 };
+    for x in 0..w { *edge_counts.entry(sample(x, 0)).or_default() += 1; }
+    for x in 0..w { *edge_counts.entry(sample(x, h - 1)).or_default() += 1; }
+    for y in 0..h { *edge_counts.entry(sample(0, y)).or_default() += 1; }
+    for y in 0..h { *edge_counts.entry(sample(w - 1, y)).or_default() += 1; }
+    let bg = edge_counts.into_iter().max_by_key(|(_, c)| *c).map(|(c, _)| c).unwrap_or([0, 0, 0, 0]);
+    let has_alpha = img.pixels().any(|p| p.0[3] < 255);
+
+    let is_bg = |p: [u8; 4]| -> bool {
+        if has_alpha {
+            p[3] < 16
+        } else {
+            let dr = (p[0] as i32 - bg[0] as i32).abs();
+            let dg = (p[1] as i32 - bg[1] as i32).abs();
+            let db = (p[2] as i32 - bg[2] as i32).abs();
+            dr + dg + db < 30
+        }
+    };
+
+    // Find empty columns (all pixels are background).
+    let empty_col: Vec<bool> = (0..w).map(|x| (0..h).all(|y| is_bg(img.get_pixel(x, y).0))).collect();
+    // Find empty rows.
+    let empty_row: Vec<bool> = (0..h).map(|y| (0..w).all(|x| is_bg(img.get_pixel(x, y).0))).collect();
+
+    // Extract run lengths of non-empty spans.
+    let col_runs = span_lengths(&empty_col);
+    let row_runs = span_lengths(&empty_row);
+
+    if col_runs.is_empty() || row_runs.is_empty() { return None; }
+
+    let frame_width = mode_u32(&col_runs)?;
+    let frame_height = mode_u32(&row_runs)?;
+
+    let cols = (w / frame_width).max(1);
+    let rows = (h / frame_height).max(1);
+
+    // For each row of frames, count how many cells contain at least one non-bg pixel.
+    let mut frames_per_row: Vec<u32> = Vec::new();
+    for row in 0..rows {
+        let y0 = row * frame_height;
+        let mut count = 0u32;
+        for col in 0..cols {
+            let x0 = col * frame_width;
+            let has_content = (y0..y0 + frame_height).any(|y|
+                (x0..x0 + frame_width).any(|x| {
+                    if x < w && y < h { !is_bg(img.get_pixel(x, y).0) } else { false }
+                })
+            );
+            if has_content { count += 1; }
+        }
+        if count > 0 {
+            frames_per_row.push(count);
+        }
+    }
+
+    // Recalculate actual row count (only rows with content).
+    let actual_rows = frames_per_row.len() as u32;
+    if actual_rows == 0 { return None; }
+
+    Some(SpritesheetAnalysis { tex_path, cols, rows: actual_rows, frame_width, frame_height, frames_per_row })
+}
+
+/// Returns lengths of non-empty runs in a boolean slice where true = empty.
+fn span_lengths(empty: &[bool]) -> Vec<u32> {
+    let mut runs = Vec::new();
+    let mut len = 0u32;
+    for &e in empty {
+        if !e { len += 1; }
+        else if len > 0 { runs.push(len); len = 0; }
+    }
+    if len > 0 { runs.push(len); }
+    runs
+}
+
+/// Mode of a u32 slice (most common value).
+fn mode_u32(vals: &[u32]) -> Option<u32> {
+    let mut counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for &v in vals { *counts.entry(v).or_default() += 1; }
+    counts.into_iter().max_by_key(|(_, c)| *c).map(|(v, _)| v)
+}
+
 #[derive(Serialize)]
 pub struct ProposalResponse {
     pub prompt: String,
@@ -1335,6 +1507,18 @@ pub async fn generate_proposal(
         None
     };
 
+    // Pixel-analyse a spritesheet when the message is animation-related.
+    let is_animation_request = {
+        let lower = message.to_lowercase();
+        lower.contains("anim") || lower.contains("sprite") || lower.contains("clip")
+            || lower.contains("frame") || lower.contains("spritesheet")
+    };
+    let spritesheet = if is_animation_request {
+        analyze_spritesheet_for_message(&message, scene.as_deref()).await
+    } else {
+        None
+    };
+
     let use_vision = screenshot.is_some();
     let provider = provider.unwrap_or_else(|| "ollama".to_string());
     let model = model.unwrap_or_else(|| {
@@ -1345,13 +1529,39 @@ pub async fn generate_proposal(
         }
     });
 
+    let spritesheet_guidance = if let Some(ref ss) = spritesheet {
+        let row_desc: Vec<String> = ss.frames_per_row.iter().enumerate()
+            .map(|(i, &n)| {
+                let start = i as u32 * ss.cols;
+                let end = start + n - 1;
+                format!("  row {i}: {n} frames (start_frame={start}, end_frame={end})", i=i, n=n, start=start, end=end)
+            })
+            .collect();
+        format!(
+            "\n\nSpritesheet pixel analysis for {path}:\
+            \n- Grid: {cols} cols × {rows} rows, each frame {fw}×{fh}px\
+            \n- Non-empty frame ranges per row:\n{rows_desc}\
+            \nUse these exact values for cols, rows, start_frame, and end_frame in the AnimatedSprite patch.\
+            \nName clips based on the texture filename, frame counts, and typical game animation conventions\
+            \n(idle, walk, run, attack, hurt, death, etc.). Choose fps: idle 6–8, walk 8–10, run 10–12, attack 10–14, death 6–8.",
+            path = ss.tex_path,
+            cols = ss.cols,
+            rows = ss.rows,
+            fw = ss.frame_width,
+            fh = ss.frame_height,
+            rows_desc = row_desc.join("\n"),
+        )
+    } else {
+        String::new()
+    };
+
     let engine_ref = include_str!("../../../ENGINE_REFERENCE.md");
     let system_prompt = format!(
         r#"{engine_ref}
 
 ---
 
-You are an AI assistant embedded in the Sindri editor. Respond with a SINGLE JSON object — no markdown fences, no prose outside the JSON.
+You are an AI assistant embedded in the Sindri editor. Respond with a SINGLE JSON object — no markdown fences, no prose outside the JSON.{spritesheet_guidance}
 
 Format:
 {{
@@ -1394,6 +1604,7 @@ Rules:
 - Coordinate system: +X right, +Y down.
 - Physics needs both PhysicsBody and Collider. body_type: "Dynamic" (players/enemies), "Fixed" (ground/walls), "Kinematic" (scripted platforms). lock_rotation=true for platformer players.
 - Supported component types: Transform, Sprite, AnimatedSprite, Tilemap, PhysicsBody, Collider, Script, Camera, AudioSource.
+- AnimatedSprite clip schema: each clip is {{name, start_frame, end_frame, fps, looping}}. Frames are 0-indexed, numbered left-to-right row-by-row across the spritesheet (cols × rows grid). Example: 8-col sheet, row 0 = frames 0–7, row 1 = frames 8–15. Always set default_clip to the idle/rest clip name.
 - Scripts use the REAL Sindri Lua API — NOT globals like key_down(). Use: self:input():is_key_down("A"), self:transform():set_position(vec2(x,y)), self:physics():set_velocity(vec2(vx,vy)), self:sprite():set_tint({{r,g,b,a}}). Always nil-check facets before use.
 - AnimatedSpriteFacet: `local anim = self:animated_sprite()` — nil if no AnimatedSprite component. `anim:play("clip_name")` switches the active clip (idempotent — safe to call every frame). `anim:set_flip_x(bool)`, `anim:set_flip_y(bool)`, `anim:current_clip()` → string. Walk pattern: `local anim = self:animated_sprite(); if anim ~= nil then if h > 0.1 then anim:play("walk_right") elseif h < -0.1 then anim:play("walk_left") else anim:play("idle") end end`
 - Cross-entity queries: `entity_transform("Name")` → `{{x, y, rotation}}` or nil (snapshot from this frame). `self:physics():contacts()` → array of entity name strings currently touching this entity's collider.
