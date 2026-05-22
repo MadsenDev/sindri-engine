@@ -39,7 +39,7 @@ pub use crate::component_metadata::{
 pub use crate::engine::{Engine, EngineConfig, EngineContext, Game};
 pub use crate::entities::{
     AudioSource, CameraComponent, Checkpoint, Collectible, Enemy, Hazard, MovingPlatform, Name,
-    PhysicsBody, Player, SpriteComponent, TilemapComponent, Transform, Trigger,
+    NavGridComponent, PhysicsBody, Player, SpriteComponent, TilemapComponent, Transform, Trigger,
 };
 pub use crate::fonts::BuiltinFont;
 pub use crate::grid::{Grid, GridCoord, GridPathfinding};
@@ -50,7 +50,9 @@ pub use crate::hierarchy::{
 pub use crate::hud::{HudLayer, HudLayout, HudPanel, HudRect, HudSprite, HudText, TextAlign};
 pub use crate::input::{ActionId, AxisBinding, Button, InputMap, InputState};
 pub use crate::math::{Camera2D, Transform2D, Vec2};
-pub use crate::pathfinding::{AStarPathfinder, GridNode, PathfindingGrid};
+pub use crate::pathfinding::{
+    AStarPathfinder, GridNode, PathfindingGrid, PathfindingMode, PlatformGraph, PlatformPathfinder,
+};
 pub use crate::physics::{PhysicsEventCallback, PhysicsWorld};
 pub use crate::render::{
     AnimatedSprite, Animation, AnimationFrame, DirectionalLight, EmissionConfig, FontHandle, Frame,
@@ -63,9 +65,9 @@ pub use crate::scene_physics::{
     SerializableComponent, SerializablePhysics,
 };
 pub use crate::script::{
-    AnimationFacet, InputFacet, PhysicsFacet, ScriptComponent, ScriptParams, ScriptRuntime,
-    ScriptSelf, ScriptTag, ScriptValue, SpriteFacet, TilemapFacet, TimeFacet, TransformFacet,
-    WorldFacet,
+    AnimationFacet, InputFacet, NavGridFacet, PhysicsFacet, ScriptComponent, ScriptParams,
+    ScriptRuntime, ScriptSelf, ScriptTag, ScriptValue, SpriteFacet, TilemapFacet, TimeFacet,
+    TransformFacet, WorldFacet,
 };
 pub use crate::state::{State, StateMachine, StateMachineLike};
 pub use crate::world::{EntityId, World};

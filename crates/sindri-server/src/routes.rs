@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
@@ -53,6 +53,7 @@ impl Default for PlaybackState {
 }
 
 pub type SharedGizmos = Arc<std::sync::atomic::AtomicBool>;
+pub type SharedDebugPaths = Arc<std::sync::RwLock<HashMap<u64, Vec<(f32, f32)>>>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -66,6 +67,7 @@ pub struct AppState {
     pub playback: SharedPlayback,
     pub errors: SharedErrors,
     pub gizmos: SharedGizmos,
+    pub debug_paths: SharedDebugPaths,
     /// Broadcast channel for live JPEG frames from headless rendering.
     pub frame_tx: Option<tokio::sync::broadcast::Sender<Vec<u8>>>,
 }
@@ -296,6 +298,16 @@ pub async fn post_gizmos(
 ) -> impl IntoResponse {
     state.gizmos.store(body.enabled, std::sync::atomic::Ordering::Relaxed);
     StatusCode::OK
+}
+
+// GET /debug/paths — returns { entity_id: [[x,y], ...] } for path gizmo drawing
+pub async fn get_debug_paths(State(state): State<AppState>) -> impl IntoResponse {
+    let paths = state.debug_paths.read().unwrap();
+    let map: HashMap<String, Vec<[f32; 2]>> = paths
+        .iter()
+        .map(|(id, pts)| (id.to_string(), pts.iter().map(|(x, y)| [*x, *y]).collect()))
+        .collect();
+    Json(map).into_response()
 }
 
 // GET /scene
@@ -652,6 +664,7 @@ pub async fn add_component(
             offset_x: 0.0,
             offset_y: 0.0,
             is_trigger: false,
+            block_pathfinding: false,
         }),
         "Script" => Component::Script(Script {
             path: String::new(),
@@ -683,6 +696,7 @@ pub async fn add_component(
             play_on_start: false,
         }),
         "Tilemap" => Component::Tilemap(sindri::component::Tilemap::default()),
+        "NavGrid" => Component::NavGrid(sindri::component::NavGrid::default()),
         _ => return (StatusCode::BAD_REQUEST, "unknown component type").into_response(),
     };
     let mut scene = state.scene.write().await;
@@ -729,6 +743,7 @@ pub async fn remove_component(
                     sindri::component::Component::Script(_) => "Script",
                     sindri::component::Component::Camera(_) => "Camera",
                     sindri::component::Component::AudioSource(_) => "AudioSource",
+                    sindri::component::Component::NavGrid(_) => "NavGrid",
                 };
                 type_name != q.component_type
             });
@@ -1038,6 +1053,28 @@ pub async fn patch_component(
             .and_then(|_| patch_f32(&body, "volume", &mut a.volume))
             .and_then(|_| patch_bool(&body, "looping", &mut a.looping))
             .and_then(|_| patch_bool(&body, "play_on_start", &mut a.play_on_start)),
+        sindri::component::Component::NavGrid(n) => {
+            patch_u32(&body, "width", &mut n.width)
+                .and_then(|_| patch_u32(&body, "height", &mut n.height))
+                .and_then(|_| patch_f32(&body, "cell_size", &mut n.cell_size))
+                .and_then(|_| patch_f32(&body, "origin_x", &mut n.origin_x))
+                .and_then(|_| patch_f32(&body, "origin_y", &mut n.origin_y))
+                .and_then(|_| patch_f32(&body, "gravity", &mut n.gravity))
+                .and_then(|_| patch_f32(&body, "jump_velocity", &mut n.jump_velocity))
+                .and_then(|_| patch_f32(&body, "move_speed", &mut n.move_speed))
+                .and_then(|_| {
+                    if let Some(mode_val) = body.get("mode") {
+                        n.mode = serde_json::from_value(mode_val.clone())
+                            .map_err(|e| format!("invalid mode: {e}"))?;
+                    }
+                    if let Some(cells_val) = body.get("cells") {
+                        let cells: Vec<u8> = serde_json::from_value(cells_val.clone())
+                            .map_err(|e| format!("invalid cells: {e}"))?;
+                        n.cells = cells;
+                    }
+                    Ok(())
+                })
+        }
     };
 
     match result {

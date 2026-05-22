@@ -59,6 +59,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         .route("/stream", get(routes::stream_handler))
         .route("/control", axum::routing::post(routes::post_control))
         .route("/gizmos", axum::routing::post(routes::post_gizmos))
+        .route("/debug/paths", get(routes::get_debug_paths))
         .route("/input/keys", axum::routing::post(routes::post_keys))
         .route("/scripts", get(routes::list_scripts))
         .route("/script", get(routes::get_script).put(routes::put_script))

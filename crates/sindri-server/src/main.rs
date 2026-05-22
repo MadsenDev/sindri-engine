@@ -603,6 +603,7 @@ fn run_preview_window(
     playback: SharedPlayback,
     errors: SharedErrors,
     gizmos: SharedGizmos,
+    debug_paths: sindri_server::routes::SharedDebugPaths,
 ) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     let mut window_attributes = Window::default_attributes();
@@ -616,7 +617,7 @@ fn run_preview_window(
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     println!("native play window ready");
 
-    let mut lua = LuaRuntime::new(errors.clone())?;
+    let mut lua = LuaRuntime::new(errors.clone(), debug_paths)?;
     let mut camera_runtime = CameraRuntime::default();
     let mut render_state = RenderState::new(project_dir.to_path_buf());
     let mut last_tick = std::time::Instant::now();
@@ -703,6 +704,7 @@ fn run_headless(
     playback: SharedPlayback,
     errors: SharedErrors,
     gizmos: SharedGizmos,
+    debug_paths: sindri_server::routes::SharedDebugPaths,
     frame_tx: tokio::sync::broadcast::Sender<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let project_settings = ProjectSettings::load(&project_dir);
@@ -711,7 +713,7 @@ fn run_headless(
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     let mut camera_runtime = CameraRuntime::default();
     let mut render_state = RenderState::new(project_dir);
-    let mut lua = LuaRuntime::new(errors.clone())?;
+    let mut lua = LuaRuntime::new(errors.clone(), debug_paths)?;
     let mut last_tick = std::time::Instant::now();
     let mut was_stopped = true;
     let frame_interval = std::time::Duration::from_millis(33);
@@ -784,6 +786,8 @@ fn main() -> anyhow::Result<()> {
     let shared_playback: SharedPlayback = Arc::new(Mutex::new(PlaybackState::default()));
     let shared_errors: SharedErrors = Arc::new(Mutex::new(Vec::new()));
     let shared_gizmos: SharedGizmos = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shared_debug_paths: sindri_server::routes::SharedDebugPaths =
+        Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
 
     let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<Vec<u8>>(4);
     let frame_tx_opt: Option<tokio::sync::broadcast::Sender<Vec<u8>>> = if headless {
@@ -808,6 +812,7 @@ fn main() -> anyhow::Result<()> {
         let project_label = project_dir.display().to_string();
         let frame_tx_sv = frame_tx_opt.clone();
         let gizmos_sv = shared_gizmos.clone();
+        let debug_paths_sv = shared_debug_paths.clone();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -867,6 +872,7 @@ fn main() -> anyhow::Result<()> {
                     playback: playback_sv,
                     errors: state_errors.clone(),
                     gizmos: gizmos_sv,
+                    debug_paths: debug_paths_sv,
                     frame_tx: frame_tx_sv,
                 };
 
@@ -889,6 +895,7 @@ fn main() -> anyhow::Result<()> {
             shared_playback,
             shared_errors,
             shared_gizmos,
+            shared_debug_paths,
             frame_tx,
         )
     } else {
@@ -900,6 +907,7 @@ fn main() -> anyhow::Result<()> {
             shared_playback,
             shared_errors,
             shared_gizmos,
+            shared_debug_paths,
         )
     }
 }

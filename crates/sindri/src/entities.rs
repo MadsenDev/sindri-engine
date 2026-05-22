@@ -4,6 +4,7 @@
 //! like sprites, physics bodies, audio sources, etc.
 
 use crate::math::{Transform2D, Vec2};
+use crate::pathfinding::{PathfindingGrid, PathfindingMode, PlatformGraph};
 use crate::physics::{ColliderShape, RigidBodyType};
 use crate::render::{Sprite, TextureHandle, Tilemap};
 
@@ -277,5 +278,134 @@ pub struct TilemapComponent {
 impl TilemapComponent {
     pub fn new(tilemap: Tilemap) -> Self {
         Self { tilemap }
+    }
+}
+
+/// Navigation grid for pathfinding.
+///
+/// Attach this to any entity to make it a pathfinding authority.  Scripts
+/// query it via `self:nav_grid()` or `world:find_path(nav_entity, start, goal)`.
+#[derive(Clone, Debug)]
+pub struct NavGridComponent {
+    pub grid: PathfindingGrid,
+    pub mode: PathfindingMode,
+    /// Pre-built platform graph (only `Some` when `mode == Platformer`).
+    pub platform_graph: Option<PlatformGraph>,
+    /// When true the platform graph is stale and needs `rebuild_platform_graph()`.
+    pub graph_dirty: bool,
+}
+
+impl NavGridComponent {
+    /// Create a top-down 8-directional nav grid covering `width × height` cells.
+    pub fn new_topdown(width: usize, height: usize, cell_size: f32) -> Self {
+        Self {
+            grid: PathfindingGrid::new(width, height, cell_size),
+            mode: PathfindingMode::TopDown8,
+            platform_graph: None,
+            graph_dirty: false,
+        }
+    }
+
+    /// Create a top-down 4-directional nav grid.
+    pub fn new_topdown4(width: usize, height: usize, cell_size: f32) -> Self {
+        Self {
+            grid: PathfindingGrid::new(width, height, cell_size),
+            mode: PathfindingMode::TopDown4,
+            platform_graph: None,
+            graph_dirty: false,
+        }
+    }
+
+    /// Create a platformer nav grid.
+    pub fn new_platformer(
+        width: usize,
+        height: usize,
+        cell_size: f32,
+        gravity: f32,
+        jump_velocity: f32,
+        move_speed: f32,
+    ) -> Self {
+        let mut comp = Self {
+            grid: PathfindingGrid::new(width, height, cell_size),
+            mode: PathfindingMode::Platformer { gravity, jump_velocity, move_speed },
+            platform_graph: None,
+            graph_dirty: true,
+        };
+        comp.rebuild_platform_graph();
+        comp
+    }
+
+    /// (Re)build the platform graph from the current grid and mode parameters.
+    /// No-op for non-platformer modes.
+    pub fn rebuild_platform_graph(&mut self) {
+        if let PathfindingMode::Platformer { gravity, jump_velocity, move_speed } = self.mode {
+            self.platform_graph =
+                Some(PlatformGraph::build(&self.grid, gravity, jump_velocity, move_speed));
+            self.graph_dirty = false;
+        }
+    }
+
+    /// Mark the platform graph as needing a rebuild on next path query.
+    pub fn mark_dirty(&mut self) {
+        if matches!(self.mode, PathfindingMode::Platformer { .. }) {
+            self.graph_dirty = true;
+        }
+    }
+
+    /// Build walkability from a `TilemapComponent`, blocking any tile whose
+    /// palette-local index is listed in `blocked_tile_indices`.
+    ///
+    /// The nav grid is resized to match the tilemap dimensions and aligned
+    /// to its world-space origin.
+    pub fn build_from_tilemap(
+        &mut self,
+        tilemap: &crate::render::Tilemap,
+        blocked_tile_indices: &[u32],
+    ) {
+        let (cols, rows) = tilemap.map_size;
+        let cell_w = tilemap.tile_size.x;
+        let cell_h = tilemap.tile_size.y;
+        let cell_size = cell_w.min(cell_h);
+
+        self.grid = PathfindingGrid::with_origin(
+            cols as usize,
+            rows as usize,
+            cell_size,
+            tilemap.position,
+        );
+
+        for y in 0..rows {
+            for x in 0..cols {
+                if let Some(tile) = tilemap.get_tile(x, y) {
+                    if !tile.is_empty() && blocked_tile_indices.contains(&(tile.id - 1)) {
+                        self.grid.set_walkable(
+                            crate::pathfinding::GridNode::new(x as i32, y as i32),
+                            false,
+                        );
+                    }
+                }
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// Build walkability from physics colliders: cells overlapped by a static
+    /// collider are marked blocked.
+    pub fn build_from_physics(&mut self, physics: &crate::physics::PhysicsWorld) {
+        let cs = self.grid.cell_size();
+        let origin = self.grid.origin();
+
+        for y in 0..self.grid.height() as i32 {
+            for x in 0..self.grid.width() as i32 {
+                let cx = origin.x + (x as f32 + 0.5) * cs;
+                let cy = origin.y + (y as f32 + 0.5) * cs;
+                let blocked = physics.point_query(Vec2::new(cx, cy)).is_some();
+                self.grid.set_walkable(
+                    crate::pathfinding::GridNode::new(x, y),
+                    !blocked,
+                );
+            }
+        }
+        self.mark_dirty();
     }
 }

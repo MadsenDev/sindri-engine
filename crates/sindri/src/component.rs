@@ -12,6 +12,7 @@ pub enum Component {
     Script(Script),
     Camera(Camera),
     AudioSource(AudioSource),
+    NavGrid(NavGrid),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +80,8 @@ pub struct Collider {
     pub offset_x: f32,
     pub offset_y: f32,
     pub is_trigger: bool,
+    #[serde(default)]
+    pub block_pathfinding: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,4 +398,72 @@ pub struct AudioSource {
     pub volume: f32,
     pub looping: bool,
     pub play_on_start: bool,
+}
+
+/// Pathfinding mode for a nav grid.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NavGridMode {
+    TopDown8,
+    TopDown4,
+    Platformer,
+}
+
+impl Default for NavGridMode {
+    fn default() -> Self { Self::TopDown8 }
+}
+
+/// Navigation grid component — stores walkability data and pathfinding settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NavGrid {
+    /// Width in cells.
+    pub width: u32,
+    /// Height in cells.
+    pub height: u32,
+    /// World-units per cell.
+    pub cell_size: f32,
+    /// World-space X offset (top-left corner of cell 0,0).
+    #[serde(default)]
+    pub origin_x: f32,
+    /// World-space Y offset.
+    #[serde(default)]
+    pub origin_y: f32,
+    /// Pathfinding mode.
+    #[serde(default)]
+    pub mode: NavGridMode,
+    /// Gravity (world-units/s²). Only used in Platformer mode.
+    #[serde(default = "default_gravity")]
+    pub gravity: f32,
+    /// Initial jump velocity (world-units/s). Only used in Platformer mode.
+    #[serde(default = "default_jump_velocity")]
+    pub jump_velocity: f32,
+    /// Horizontal move speed (world-units/s). Only used in Platformer mode.
+    #[serde(default = "default_move_speed")]
+    pub move_speed: f32,
+    /// Flat walkability array (row-major: `[y * width + x]`).
+    /// Each byte: 1 = walkable, 0 = blocked.
+    /// Empty = all walkable by default.
+    #[serde(default)]
+    pub cells: Vec<u8>,
+}
+
+fn default_gravity() -> f32 { 980.0 }
+fn default_jump_velocity() -> f32 { 400.0 }
+fn default_move_speed() -> f32 { 150.0 }
+
+impl Default for NavGrid {
+    fn default() -> Self {
+        Self {
+            width: 20,
+            height: 15,
+            cell_size: 32.0,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            mode: NavGridMode::TopDown8,
+            gravity: default_gravity(),
+            jump_velocity: default_jump_velocity(),
+            move_speed: default_move_speed(),
+            cells: Vec::new(), // empty = all walkable
+        }
+    }
 }

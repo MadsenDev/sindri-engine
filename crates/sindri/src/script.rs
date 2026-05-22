@@ -252,6 +252,31 @@ pub enum ScriptCommand {
         height: u32,
         tile_id: u32,
     },
+    SetNavWalkable {
+        entity: EntityId,
+        x: i32,
+        y: i32,
+        walkable: bool,
+    },
+    SetNavWalkableArea {
+        entity: EntityId,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        walkable: bool,
+    },
+    RebuildNavFromTilemap {
+        entity: EntityId,
+        tilemap_entity: EntityId,
+        blocked_ids: Vec<u32>,
+    },
+    RebuildNavFromPhysics {
+        entity: EntityId,
+    },
+    RebuildNavPlatformGraph {
+        entity: EntityId,
+    },
     SetCameraActive {
         entity: EntityId,
         active: bool,
@@ -394,6 +419,45 @@ impl ScriptCommandBuffer {
             height,
             tile_id,
         });
+    }
+
+    pub fn set_nav_walkable(&mut self, entity: EntityId, x: i32, y: i32, walkable: bool) {
+        self.commands.push(ScriptCommand::SetNavWalkable { entity, x, y, walkable });
+    }
+
+    pub fn set_nav_walkable_area(
+        &mut self,
+        entity: EntityId,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        walkable: bool,
+    ) {
+        self.commands.push(ScriptCommand::SetNavWalkableArea {
+            entity, x, y, width, height, walkable,
+        });
+    }
+
+    pub fn rebuild_nav_from_tilemap(
+        &mut self,
+        entity: EntityId,
+        tilemap_entity: EntityId,
+        blocked_ids: Vec<u32>,
+    ) {
+        self.commands.push(ScriptCommand::RebuildNavFromTilemap {
+            entity,
+            tilemap_entity,
+            blocked_ids,
+        });
+    }
+
+    pub fn rebuild_nav_from_physics(&mut self, entity: EntityId) {
+        self.commands.push(ScriptCommand::RebuildNavFromPhysics { entity });
+    }
+
+    pub fn rebuild_nav_platform_graph(&mut self, entity: EntityId) {
+        self.commands.push(ScriptCommand::RebuildNavPlatformGraph { entity });
     }
 
     pub fn set_camera_active(&mut self, entity: EntityId, active: bool) {
@@ -613,6 +677,65 @@ impl ScriptCommandBuffer {
                     physics.remove_body(entity);
                     world.despawn(entity);
                 }
+                ScriptCommand::SetNavWalkable { entity, x, y, walkable } => {
+                    if let Some(nav) = world.get_mut::<crate::entities::NavGridComponent>(entity) {
+                        nav.grid.set_walkable(crate::pathfinding::GridNode::new(x, y), walkable);
+                        nav.mark_dirty();
+                    }
+                }
+                ScriptCommand::SetNavWalkableArea { entity, x, y, width, height, walkable } => {
+                    if let Some(nav) = world.get_mut::<crate::entities::NavGridComponent>(entity) {
+                        nav.grid.set_area_walkable(x, y, width, height, walkable);
+                        nav.mark_dirty();
+                    }
+                }
+                ScriptCommand::RebuildNavFromTilemap { entity, tilemap_entity, blocked_ids } => {
+                    // Read tilemap, then mutate nav grid
+                    let tilemap_data = world
+                        .get::<crate::entities::TilemapComponent>(tilemap_entity)
+                        .map(|t| t.tilemap.clone());
+                    if let Some(tilemap) = tilemap_data {
+                        if let Some(nav) = world.get_mut::<crate::entities::NavGridComponent>(entity) {
+                            nav.build_from_tilemap(&tilemap, &blocked_ids);
+                        }
+                    }
+                }
+                ScriptCommand::RebuildNavFromPhysics { entity } => {
+                    // Need to read physics before mutating world; clone the grid params first
+                    let (width, height, cell_size, origin, mode) = {
+                        if let Some(nav) = world.get::<crate::entities::NavGridComponent>(entity) {
+                            (nav.grid.width(), nav.grid.height(), nav.grid.cell_size(), nav.grid.origin(), nav.mode)
+                        } else {
+                            continue;
+                        }
+                    };
+                    let mut new_grid = crate::pathfinding::PathfindingGrid::with_origin(
+                        width, height, cell_size, origin,
+                    );
+                    let cs = cell_size;
+                    for y in 0..height as i32 {
+                        for x in 0..width as i32 {
+                            let cx = origin.x + (x as f32 + 0.5) * cs;
+                            let cy = origin.y + (y as f32 + 0.5) * cs;
+                            if physics.point_query(Vec2::new(cx, cy)).is_some() {
+                                new_grid.set_walkable(
+                                    crate::pathfinding::GridNode::new(x, y),
+                                    false,
+                                );
+                            }
+                        }
+                    }
+                    if let Some(nav) = world.get_mut::<crate::entities::NavGridComponent>(entity) {
+                        nav.grid = new_grid;
+                        nav.mode = mode;
+                        nav.mark_dirty();
+                    }
+                }
+                ScriptCommand::RebuildNavPlatformGraph { entity } => {
+                    if let Some(nav) = world.get_mut::<crate::entities::NavGridComponent>(entity) {
+                        nav.rebuild_platform_graph();
+                    }
+                }
             }
         }
     }
@@ -717,6 +840,18 @@ impl UserData for ScriptSelf {
                 .is_some()
             {
                 Ok(Some(TilemapFacet {
+                    entity: this.entity,
+                    world: this.world,
+                    commands: Arc::clone(&this.commands),
+                }))
+            } else {
+                Ok(None)
+            }
+        });
+        methods.add_method("nav_grid", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            if world.get::<crate::entities::NavGridComponent>(this.entity).is_some() {
+                Ok(Some(NavGridFacet {
                     entity: this.entity,
                     world: this.world,
                     commands: Arc::clone(&this.commands),
@@ -994,6 +1129,43 @@ impl UserData for WorldFacet {
                     });
                 }
                 Ok(())
+            },
+        );
+
+        // world:find_path(nav_entity_id, start, goal) → array of {x,y} or nil
+        methods.add_method(
+            "find_path",
+            |lua, this, (nav_entity_raw, start, goal): (i64, Vec2, Vec2)| {
+                use crate::pathfinding::{AStarPathfinder, PathfindingMode, PlatformPathfinder};
+                if nav_entity_raw < 0 {
+                    return Ok(mlua::Value::Nil);
+                }
+                let nav_entity = EntityId(nav_entity_raw as u32);
+                let world = unsafe { &*this.world };
+                let Some(nav) = world.get::<crate::entities::NavGridComponent>(nav_entity) else {
+                    return Ok(mlua::Value::Nil);
+                };
+                let path: Option<Vec<Vec2>> = match nav.mode {
+                    PathfindingMode::Platformer { .. } => {
+                        nav.platform_graph.as_ref().and_then(|pg| {
+                            PlatformPathfinder::find_path(pg, &nav.grid, start, goal)
+                        })
+                    }
+                    mode => AStarPathfinder::find_path(&nav.grid, start, goal, mode),
+                };
+                match path {
+                    Some(pts) => {
+                        let t = lua.create_table()?;
+                        for (i, p) in pts.iter().enumerate() {
+                            let pt = lua.create_table()?;
+                            pt.set("x", p.x)?;
+                            pt.set("y", p.y)?;
+                            t.set(i + 1, pt)?;
+                        }
+                        Ok(mlua::Value::Table(t))
+                    }
+                    None => Ok(mlua::Value::Nil),
+                }
             },
         );
     }
@@ -1274,6 +1446,181 @@ impl UserData for TilemapFacet {
                 .get::<crate::entities::TilemapComponent>(this.entity)
                 .map(|t| t.tilemap.tile_to_world(x, y))
                 .unwrap_or(Vec2::ZERO))
+        });
+    }
+}
+
+// ── NavGridFacet ─────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct NavGridFacet {
+    entity: EntityId,
+    world: *const crate::world::World,
+    commands: Arc<Mutex<ScriptCommandBuffer>>,
+}
+
+impl UserData for NavGridFacet {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        // ── Queries (immediate reads) ──────────────────────────────────────
+
+        methods.add_method("width", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<crate::entities::NavGridComponent>(this.entity)
+                .map(|n| n.grid.width() as i64)
+                .unwrap_or(0))
+        });
+
+        methods.add_method("height", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<crate::entities::NavGridComponent>(this.entity)
+                .map(|n| n.grid.height() as i64)
+                .unwrap_or(0))
+        });
+
+        methods.add_method("cell_size", |_, this, ()| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<crate::entities::NavGridComponent>(this.entity)
+                .map(|n| n.grid.cell_size())
+                .unwrap_or(1.0))
+        });
+
+        methods.add_method("is_walkable", |_, this, (x, y): (i32, i32)| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<crate::entities::NavGridComponent>(this.entity)
+                .map(|n| n.grid.is_walkable(&crate::pathfinding::GridNode::new(x, y)))
+                .unwrap_or(false))
+        });
+
+        methods.add_method("world_to_tile", |lua, this, pos: Vec2| {
+            let world = unsafe { &*this.world };
+            if let Some(nav) = world.get::<crate::entities::NavGridComponent>(this.entity) {
+                let node = nav.grid.world_to_grid(pos);
+                let t = lua.create_table()?;
+                t.set("x", node.x)?;
+                t.set("y", node.y)?;
+                Ok(mlua::Value::Table(t))
+            } else {
+                let t = lua.create_table()?;
+                t.set("x", 0_i32)?;
+                t.set("y", 0_i32)?;
+                Ok(mlua::Value::Table(t))
+            }
+        });
+
+        methods.add_method("tile_to_world", |_, this, (x, y): (i32, i32)| {
+            let world = unsafe { &*this.world };
+            Ok(world
+                .get::<crate::entities::NavGridComponent>(this.entity)
+                .map(|n| n.grid.grid_to_world(crate::pathfinding::GridNode::new(x, y)))
+                .unwrap_or(Vec2::ZERO))
+        });
+
+        // ── Path query ────────────────────────────────────────────────────
+
+        // find_path(start: {x,y}, goal: {x,y}) → array of {x,y} or nil
+        methods.add_method("find_path", |lua, this, (start, goal): (Vec2, Vec2)| {
+            let world = unsafe { &*this.world };
+            let Some(nav) = world.get::<crate::entities::NavGridComponent>(this.entity) else {
+                return Ok(mlua::Value::Nil);
+            };
+
+            use crate::pathfinding::{AStarPathfinder, PathfindingMode, PlatformPathfinder};
+
+            let path: Option<Vec<Vec2>> = match nav.mode {
+                PathfindingMode::Platformer { .. } => {
+                    nav.platform_graph.as_ref().and_then(|pg| {
+                        PlatformPathfinder::find_path(pg, &nav.grid, start, goal)
+                    })
+                }
+                mode => AStarPathfinder::find_path(&nav.grid, start, goal, mode),
+            };
+
+            match path {
+                Some(pts) => {
+                    let t = lua.create_table()?;
+                    for (i, p) in pts.iter().enumerate() {
+                        let pt = lua.create_table()?;
+                        pt.set("x", p.x)?;
+                        pt.set("y", p.y)?;
+                        t.set(i + 1, pt)?;
+                    }
+                    Ok(mlua::Value::Table(t))
+                }
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        // ── Mutations (queued commands) ───────────────────────────────────
+
+        methods.add_method("set_walkable", |_, this, (x, y, walkable): (i32, i32, bool)| {
+            if let Ok(mut cmds) = this.commands.lock() {
+                cmds.set_nav_walkable(this.entity, x, y, walkable);
+            }
+            Ok(())
+        });
+
+        methods.add_method(
+            "set_walkable_area",
+            |_, this, (x, y, w, h, walkable): (i32, i32, i32, i32, bool)| {
+                if let Ok(mut cmds) = this.commands.lock() {
+                    cmds.set_nav_walkable_area(this.entity, x, y, w, h, walkable);
+                }
+                Ok(())
+            },
+        );
+
+        // build_from_tilemap(tilemap_entity_id, blocked_tile_indices_table)
+        methods.add_method(
+            "build_from_tilemap",
+            |_, this, (tilemap_entity_raw, blocked_table): (i64, mlua::Table)| {
+                if tilemap_entity_raw < 0 {
+                    return Ok(());
+                }
+                let tilemap_entity = EntityId(tilemap_entity_raw as u32);
+                let mut blocked_ids: Vec<u32> = Vec::new();
+                for pair in blocked_table.pairs::<mlua::Value, mlua::Value>() {
+                    let (_, v) = pair?;
+                    if let mlua::Value::Integer(id) = v {
+                        blocked_ids.push(id as u32);
+                    } else if let mlua::Value::Number(id) = v {
+                        blocked_ids.push(id as u32);
+                    }
+                }
+                if let Ok(mut cmds) = this.commands.lock() {
+                    cmds.rebuild_nav_from_tilemap(this.entity, tilemap_entity, blocked_ids);
+                }
+                Ok(())
+            },
+        );
+
+        methods.add_method("build_from_physics", |_, this, ()| {
+            if let Ok(mut cmds) = this.commands.lock() {
+                cmds.rebuild_nav_from_physics(this.entity);
+            }
+            Ok(())
+        });
+
+        methods.add_method("rebuild_platform_graph", |_, this, ()| {
+            if let Ok(mut cmds) = this.commands.lock() {
+                cmds.rebuild_nav_platform_graph(this.entity);
+            }
+            Ok(())
+        });
+
+        // fill_all(walkable) – convenience for resetting the whole grid
+        methods.add_method("fill_all", |_, this, walkable: bool| {
+            let world = unsafe { &*this.world };
+            if let Some(nav) = world.get::<crate::entities::NavGridComponent>(this.entity) {
+                let (w, h) = (nav.grid.width() as i32, nav.grid.height() as i32);
+                if let Ok(mut cmds) = this.commands.lock() {
+                    cmds.set_nav_walkable_area(this.entity, 0, 0, w, h, walkable);
+                }
+            }
+            Ok(())
         });
     }
 }

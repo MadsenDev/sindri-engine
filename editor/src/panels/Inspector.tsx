@@ -674,6 +674,7 @@ function ColliderFields({ comp, entityId, componentIdx, onSceneChange }: {
       <NumberInputField label="offset x" value={comp.offset_x} onCommit={v => patch({ offset_x: v })} />
       <NumberInputField label="offset y" value={comp.offset_y} onCommit={v => patch({ offset_y: v })} />
       <BoolField label="trigger" value={comp.is_trigger} onChange={v => patch({ is_trigger: v })} />
+      <BoolField label="block pathfinding" value={comp.block_pathfinding ?? false} onChange={v => patch({ block_pathfinding: v })} />
     </>
   );
 }
@@ -920,3 +921,4 @@ const prefabBtnStyle: CSSProperties = {
   cursor: "pointer",
   fontFamily: "var(--font-ui)",
 };
+

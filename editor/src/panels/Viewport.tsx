@@ -96,7 +96,7 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
             color: gizmos ? "var(--paper)" : "var(--ink-3)",
             border: `1px solid ${gizmos ? "var(--moss)" : "var(--rule)"}`,
             cursor: "pointer",
-            display: tab === "game" ? "block" : "none",
+            display: "block",
           }}
         >
           gizmos
@@ -215,6 +215,23 @@ function SceneView({
   const imgCacheRef = useRef<Map<string, HTMLImageElement | null>>(new Map());
   const animStateRef = useRef<Map<number, { frame: number; timer: number }>>(new Map());
   const lastDrawTimeRef = useRef(performance.now());
+  const debugPathsRef = useRef<Record<string, [number, number][]>>({});
+
+  // Poll debug paths from server when gizmos are on
+  useEffect(() => {
+    if (!gizmos) { debugPathsRef.current = {}; return; }
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const res = await fetch("http://127.0.0.1:7878/debug/paths");
+        if (res.ok) debugPathsRef.current = await res.json();
+      } catch {}
+      if (!cancelled) setTimeout(poll, 100);
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [gizmos]);
 
   // Tilemap painting state
   const tilemapEditRef = useRef(tilemapEdit);
@@ -491,6 +508,38 @@ function SceneView({
           ctx.strokeStyle = "rgba(180,140,60,0.9)";
           ctx.lineWidth = 2;
           ctx.strokeRect(hx + 1, hy + 1, tilePxW - 2, tilePxH - 2);
+        }
+        ctx.restore();
+      }
+    }
+
+    // — Debug paths (gizmo) —
+    if (gizmosRef.current) {
+      const paths = debugPathsRef.current;
+      const colors = ["#ff6b35", "#ffd166", "#06d6a0", "#118ab2", "#ef476f"];
+      let colorIdx = 0;
+      for (const pts of Object.values(paths)) {
+        if (!pts || pts.length < 2) continue;
+        const color = colors[colorIdx % colors.length];
+        colorIdx++;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+          const s = worldToScreen(pts[i][0], pts[i][1], cw, ch);
+          if (i === 0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (let i = 0; i < pts.length; i++) {
+          const s = worldToScreen(pts[i][0], pts[i][1], cw, ch);
+          ctx.fillStyle = i === 0 ? "white" : color;
+          ctx.beginPath();
+          ctx.arc(s.sx, s.sy, 3, 0, Math.PI * 2);
+          ctx.fill();
         }
         ctx.restore();
       }
@@ -1114,6 +1163,7 @@ function drawEntity(
     }
     return;
   }
+
 
   const visW = sprite?.width ?? animSprite?.width;
   const visH = sprite?.height ?? animSprite?.height;

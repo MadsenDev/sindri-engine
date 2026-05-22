@@ -8,7 +8,7 @@ use sindri::math::Vec2;
 use sindri::physics::{ColliderShape, PhysicsWorld, RigidBodyType as PhysicsBodyType};
 use sindri::scene::Scene;
 use sindri::world::EntityId;
-use sindri_server::routes::SharedErrors;
+use sindri_server::routes::{SharedDebugPaths, SharedErrors};
 
 enum CameraCommand {
     SetActive(bool),
@@ -329,6 +329,7 @@ pub struct LuaRuntime {
     pressed_keys: Arc<RwLock<HashSet<String>>>,
     prev_keys: HashSet<String>,
     errors: SharedErrors,
+    pub debug_paths: SharedDebugPaths,
     // Velocity cache for script access — keyed by entity id
     pub velocities: HashMap<u64, (f32, f32)>,
     // Animation state per entity
@@ -338,7 +339,7 @@ pub struct LuaRuntime {
 }
 
 impl LuaRuntime {
-    pub fn new(errors: SharedErrors) -> anyhow::Result<Self> {
+    pub fn new(errors: SharedErrors, debug_paths: SharedDebugPaths) -> anyhow::Result<Self> {
         let lua = Lua::new();
 
         let print_fn = lua.create_function(|_, args: mlua::MultiValue| {
@@ -398,6 +399,7 @@ impl LuaRuntime {
             pressed_keys,
             prev_keys: HashSet::new(),
             errors,
+            debug_paths,
             velocities: HashMap::new(),
             anim_states: HashMap::new(),
             physics: PhysicsWorld::new(),
@@ -708,6 +710,7 @@ impl LuaRuntime {
         self.velocities.clear();
         self.physics = PhysicsWorld::new();
         self.physics_initialized = false;
+        if let Ok(mut dp) = self.debug_paths.write() { dp.clear(); }
         if let Ok(mut k) = self.keys.write() {
             k.clear();
         }
@@ -851,10 +854,13 @@ impl LuaRuntime {
         // Snapshot entity name → (id, x, y, rotation) for cross-entity queries.
         let entity_snapshot: std::sync::Arc<HashMap<String, (u64, f32, f32, f32)>> = {
             let map: HashMap<String, (u64, f32, f32, f32)> = scene.entities.iter().map(|(id, e)| {
-                let (x, y, rot) = e.components.iter().find_map(|c| {
+                let (tx, ty, rot) = e.components.iter().find_map(|c| {
                     if let Component::Transform(t) = c { Some((t.x, t.y, t.rotation)) } else { None }
                 }).unwrap_or((0.0, 0.0, 0.0));
-                (e.name.clone(), (*id, x, y, rot))
+                let (ox, oy) = e.components.iter().find_map(|c| {
+                    if let Component::Collider(col) = c { Some((col.offset_x, col.offset_y)) } else { None }
+                }).unwrap_or((0.0, 0.0));
+                (e.name.clone(), (*id, tx + ox, ty + oy, rot))
             }).collect();
             std::sync::Arc::new(map)
         };
@@ -887,6 +893,100 @@ impl LuaRuntime {
                 }
             }) {
                 let _ = self.lua.globals().set("entity_transform", f);
+            }
+        }
+
+        // Build the scene nav grid once per frame:
+        //   1. Tilemap solid tiles (using the tilemap entity's world-space origin)
+        //   2. Entity Colliders with block_pathfinding = true
+        // Shared by the global find_path() and self:find_path() on every entity.
+        let scene_nav_grid: Option<Arc<sindri::pathfinding::PathfindingGrid>> = {
+            use sindri::pathfinding::{PathfindingGrid, GridNode};
+
+            scene.entities.values()
+                .find_map(|ent| {
+                    ent.components.iter().find_map(|c| {
+                        if let Component::Tilemap(tm) = c { Some(tm.clone()) } else { None }
+                    }).map(|tm| {
+                        let origin = ent.components.iter().find_map(|c| {
+                            if let Component::Transform(t) = c { Some(Vec2::new(t.x, t.y)) } else { None }
+                        }).unwrap_or(Vec2::ZERO);
+                        (tm, origin)
+                    })
+                })
+                .map(|(tm, origin)| {
+                    let cols = tm.map_cols as usize;
+                    let rows = tm.map_rows as usize;
+                    let tw = tm.tile_width;
+                    let mut grid = PathfindingGrid::with_origin(cols, rows, tw, origin);
+
+                    // Solid tilemap cells
+                    for r in 0..tm.map_rows {
+                        for c in 0..tm.map_cols {
+                            if tm.is_tile_solid(c, r) {
+                                grid.set_walkable(GridNode::new(c as i32, r as i32), false);
+                            }
+                        }
+                    }
+
+                    // Entity colliders flagged as blocking pathfinding
+                    for ent in scene.entities.values() {
+                        let tx = ent.components.iter().find_map(|c| {
+                            if let Component::Transform(t) = c { Some((t.x, t.y)) } else { None }
+                        });
+                        let Some((ex, ey)) = tx else { continue };
+                        for comp in &ent.components {
+                            if let Component::Collider(col) = comp {
+                                if !col.block_pathfinding || col.is_trigger { continue; }
+                                let cx = ex + col.offset_x;
+                                let cy = ey + col.offset_y;
+                                let left   = cx - col.width  / 2.0;
+                                let right  = cx + col.width  / 2.0;
+                                let top    = cy - col.height / 2.0;
+                                let bottom = cy + col.height / 2.0;
+                                let col_min = ((left   - origin.x) / tw).floor() as i32;
+                                let col_max = ((right  - origin.x) / tw).ceil()  as i32 - 1;
+                                let row_min = ((top    - origin.y) / tw).floor() as i32;
+                                let row_max = ((bottom - origin.y) / tw).ceil()  as i32 - 1;
+                                for gr in row_min..=row_max {
+                                    for gc in col_min..=col_max {
+                                        grid.set_walkable(GridNode::new(gc, gr), false);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Arc::new(grid)
+                })
+        };
+
+        // Global find_path(start, goal) — kept for backwards compat.
+        {
+            use sindri::pathfinding::{AStarPathfinder, PathfindingMode};
+            let grid_arc = scene_nav_grid.clone();
+            if let Ok(f) = self.lua.create_function(move |lua, (start, goal): (mlua::Table, mlua::Table)| {
+                let Some(ref grid) = grid_arc else { return Ok(mlua::Value::Nil); };
+                let sx: f32 = start.get("x").or_else(|_| start.get(1))?;
+                let sy: f32 = start.get("y").or_else(|_| start.get(2))?;
+                let gx: f32 = goal.get("x").or_else(|_| goal.get(1))?;
+                let gy: f32 = goal.get("y").or_else(|_| goal.get(2))?;
+                match AStarPathfinder::find_path(grid, Vec2::new(sx, sy), Vec2::new(gx, gy), PathfindingMode::TopDown8) {
+                    Some(pts) => {
+                        let t = lua.create_table()?;
+                        let skip = if pts.len() > 1 { 1 } else { 0 };
+                        for (i, p) in pts.iter().skip(skip).enumerate() {
+                            let pt = lua.create_table()?;
+                            pt.set("x", p.x)?;
+                            pt.set("y", p.y)?;
+                            t.set(i + 1, pt)?;
+                        }
+                        Ok(mlua::Value::Table(t))
+                    }
+                    None => Ok(mlua::Value::Nil),
+                }
+            }) {
+                let _ = self.lua.globals().set("find_path", f);
             }
         }
 
@@ -943,6 +1043,9 @@ impl LuaRuntime {
             let tilemap_comp = entity.components.iter().find_map(|c| {
                 if let Component::Tilemap(tm) = c { Some(tm.clone()) } else { None }
             });
+            let collider_offset: (f32, f32) = entity.components.iter().find_map(|c| {
+                if let Component::Collider(col) = c { Some((col.offset_x, col.offset_y)) } else { None }
+            }).unwrap_or((0.0, 0.0));
 
             // Advance animation state
             if let Some(ref anim) = anim_comp {
@@ -1307,7 +1410,7 @@ impl LuaRuntime {
                                         }
                                     }
                                 }
-                                match AStarPathfinder::find_path(&grid, sindri::math::Vec2::new(wx, wy), sindri::math::Vec2::new(gx, gy)) {
+                                match AStarPathfinder::find_path(&grid, sindri::math::Vec2::new(wx, wy), sindri::math::Vec2::new(gx, gy), sindri::pathfinding::PathfindingMode::TopDown8) {
                                     Some(path) => {
                                         let t = lua.create_table()?;
                                         for (i, p) in path.iter().enumerate() {
@@ -1332,6 +1435,47 @@ impl LuaRuntime {
                     match tm_fn {
                         Ok(f) => { let _ = self_tbl.set("tilemap", f); }
                         Err(e) => self.report_error(format!("[lua] tilemap method error ({script_path}): {e}")),
+                    }
+                }
+
+                // self:find_path(goal) — zero-config pathfinding using the scene nav grid
+                {
+                    use sindri::pathfinding::{AStarPathfinder, PathfindingMode};
+                    let grid_for_self = scene_nav_grid.clone();
+                    let (self_x, self_y) = if let Some(ref t) = transform {
+                        (t.x + collider_offset.0, t.y + collider_offset.1)
+                    } else { (0.0, 0.0) };
+                    let debug_paths_for_self = self.debug_paths.clone();
+                    let eid_for_path = entity_id;
+                    match self.lua.create_function(move |lua, (_self_tbl, goal): (Table, Table)| {
+                        let Some(ref grid) = grid_for_self else { return Ok(mlua::Value::Nil); };
+                        let gx: f32 = goal.get("x").or_else(|_| goal.get(1))?;
+                        let gy: f32 = goal.get("y").or_else(|_| goal.get(2))?;
+                        match AStarPathfinder::find_path(grid, Vec2::new(self_x, self_y), Vec2::new(gx, gy), PathfindingMode::TopDown8) {
+                            Some(pts) => {
+                                if let Ok(mut dp) = debug_paths_for_self.write() {
+                                    dp.insert(eid_for_path, pts.iter().map(|p| (p.x, p.y)).collect());
+                                }
+                                let t = lua.create_table()?;
+                                let skip = if pts.len() > 1 { 1 } else { 0 };
+                                for (i, p) in pts.iter().skip(skip).enumerate() {
+                                    let pt = lua.create_table()?;
+                                    pt.set("x", p.x)?;
+                                    pt.set("y", p.y)?;
+                                    t.set(i + 1, pt)?;
+                                }
+                                Ok(mlua::Value::Table(t))
+                            }
+                            None => {
+                                if let Ok(mut dp) = debug_paths_for_self.write() {
+                                    dp.remove(&eid_for_path);
+                                }
+                                Ok(mlua::Value::Nil)
+                            }
+                        }
+                    }) {
+                        Ok(f) => { let _ = self_tbl.set("find_path", f); }
+                        Err(e) => self.report_error(format!("[lua] find_path method error ({script_path}): {e}")),
                     }
                 }
 
