@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene, Entity, ProposalData, AiModelConfig, AiModelRole } from "../App";
-import { KbdKey } from "../App";
+import { KbdKey } from "./KbdKey";
 
 interface Message {
   role: "user" | "ai";
