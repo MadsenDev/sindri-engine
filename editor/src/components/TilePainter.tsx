@@ -43,6 +43,8 @@ interface Props {
   onClose: () => void;
   projectPath?: string | null;
   onSceneChange?: () => void;
+  entityX?: number;
+  entityY?: number;
 }
 
 interface PrefabInfo { name: string; path: string; }
@@ -81,7 +83,7 @@ function drawTileOnCanvas(
   ctx.drawImage(img, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
 }
 
-export default function TilePainter({ comp, entityId, componentIdx, onClose, projectPath, onSceneChange }: Props) {
+export default function TilePainter({ comp, entityId, componentIdx, onClose, projectPath, onSceneChange, entityX = 0, entityY = 0 }: Props) {
   const initLayers = () =>
     comp.layers.length > 0
       ? comp.layers.map(l => ({ ...l, tiles: [...l.tiles] }))
@@ -112,6 +114,9 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [prefabs, setPrefabs] = useState<PrefabInfo[]>([]);
   const [selectedPrefabPath, setSelectedPrefabPath] = useState<string | null>(null);
+  const [hoverTile, setHoverTile] = useState<{ col: number; row: number } | null>(null);
+  const [ghostImg, setGhostImg] = useState<HTMLImageElement | null>(null);
+  const [ghostSize, setGhostSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   useEffect(() => {
     const container = canvasContainerRef.current;
@@ -151,6 +156,24 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
     if (paintMode !== "stamp" || !projectPath) return;
     invoke<PrefabInfo[]>("list_prefabs", { projectPath }).then(setPrefabs).catch(() => {});
   }, [paintMode, projectPath]);
+
+  useEffect(() => {
+    if (!selectedPrefabPath || !projectPath) { setGhostImg(null); return; }
+    invoke<string>("read_project_file", { projectPath, relativePath: selectedPrefabPath })
+      .then(text => {
+        const node = JSON.parse(text) as { components?: { type: string; texture_path?: string; width?: number; height?: number }[] };
+        const sprite = node.components?.find(c => c.type === "Sprite" || c.type === "AnimatedSprite");
+        if (!sprite?.texture_path) { setGhostImg(null); return; }
+        const w = sprite.width ?? comp.tile_width;
+        const h = sprite.height ?? comp.tile_height;
+        setGhostSize({ w, h });
+        const img = new Image();
+        img.onload = () => setGhostImg(img);
+        img.onerror = () => setGhostImg(null);
+        img.src = `http://localhost:7878/assets/${sprite.texture_path}`;
+      })
+      .catch(() => setGhostImg(null));
+  }, [selectedPrefabPath, projectPath, comp.tile_width, comp.tile_height]);
 
   const flush = useCallback(async (newLayers: TileLayer[] | null, newPalettes: TilePalette[] | null) => {
     const data: Record<string, unknown> = {};
@@ -242,7 +265,30 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
         }
       }
     }
-  }, [layers, palettes, pan, zoom, paletteImages, paintMode, activeLayerIdx, comp.map_cols, comp.map_rows, comp.tile_width, comp.tile_height, canvasSize]);
+
+    // Stamp mode: ghost preview at hovered tile
+    if (paintMode === "stamp" && hoverTile) {
+      const gx = pan.x + hoverTile.col * tw;
+      const gy = pan.y + hoverTile.row * th;
+      if (ghostImg) {
+        // Draw sprite scaled to tile size, centered
+        const scale = Math.min(tw / ghostSize.w, th / ghostSize.h);
+        const dw = ghostSize.w * scale;
+        const dh = ghostSize.h * scale;
+        ctx.globalAlpha = 0.65;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(ghostImg, gx + (tw - dw) / 2, gy + (th - dh) / 2, dw, dh);
+        ctx.globalAlpha = 1;
+      }
+      // Highlight cell
+      ctx.strokeStyle = "rgba(180,140,60,0.9)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(gx + 1, gy + 1, tw - 2, th - 2);
+      // Crosshair
+      ctx.fillStyle = selectedPrefabPath ? "rgba(180,140,60,0.5)" : "rgba(100,100,100,0.3)";
+      ctx.fillRect(gx, gy, tw, th);
+    }
+  }, [layers, palettes, pan, zoom, paletteImages, paintMode, activeLayerIdx, comp.map_cols, comp.map_rows, comp.tile_width, comp.tile_height, canvasSize, hoverTile, ghostImg, ghostSize, selectedPrefabPath]);
 
   const canvasToTile = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -321,10 +367,15 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
       setPan({ x: panStartRef.current.px + e.clientX - panStartRef.current.mx, y: panStartRef.current.py + e.clientY - panStartRef.current.my });
       return;
     }
+    if (paintMode === "stamp") {
+      const tile = canvasToTile(e.clientX, e.clientY);
+      setHoverTile(tile ? { col: tile.col, row: tile.row } : null);
+      return;
+    }
     if (!isPainting.current) return;
     const tile = canvasToTile(e.clientX, e.clientY);
     if (tile) paintAt(tile.col, tile.row);
-  }, [canvasToTile, paintAt]);
+  }, [canvasToTile, paintAt, paintMode]);
 
   const handleCanvasPointerUp = useCallback(() => { isPainting.current = false; panStartRef.current = null; }, []);
 
@@ -332,15 +383,19 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
     if (!selectedPrefabPath || !projectPath) return;
     const tile = canvasToTile(e.clientX, e.clientY);
     if (!tile) return;
-    // World position = tile center relative to tilemap entity origin (0,0)
-    const wx = (tile.col + 0.5) * comp.tile_width;
-    const wy = (tile.row + 0.5) * comp.tile_height;
+    // World position = tilemap entity origin + tile center offset
+    const wx = entityX + (tile.col + 0.5) * comp.tile_width;
+    const wy = entityY + (tile.row + 0.5) * comp.tile_height;
     try {
-      const newId = await invoke<number>("instantiate_prefab", { projectPath, prefabPath: selectedPrefabPath });
+      const newId = await invoke<number>("instantiate_prefab", {
+        projectPath,
+        prefabPath: selectedPrefabPath,
+        parentId: entityId,
+      });
       await invoke("patch_transform", { entityId: newId, x: wx, y: wy, scaleX: 1, scaleY: 1, rotation: 0 });
       onSceneChange?.();
-    } catch (e) { console.error("stamp prefab failed:", e); }
-  }, [selectedPrefabPath, projectPath, canvasToTile, comp.tile_width, comp.tile_height, onSceneChange]);
+    } catch (err) { console.error("stamp prefab failed:", err); }
+  }, [selectedPrefabPath, projectPath, canvasToTile, comp.tile_width, comp.tile_height, entityX, entityY, entityId, onSceneChange]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (paintMode === "stamp") { handleStampClick(e); return; }
@@ -448,7 +503,7 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
             <button onClick={() => setPaintMode("draw")} style={modeBtn("draw")}>Draw</button>
             <button onClick={() => setPaintMode("erase")} style={modeBtn("erase")}>Erase</button>
             <button onClick={() => setPaintMode("collision")} style={modeBtn("collision")}>Collision</button>
-            {projectPath && <button onClick={() => setPaintMode("stamp")} style={modeBtn("stamp")}>Stamp</button>}
+            {projectPath && <button onClick={() => { setPaintMode(m => m === "stamp" ? "draw" : "stamp"); setHoverTile(null); }} style={modeBtn("stamp")}>Stamp</button>}
             <div style={{ width: 1, height: 16, background: "var(--rule-2)", margin: "0 2px" }} />
             <button onClick={() => {
               const tileCount = comp.map_cols * comp.map_rows;
@@ -470,6 +525,14 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
         {paintMode === "collision" ? (
           <div style={{ padding: "4px 16px", background: "rgba(200,50,50,0.12)", borderBottom: "1px solid rgba(200,50,50,0.3)", flexShrink: 0 }}>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "rgba(220,100,100,0.9)" }}>Click palette tiles to toggle solid · Shift+click map to flood fill</span>
+          </div>
+        ) : paintMode === "stamp" ? (
+          <div style={{ padding: "4px 16px", background: "rgba(180,140,60,0.1)", borderBottom: "1px solid rgba(180,140,60,0.3)", flexShrink: 0 }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "rgba(200,160,80,0.9)" }}>
+              {selectedPrefabPath
+                ? `Stamping ◆ ${prefabs.find(p => p.path === selectedPrefabPath)?.name ?? "…"} · instances are children of this tilemap entity`
+                : "Select a prefab from the list, then click to stamp instances"}
+            </span>
           </div>
         ) : (
           <div style={{ padding: "4px 16px", background: "rgba(0,0,0,0.1)", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
@@ -631,10 +694,11 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose, pro
           {/* Canvas map */}
           <div ref={canvasContainerRef} style={{ flex: 1, overflow: "hidden", position: "relative" }}>
             <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h}
-              style={{ width: "100%", height: "100%", display: "block", cursor: "crosshair" }}
+              style={{ width: "100%", height: "100%", display: "block", cursor: paintMode === "stamp" ? (selectedPrefabPath ? "cell" : "not-allowed") : "crosshair" }}
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handleCanvasPointerMove}
               onPointerUp={handleCanvasPointerUp}
+              onPointerLeave={() => setHoverTile(null)}
               onClick={handleCanvasClick}
               onWheel={handleWheel}
             />

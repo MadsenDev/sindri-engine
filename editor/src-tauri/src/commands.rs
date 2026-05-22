@@ -3572,6 +3572,7 @@ pub async fn save_as_prefab(
 pub async fn instantiate_prefab(
     project_path: String,
     prefab_path: String,
+    parent_id: Option<u64>,
 ) -> Result<u64, String> {
     let full = std::path::Path::new(&project_path).join(&prefab_path);
     let text = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
@@ -3588,7 +3589,7 @@ pub async fn instantiate_prefab(
         .await
         .map_err(|e| e.to_string())?;
 
-    let entity_id = instantiate_prefab_node(&node, None, &mut scene, &prefab_path);
+    let entity_id = instantiate_prefab_node(&node, parent_id, &mut scene, &prefab_path);
 
     // PUT the modified scene back
     client

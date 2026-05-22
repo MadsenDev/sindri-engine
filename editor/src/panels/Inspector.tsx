@@ -432,7 +432,10 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
         {component.type === "Script"      && <ScriptField comp={component} entityId={entity.id} componentIdx={componentIdx} onOpenScript={onOpenScript} onSceneChange={onSceneChange} />}
         {component.type === "Camera"      && <CameraFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
         {component.type === "AudioSource" && <AudioFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} />}
-        {component.type === "Tilemap"     && <TilemapFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} projectPath={projectPath} />}
+        {component.type === "Tilemap"     && (() => {
+          const t = entity.components.find(c => c.type === "Transform") as Extract<Component, { type: "Transform" }> | undefined;
+          return <TilemapFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} projectPath={projectPath} entityX={t?.x ?? 0} entityY={t?.y ?? 0} />;
+        })()}
       </div>
     </>
   );
@@ -833,11 +836,13 @@ function AudioFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 // ─── Tilemap ──────────────────────────────────────────────────────────────────
 
-function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles, projectPath }: {
+function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles, projectPath, entityX, entityY }: {
   comp: Extract<Component, { type: "Tilemap" }>;
   entityId: number; componentIdx: number; onSceneChange: () => void;
   projectFiles: ProjectFile[];
   projectPath?: string | null;
+  entityX?: number;
+  entityY?: number;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
   const [painterOpen, setPainterOpen] = useState(false);
@@ -942,6 +947,8 @@ function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFil
           onClose={() => { setPainterOpen(false); onSceneChange(); }}
           projectPath={projectPath}
           onSceneChange={onSceneChange}
+          entityX={entityX ?? 0}
+          entityY={entityY ?? 0}
         />
       )}
     </>
