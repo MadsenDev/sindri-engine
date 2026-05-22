@@ -96,6 +96,22 @@ fn component_transform(entity: &sindri::entity::Entity) -> Option<&sindri::compo
     })
 }
 
+/// Resolve an entity's world-space position by walking up the parent chain.
+/// Each child's (x, y) is a local offset from its parent's world position.
+fn resolve_world_pos(scene: &Scene, entity_id: u64) -> Vec2 {
+    fn inner(scene: &Scene, entity_id: u64, depth: u8) -> Vec2 {
+        if depth > 16 { return Vec2::ZERO; } // cycle guard
+        let Some(entity) = scene.entities.get(&entity_id) else { return Vec2::ZERO };
+        let Some(t) = component_transform(entity) else { return Vec2::ZERO };
+        let local = Vec2::new(t.x, t.y);
+        match entity.parent {
+            Some(pid) => inner(scene, pid, depth + 1) + local,
+            None => local,
+        }
+    }
+    inner(scene, entity_id, 0)
+}
+
 #[derive(Default)]
 struct CameraRuntime {
     positions: HashMap<u64, Vec2>,
@@ -227,14 +243,13 @@ fn scene_camera(scene: &Scene, runtime: &mut CameraRuntime) -> Camera2D {
         return Camera2D::new(Vec2::new(0.0, 0.0));
     };
 
-    let target_transform = camera
+    let target_pos = camera
         .follow_entity
-        .and_then(|id| scene.entities.get(&id))
-        .and_then(component_transform)
-        .unwrap_or(camera_transform);
+        .map(|id| resolve_world_pos(scene, id))
+        .unwrap_or_else(|| Vec2::new(camera_transform.x, camera_transform.y));
     let target = Vec2::new(
-        target_transform.x + camera.offset_x,
-        target_transform.y + camera.offset_y,
+        target_pos.x + camera.offset_x,
+        target_pos.y + camera.offset_y,
     );
 
     let previous = if camera.follow_entity.is_some() {
@@ -373,7 +388,7 @@ fn draw_scene_contents(
         let Some(t) = entity.components.iter().find_map(|c| {
             if let Component::Transform(t) = c { Some(t) } else { None }
         }) else { continue };
-        let pos = Vec2::new(t.x, t.y);
+        let pos = resolve_world_pos(scene, item.entity_id);
 
         match &item.kind {
             DrawKind::TilemapLayer(layer_idx) => {

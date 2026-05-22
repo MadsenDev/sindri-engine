@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ActiveTool, Scene, Entity } from "../App";
+import type { ActiveTool, Scene, Entity, TilemapEdit } from "../App";
 
 export interface ColliderChange {
   entityId: number;
@@ -19,6 +19,10 @@ interface Props {
   engineReady: boolean;
   isPlaying: boolean;
   resolution?: string;
+  tilemapEdit?: TilemapEdit | null;
+  onTilemapEditChange?: (e: TilemapEdit) => void;
+  onSceneChange?: () => void;
+  projectPath?: string | null;
 }
 
 interface Camera {
@@ -37,7 +41,7 @@ const COLLIDER_COLOR = "rgba(155,176,112,0.35)";  // moss
 const CAMERA_COLOR = "#6dbcdb";      // cyan
 const LABEL_COLOR = "#8a8580";       // ink-3
 
-export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, onColliderCommit, engineReady, isPlaying, resolution = "1280 × 720" }: Props) {
+export default function Viewport({ scene, selectedId, onSelect, activeTool, onTransformCommit, onColliderCommit, engineReady, isPlaying, resolution = "1280 × 720", tilemapEdit, onTilemapEditChange, onSceneChange, projectPath }: Props) {
   const [tab, setTab] = useState<"scene" | "game">("scene");
   const [gizmos, setGizmos] = useState(false);
 
@@ -110,6 +114,10 @@ export default function Viewport({ scene, selectedId, onSelect, activeTool, onTr
             onTransformCommit={onTransformCommit}
             onColliderCommit={onColliderCommit}
             gizmos={gizmos}
+            tilemapEdit={tilemapEdit}
+            onTilemapEditChange={onTilemapEditChange}
+            onSceneChange={onSceneChange}
+            projectPath={projectPath}
           />
         ) : (
           <GameView engineReady={engineReady} isPlaying={isPlaying} />
@@ -161,6 +169,10 @@ interface ColliderDraft {
   offset_y: number;
 }
 
+function encodeTile(paletteId: number, tileIdx: number): number {
+  return (((paletteId & 0xffff) << 16) | (tileIdx & 0xffff)) >>> 0;
+}
+
 function SceneView({
   scene,
   selectedId,
@@ -169,6 +181,9 @@ function SceneView({
   onTransformCommit,
   onColliderCommit,
   gizmos,
+  tilemapEdit,
+  onSceneChange,
+  projectPath,
 }: {
   scene: Scene | null;
   selectedId: number | null;
@@ -177,6 +192,10 @@ function SceneView({
   onTransformCommit: (change: TransformChange) => void;
   onColliderCommit: (change: ColliderChange) => void;
   gizmos?: boolean;
+  tilemapEdit?: TilemapEdit | null;
+  onTilemapEditChange?: (e: TilemapEdit) => void;
+  onSceneChange?: () => void;
+  projectPath?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -196,10 +215,21 @@ function SceneView({
   const imgCacheRef = useRef<Map<string, HTMLImageElement | null>>(new Map());
   const animStateRef = useRef<Map<number, { frame: number; timer: number }>>(new Map());
   const lastDrawTimeRef = useRef(performance.now());
+
+  // Tilemap painting state
+  const tilemapEditRef = useRef(tilemapEdit);
+  const isPaintingTilesRef = useRef(false);
+  const tilemapHoverRef = useRef<{ col: number; row: number } | null>(null);
+  const tileLayersDraftRef = useRef<{ entityId: number; compIdx: number; layers: unknown[] } | null>(null);
+  const tileSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ghost image for stamp mode
+  const stampGhostRef = useRef<{ img: HTMLImageElement | null; w: number; h: number; path: string | null }>({ img: null, w: 0, h: 0, path: null });
+
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { gizmosRef.current = gizmos; }, [gizmos]);
+  useEffect(() => { tilemapEditRef.current = tilemapEdit; }, [tilemapEdit]);
 
   const worldToScreen = (wx: number, wy: number, cw: number, ch: number) => ({
     sx: (wx - cameraRef.current.x) * cameraRef.current.zoom + cw / 2,
@@ -210,6 +240,92 @@ function SceneView({
     wx: (sx - cw / 2) / cameraRef.current.zoom + cameraRef.current.x,
     wy: (sy - ch / 2) / cameraRef.current.zoom + cameraRef.current.y,
   });
+
+  // Load ghost image for stamp mode
+  useEffect(() => {
+    const te = tilemapEdit;
+    if (!te || te.mode !== "stamp" || !te.selectedPrefabPath || !projectPath) {
+      stampGhostRef.current = { img: null, w: 0, h: 0, path: null };
+      return;
+    }
+    if (stampGhostRef.current.path === te.selectedPrefabPath) return;
+    stampGhostRef.current = { img: null, w: 0, h: 0, path: te.selectedPrefabPath };
+    invoke<string>("read_project_file", { projectPath, relativePath: te.selectedPrefabPath })
+      .then(text => {
+        const node = JSON.parse(text) as { components?: { type: string; texture_path?: string; width?: number; height?: number }[] };
+        const sprite = node.components?.find(c => c.type === "Sprite" || c.type === "AnimatedSprite");
+        if (!sprite?.texture_path) return;
+        const w = sprite.width ?? 16;
+        const h = sprite.height ?? 16;
+        const img = new Image();
+        img.onload = () => { stampGhostRef.current = { img, w, h, path: te.selectedPrefabPath }; };
+        img.onerror = () => {};
+        img.src = `http://localhost:7878/assets/${sprite.texture_path}`;
+      })
+      .catch(() => {});
+  }, [tilemapEdit?.mode, tilemapEdit?.selectedPrefabPath, projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const flushTilePatch = useCallback(async (entityId: number, compIdx: number, layers: unknown[]) => {
+    try {
+      await invoke("patch_component", { entityId, componentIdx: compIdx, data: { layers } });
+      onSceneChange?.();
+    } catch {}
+  }, [onSceneChange]);
+
+  const paintTile = useCallback((entityId: number, compIdx: number, col: number, row: number) => {
+    const te = tilemapEditRef.current;
+    const sc = sceneRef.current;
+    if (!te || !sc || te.mode === "collision" || te.mode === "stamp") return;
+    const entity = sc.entities[String(entityId)];
+    if (!entity) return;
+    const tmComp = entity.components[compIdx] as { type: "Tilemap"; palettes: unknown[]; layers: { name: string; tiles: number[]; visible: boolean; opacity: number; z_index: number }[]; map_cols: number; map_rows: number } | undefined;
+    if (!tmComp || tmComp.type !== "Tilemap") return;
+
+    const draft = tileLayersDraftRef.current;
+    const currentLayers = (draft?.entityId === entityId ? draft.layers : tmComp.layers) as typeof tmComp.layers;
+    const layerIdx = Math.min(te.layerIdx, currentLayers.length - 1);
+    const layer = currentLayers[layerIdx];
+    if (!layer) return;
+
+    const idx = row * tmComp.map_cols + col;
+    if (idx < 0 || idx >= layer.tiles.length) return;
+
+    const palettes = tmComp.palettes as { name: string; texture_path: string; tileset_cols: number; tileset_rows: number; solid_tiles: number[] }[];
+    const pal = palettes[te.paletteIdx];
+    const val = te.mode === "erase" ? 0 : (pal ? encodeTile(te.paletteIdx + 1, te.tileIdx) : 0);
+    if (te.mode !== "erase" && !pal) return;
+    if (layer.tiles[idx] === val) return;
+
+    const newLayers = currentLayers.map((l, i) => {
+      if (i !== layerIdx) return l;
+      const newTiles = [...l.tiles];
+      newTiles[idx] = val;
+      return { ...l, tiles: newTiles };
+    });
+
+    tileLayersDraftRef.current = { entityId, compIdx, layers: newLayers };
+    if (tileSaveTimerRef.current) clearTimeout(tileSaveTimerRef.current);
+    tileSaveTimerRef.current = setTimeout(() => {
+      const d = tileLayersDraftRef.current;
+      if (d) { flushTilePatch(d.entityId, d.compIdx, d.layers); tileLayersDraftRef.current = null; }
+    }, 150);
+  }, [flushTilePatch]);
+
+  const getTilemapAtPoint = useCallback((wx: number, wy: number): { entity: Entity; compIdx: number; col: number; row: number } | null => {
+    const sc = sceneRef.current;
+    const selId = selectedRef.current;
+    if (!sc || selId === null) return null;
+    const entity = sc.entities[String(selId)];
+    if (!entity) return null;
+    const compIdx = entity.components.findIndex(c => c.type === "Tilemap");
+    if (compIdx < 0) return null;
+    const tm = entity.components[compIdx] as { type: "Tilemap"; tile_width: number; tile_height: number; map_cols: number; map_rows: number };
+    const worldPos = resolveWorldPos(sc, entity);
+    const col = Math.floor((wx - worldPos.x) / tm.tile_width);
+    const row = Math.floor((wy - worldPos.y) / tm.tile_height);
+    if (col < 0 || row < 0 || col >= tm.map_cols || row >= tm.map_rows) return null;
+    return { entity, compIdx, col, row };
+  }, []);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -312,7 +428,71 @@ function SceneView({
       for (const item of drawList) {
         const entity = sc.entities[String(item.entityId)];
         if (!entity) continue;
-        drawEntity(ctx, entity, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt, gizmosRef.current, item.layerIdx);
+        drawEntity(ctx, entity, sc, selId, cw, ch, cam, worldToScreen, draftRef.current.get(entity.id), activeToolRef.current, colliderDraftRef.current.get(entity.id), imgCacheRef.current, animStateRef.current, dt, gizmosRef.current, item.layerIdx);
+      }
+    }
+
+    // — Tilemap hover overlay —
+    const te = tilemapEditRef.current;
+    const hover = tilemapHoverRef.current;
+    if (te && hover && sc && selId !== null) {
+      const hovEntity = sc.entities[String(selId)];
+      const hovCompIdx = hovEntity ? hovEntity.components.findIndex(c => c.type === "Tilemap") : -1;
+      const hovTm = hovCompIdx >= 0 ? hovEntity!.components[hovCompIdx] as { type: "Tilemap"; palettes: { name: string; texture_path: string; tileset_cols: number; tileset_rows: number; margin: number; spacing: number; solid_tiles: number[] }[]; tile_width: number; tile_height: number; map_cols: number; map_rows: number } : null;
+      const hovTransform = hovEntity ? getTransform(hovEntity) : null;
+      if (hovTm && hovTransform) {
+        const hovWorldPos = hovEntity ? resolveWorldPos(sc, hovEntity) : hovTransform;
+        const { sx: tmSx, sy: tmSy } = worldToScreen(hovWorldPos.x, hovWorldPos.y, cw, ch);
+        const tilePxW = hovTm.tile_width * cam.zoom;
+        const tilePxH = hovTm.tile_height * cam.zoom;
+        const hx = tmSx + hover.col * tilePxW;
+        const hy = tmSy + hover.row * tilePxH;
+
+        ctx.save();
+        if (te.mode === "draw") {
+          const hovPal = hovTm.palettes[te.paletteIdx];
+          const hovImg = hovPal ? imgCacheRef.current.get(hovPal.texture_path) : null;
+          if (hovImg) {
+            const cols = Math.max(1, hovPal!.tileset_cols);
+            const rows = Math.max(1, hovPal!.tileset_rows);
+            const m = hovPal!.margin ?? 0;
+            const s = hovPal!.spacing ?? 0;
+            const iw = hovImg.naturalWidth; const ih = hovImg.naturalHeight;
+            let srcX: number, srcY: number, srcW: number, srcH: number;
+            if (m === 0 && s === 0) {
+              srcW = iw / cols; srcH = ih / rows;
+              srcX = (te.tileIdx % cols) * srcW; srcY = Math.floor(te.tileIdx / cols) * srcH;
+            } else {
+              srcW = (iw - 2 * m - s * (cols - 1)) / cols; srcH = (ih - 2 * m - s * (rows - 1)) / rows;
+              srcX = m + (te.tileIdx % cols) * (srcW + s); srcY = m + Math.floor(te.tileIdx / cols) * (srcH + s);
+            }
+            ctx.globalAlpha = 0.75;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(hovImg, srcX, srcY, srcW, srcH, hx, hy, Math.round(tilePxW), Math.round(tilePxH));
+            ctx.globalAlpha = 1;
+          }
+          ctx.strokeStyle = "rgba(180,140,60,0.9)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(hx + 1, hy + 1, tilePxW - 2, tilePxH - 2);
+        } else if (te.mode === "erase") {
+          ctx.fillStyle = "rgba(220,60,60,0.25)";
+          ctx.fillRect(hx, hy, tilePxW, tilePxH);
+          ctx.strokeStyle = "rgba(220,60,60,0.9)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(hx + 1, hy + 1, tilePxW - 2, tilePxH - 2);
+        } else if (te.mode === "stamp") {
+          const ghost = stampGhostRef.current;
+          if (ghost.img) {
+            ctx.globalAlpha = 0.7;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(ghost.img, hx, hy, Math.round(tilePxW), Math.round(tilePxH));
+            ctx.globalAlpha = 1;
+          }
+          ctx.strokeStyle = "rgba(180,140,60,0.9)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(hx + 1, hy + 1, tilePxW - 2, tilePxH - 2);
+        }
+        ctx.restore();
       }
     }
 
@@ -389,6 +569,32 @@ function SceneView({
     const my = e.clientY - rect.top;
     const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
     const tool = activeToolRef.current;
+
+    // Tilemap painting mode
+    const te = tilemapEditRef.current;
+    if (te) {
+      const hit = getTilemapAtPoint(wx, wy);
+      if (hit) {
+        if (te.mode === "stamp") {
+          // Stamp: store LOCAL coords (offset from tilemap origin) so child follows parent on move.
+          const selId = selectedRef.current;
+          if (te.selectedPrefabPath && projectPath && selId !== null) {
+            const tm = hit.entity.components[hit.compIdx] as { tile_width: number; tile_height: number };
+            const localX = (hit.col + 0.5) * tm.tile_width;
+            const localY = (hit.row + 0.5) * tm.tile_height;
+            invoke<number>("instantiate_prefab", { projectPath, prefabPath: te.selectedPrefabPath, parentId: selId })
+              .then(newId => invoke("patch_transform", { entityId: newId, x: localX, y: localY, scaleX: 1, scaleY: 1, rotation: 0 }))
+              .then(() => onSceneChange?.())
+              .catch(err => console.error("stamp failed:", err));
+          }
+        } else {
+          isPaintingTilesRef.current = true;
+          paintTile(hit.entity.id, hit.compIdx, hit.col, hit.row);
+        }
+        e.preventDefault();
+        return;
+      }
+    }
 
     // In collider mode: check handles on the selected entity FIRST, before any hit test.
     // This ensures handles always win over selecting a different entity underneath.
@@ -481,6 +687,24 @@ function SceneView({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Tilemap hover tracking
+    if (tilemapEditRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const { wx, wy } = screenToWorld(mx, my, canvas.width, canvas.height);
+        const hit = getTilemapAtPoint(wx, wy);
+        tilemapHoverRef.current = hit ? { col: hit.col, row: hit.row } : null;
+        if (isPaintingTilesRef.current && hit && tilemapEditRef.current!.mode !== "stamp") {
+          paintTile(hit.entity.id, hit.compIdx, hit.col, hit.row);
+        }
+      }
+    } else {
+      tilemapHoverRef.current = null;
+    }
+
     const colliderDrag = colliderDragRef.current;
     if (colliderDrag) {
       const canvas = canvasRef.current;
@@ -555,6 +779,18 @@ function SceneView({
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    if (isPaintingTilesRef.current) {
+      isPaintingTilesRef.current = false;
+      // Flush any pending tile save immediately
+      if (tileSaveTimerRef.current) {
+        clearTimeout(tileSaveTimerRef.current);
+        tileSaveTimerRef.current = null;
+      }
+      const d = tileLayersDraftRef.current;
+      if (d) { flushTilePatch(d.entityId, d.compIdx, d.layers); tileLayersDraftRef.current = null; }
+      return;
+    }
+
     const colliderDrag = colliderDragRef.current;
     if (colliderDrag) {
       colliderDragRef.current = null;
@@ -601,11 +837,16 @@ function SceneView({
     onSelect(hitTest(scene, wx, wy));
   };
 
+  const tilemapCursor = tilemapEdit
+    ? (tilemapEdit.mode === "stamp" ? (tilemapEdit.selectedPrefabPath ? "cell" : "not-allowed") : "crosshair")
+    : null;
+
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", cursor: activeTool === "select" ? "crosshair" : "grab" }}
+    <div ref={containerRef} style={{ width: "100%", height: "100%", cursor: tilemapCursor ?? (activeTool === "select" ? "crosshair" : "grab") }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onMouseLeave={() => { tilemapHoverRef.current = null; }}
       onContextMenu={e => e.preventDefault()}
       onWheel={handleWheel}
     >
@@ -627,6 +868,19 @@ function getTransform(entity: Entity): TransformDraft | null {
   } : null;
 }
 
+// Walk the parent chain to compute world-space position.
+// Each entity's (x, y) is a local offset from its parent's world position.
+function resolveWorldPos(scene: Scene, entity: Entity, depth = 0): { x: number; y: number } {
+  if (depth > 16) return { x: 0, y: 0 };
+  const t = getTransform(entity);
+  if (!t) return { x: 0, y: 0 };
+  if (entity.parent === null || entity.parent === undefined) return { x: t.x, y: t.y };
+  const parentEntity = scene.entities[String(entity.parent)];
+  if (!parentEntity) return { x: t.x, y: t.y };
+  const parentWorld = resolveWorldPos(scene, parentEntity, depth + 1);
+  return { x: parentWorld.x + t.x, y: parentWorld.y + t.y };
+}
+
 function hitTest(scene: Scene, wx: number, wy: number): number | null {
   let hit: number | null = null;
   for (const entity of Object.values(scene.entities)) {
@@ -636,10 +890,11 @@ function hitTest(scene: Scene, wx: number, wy: number): number | null {
     const tm = entity.components.find(c => c.type === "Tilemap") as { type: "Tilemap"; map_cols: number; map_rows: number; tile_width: number; tile_height: number } | undefined;
     const camera = entity.components.find(c => c.type === "Camera") as { type: "Camera"; zoom: number } | undefined;
     if (!transform) continue;
+    const world = resolveWorldPos(scene, entity);
     if (tm) {
       const tmW = tm.map_cols * tm.tile_width;
       const tmH = tm.map_rows * tm.tile_height;
-      if (wx >= transform.x && wx <= transform.x + tmW && wy >= transform.y && wy <= transform.y + tmH) {
+      if (wx >= world.x && wx <= world.x + tmW && wy >= world.y && wy <= world.y + tmH) {
         hit = entity.id;
       }
       continue;
@@ -648,7 +903,7 @@ function hitTest(scene: Scene, wx: number, wy: number): number | null {
     const visH = sprite?.height ?? anim?.height;
     const hw = visW ? Math.abs(visW * transform.scale_x) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_x) * 16, 12);
     const hh = visH ? Math.abs(visH * transform.scale_y) * 0.5 : camera ? 12 : Math.max(Math.abs(transform.scale_y) * 16, 12);
-    if (wx >= transform.x - hw && wx <= transform.x + hw && wy >= transform.y - hh && wy <= transform.y + hh) {
+    if (wx >= world.x - hw && wx <= world.x + hw && wy >= world.y - hh && wy <= world.y + hh) {
       hit = entity.id;
     }
   }
@@ -693,6 +948,7 @@ function nextTransformForDrag(drag: DragState, wx: number, wy: number, snapping:
 function drawEntity(
   ctx: CanvasRenderingContext2D,
   entity: Entity,
+  scene: Scene,
   selectedId: number | null,
   cw: number,
   ch: number,
@@ -727,9 +983,11 @@ function drawEntity(
     | undefined;
 
   const isSelected = entity.id === selectedId;
+  // Use draft for the dragged entity; otherwise resolve world position via parent chain.
   const activeTransform = draft ?? transform;
-  const tx = activeTransform?.x ?? 0;
-  const ty = activeTransform?.y ?? 0;
+  const worldPos = draft ? { x: draft.x, y: draft.y } : resolveWorldPos(scene, entity);
+  const tx = worldPos.x;
+  const ty = worldPos.y;
   const { sx, sy } = worldToScreen(tx, ty, cw, ch);
 
   if (!activeTransform) {
