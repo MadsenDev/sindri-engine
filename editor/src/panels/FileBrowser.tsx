@@ -36,6 +36,7 @@ interface Props {
   onOpenScript: (path: string) => void;
   onOpenScene: (path: string) => void;
   onFilesChange?: (files: { path: string; kind: string; name: string }[]) => void;
+  onSceneChange?: () => void;
 }
 
 const FILE_ICON: Record<string, string> = {
@@ -44,6 +45,7 @@ const FILE_ICON: Record<string, string> = {
   image:      "▣",
   animclips:  "▶",
   audio:      "♪",
+  prefab:     "◆",
   other:      "·",
 };
 
@@ -71,7 +73,7 @@ const toolbarBtnStyle: React.CSSProperties = {
   padding: "1px 7px", cursor: "pointer",
 };
 
-export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onFilesChange }: Props) {
+export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onFilesChange, onSceneChange }: Props) {
   const [tree, setTree] = useState<FileNode | null>(null);
   const [spriteEditorPath, setSpriteEditorPath] = useState<string | null>(null);
   const [spriteEditorComp, setSpriteEditorComp] = useState<AnimatedSpriteComp | null>(null);
@@ -162,6 +164,17 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
   const openNode = (node: FileNode) => {
     if (node.kind === "script") onOpenScript(node.path);
     else if (node.kind === "scene") onOpenScene(node.path);
+    else if (node.kind === "prefab") handleInstantiatePrefab(node.path);
+  };
+
+  const handleInstantiatePrefab = async (prefabPath: string) => {
+    if (!projectPath) return;
+    try {
+      await invoke("instantiate_prefab", { projectPath, prefabPath });
+      onSceneChange?.();
+    } catch (e) {
+      console.error("instantiate_prefab failed:", e);
+    }
   };
 
   const handleDrop = async (e: React.DragEvent, targetFolderPath: string) => {
@@ -204,6 +217,9 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
     const items = [
       ...(!node.is_dir && (node.kind === "script" || node.kind === "scene")
         ? [{ label: "Open", icon: "↗", onClick: () => openNode(node) }]
+        : []),
+      ...(!node.is_dir && node.kind === "prefab"
+        ? [{ label: "Instantiate in Scene", icon: "◆", onClick: () => handleInstantiatePrefab(node.path) }]
         : []),
       ...(!node.is_dir && node.kind === "image"
         ? [{ label: "Slice Spritesheet…", icon: "▣", onClick: () => {

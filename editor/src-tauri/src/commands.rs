@@ -3062,6 +3062,7 @@ fn file_kind_from_ext(ext: &str) -> &'static str {
         "lua" => "script",
         "sindri" => "scene",
         "animclips" => "animclips",
+        "prefab" => "prefab",
         "png" | "jpg" | "jpeg" | "webp" | "bmp" => "image",
         "ogg" | "wav" | "mp3" | "flac" => "audio",
         _ => "other",
@@ -3435,4 +3436,270 @@ pub async fn save_editor_prefs(app: tauri::AppHandle, prefs: EditorPrefs) -> Res
     let path = editor_prefs_path(&app)?;
     let json = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+// ─── Prefabs ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PrefabInfo {
+    pub name: String,
+    pub path: String, // relative to project root
+}
+
+fn collect_prefabs_recursive(dir: &std::path::Path, relative: &str, out: &mut Vec<PrefabInfo>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        if name.starts_with('.') { continue; }
+        let rel = if relative.is_empty() { name.clone() } else { format!("{}/{}", relative, name) };
+        if path.is_dir() {
+            collect_prefabs_recursive(&path, &rel, out);
+        } else if path.extension().map(|e| e == "prefab").unwrap_or(false) {
+            let display_name = name.strip_suffix(".prefab").unwrap_or(&name).to_string();
+            out.push(PrefabInfo { name: display_name, path: rel });
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn list_prefabs(project_path: String) -> Result<Vec<PrefabInfo>, String> {
+    let prefabs_dir = std::path::Path::new(&project_path).join("prefabs");
+    let mut out = Vec::new();
+    if prefabs_dir.exists() {
+        collect_prefabs_recursive(&prefabs_dir, "prefabs", &mut out);
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// Recursively builds a PrefabNode JSON from an entity in the scene JSON.
+fn entity_to_prefab_node(entity_id: u64, scene: &serde_json::Value) -> serde_json::Value {
+    let entities = &scene["entities"];
+    let entity = &entities[entity_id.to_string()];
+    let name = entity["name"].as_str().unwrap_or("Entity");
+    let components = entity["components"].clone();
+    let children_ids: Vec<u64> = entity["children"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
+        .unwrap_or_default();
+    let children: Vec<serde_json::Value> = children_ids
+        .iter()
+        .map(|&cid| entity_to_prefab_node(cid, scene))
+        .collect();
+    serde_json::json!({ "name": name, "components": components, "children": children })
+}
+
+/// Recursively instantiates a PrefabNode into the scene, returning the root entity ID.
+/// `next_id` is updated in-place.
+fn instantiate_prefab_node(
+    node: &serde_json::Value,
+    parent_id: Option<u64>,
+    scene: &mut serde_json::Value,
+    prefab_rel_path: &str,
+) -> u64 {
+    let next_id = scene["next_id"].as_u64().unwrap_or(1);
+    scene["next_id"] = serde_json::json!(next_id + 1);
+
+    let entity = serde_json::json!({
+        "id": next_id,
+        "name": node["name"],
+        "parent": parent_id,
+        "children": [],
+        "components": node["components"],
+        "active": true,
+        "staged": false,
+        "prefab_source": prefab_rel_path,
+    });
+    scene["entities"][next_id.to_string()] = entity;
+
+    // Register as child of parent
+    if let Some(pid) = parent_id {
+        if let Some(parent_children) = scene["entities"][pid.to_string()]["children"].as_array_mut() {
+            let mut arr = parent_children.clone();
+            arr.push(serde_json::json!(next_id));
+            scene["entities"][pid.to_string()]["children"] = serde_json::json!(arr);
+        }
+    }
+
+    // Recursively instantiate children
+    let children = node["children"].as_array().cloned().unwrap_or_default();
+    for child in &children {
+        instantiate_prefab_node(child, Some(next_id), scene, prefab_rel_path);
+    }
+
+    next_id
+}
+
+#[tauri::command]
+pub async fn save_as_prefab(
+    project_path: String,
+    entity_id: u64,
+    prefab_name: String,
+) -> Result<String, String> {
+    // Ensure name has no path sep characters
+    let safe_name = prefab_name.replace(['/', '\\', '.'], "_");
+    let prefabs_dir = std::path::Path::new(&project_path).join("prefabs");
+    std::fs::create_dir_all(&prefabs_dir).map_err(|e| e.to_string())?;
+    let file_path = prefabs_dir.join(format!("{}.prefab", safe_name));
+    let relative_path = format!("prefabs/{}.prefab", safe_name);
+
+    // GET current scene from engine
+    let scene: serde_json::Value = reqwest::get(engine_url("/scene"))
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let node = entity_to_prefab_node(entity_id, &scene);
+    let json = serde_json::to_string_pretty(&node).map_err(|e| e.to_string())?;
+    std::fs::write(&file_path, &json).map_err(|e| e.to_string())?;
+
+    // Tag entity with prefab_source
+    let client = reqwest::Client::new();
+    client
+        .patch(engine_url(&format!("/scene/entity/{}/prefab_source", entity_id)))
+        .json(&serde_json::json!({ "path": relative_path }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(relative_path)
+}
+
+#[tauri::command]
+pub async fn instantiate_prefab(
+    project_path: String,
+    prefab_path: String,
+) -> Result<u64, String> {
+    let full = std::path::Path::new(&project_path).join(&prefab_path);
+    let text = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
+    let node: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+
+    // GET current scene
+    let client = reqwest::Client::new();
+    let mut scene: serde_json::Value = client
+        .get(engine_url("/scene"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let entity_id = instantiate_prefab_node(&node, None, &mut scene, &prefab_path);
+
+    // PUT the modified scene back
+    client
+        .put(engine_url("/scene"))
+        .json(&scene)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(entity_id)
+}
+
+#[tauri::command]
+pub async fn update_prefab(entity_id: u64) -> Result<(), String> {
+    let scene: serde_json::Value = reqwest::get(engine_url("/scene"))
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let entity = &scene["entities"][entity_id.to_string()];
+    let prefab_source = entity["prefab_source"]
+        .as_str()
+        .ok_or("entity has no prefab_source")?
+        .to_string();
+
+    // Resolve against project root — derive from the engine's active scene path.
+    let scene_path: String = reqwest::get(engine_url("/scene/path"))
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<String>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // project root = parent of "scenes" dir
+    let project_root = std::path::Path::new(&scene_path)
+        .parent() // scenes/
+        .and_then(|p| p.parent()) // project root
+        .ok_or("could not resolve project root")?;
+
+    let full = project_root.join(&prefab_source);
+    let node = entity_to_prefab_node(entity_id, &scene);
+    let json = serde_json::to_string_pretty(&node).map_err(|e| e.to_string())?;
+    std::fs::write(&full, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn sync_from_prefab(project_path: String, entity_id: u64) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let mut scene: serde_json::Value = client
+        .get(engine_url("/scene"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let prefab_source = scene["entities"][entity_id.to_string()]["prefab_source"]
+        .as_str()
+        .ok_or("entity has no prefab_source")?
+        .to_string();
+
+    let full = std::path::Path::new(&project_path).join(&prefab_source);
+    let text = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
+    let node: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+
+    // Preserve the entity's Transform component, replace everything else
+    let existing_components = scene["entities"][entity_id.to_string()]["components"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let transform = existing_components
+        .iter()
+        .find(|c| c["type"].as_str() == Some("Transform"))
+        .cloned();
+
+    let mut new_components: Vec<serde_json::Value> = node["components"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c["type"].as_str() != Some("Transform"))
+        .collect();
+
+    if let Some(t) = transform {
+        new_components.insert(0, t);
+    }
+
+    scene["entities"][entity_id.to_string()]["components"] = serde_json::json!(new_components);
+    scene["entities"][entity_id.to_string()]["name"] = node["name"].clone();
+
+    client
+        .put(engine_url("/scene"))
+        .json(&scene)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unlink_from_prefab(entity_id: u64) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    client
+        .patch(engine_url(&format!("/scene/entity/{}/prefab_source", entity_id)))
+        .json(&serde_json::json!({ "path": null }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

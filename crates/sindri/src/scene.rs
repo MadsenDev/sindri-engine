@@ -41,6 +41,7 @@ impl Scene {
                 components: vec![],
                 active: true,
                 staged,
+                prefab_source: None,
             },
         );
         id

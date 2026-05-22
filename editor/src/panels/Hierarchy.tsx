@@ -11,6 +11,7 @@ interface Props {
   onSelectComponent: (entityId: number, componentIdx: number) => void;
   onSceneChange: () => void;
   onDeleteEntity: (id: number) => Promise<void>;
+  projectPath?: string | null;
 }
 
 const COMPONENT_TYPES = ["Transform", "Sprite", "AnimatedSprite", "Tilemap", "PhysicsBody", "Collider", "Script", "Camera", "AudioSource"];
@@ -101,10 +102,31 @@ const CREATE_PRESETS: CreatePreset[] = [
   },
 ];
 
-export default function Hierarchy({ scene, selectedId, selectedComponent, onSelect, onSelectComponent, onSceneChange, onDeleteEntity }: Props) {
+export default function Hierarchy({ scene, selectedId, selectedComponent, onSelect, onSelectComponent, onSceneChange, onDeleteEntity, projectPath }: Props) {
   const entities = scene ? scene.entities : {};
   const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [savingPrefabForId, setSavingPrefabForId] = useState<number | null>(null);
+  const [prefabName, setPrefabName] = useState("");
+  const prefabInputRef = useRef<HTMLInputElement>(null);
   const { show } = useContextMenu();
+
+  useEffect(() => {
+    if (savingPrefabForId !== null) {
+      setTimeout(() => prefabInputRef.current?.focus(), 0);
+    }
+  }, [savingPrefabForId]);
+
+  const handleSaveAsPrefab = async (name: string) => {
+    if (!savingPrefabForId || !name.trim() || !projectPath) return;
+    try {
+      await invoke("save_as_prefab", { projectPath, entityId: savingPrefabForId, prefabName: name.trim() });
+      onSceneChange();
+    } catch (e) {
+      console.error("save_as_prefab failed:", e);
+    }
+    setSavingPrefabForId(null);
+    setPrefabName("");
+  };
 
   const roots = Object.values(entities)
     .filter(e => e.parent === null)
@@ -202,6 +224,8 @@ export default function Hierarchy({ scene, selectedId, selectedComponent, onSele
       },
       { label: "Create Child", icon: "◻", children: createMenuItems(entity.id) },
       { divider: true as const },
+      { label: "Save as Prefab…", icon: "◆", disabled: !projectPath, onClick: () => { onSelect(entity.id); const suggested = entity.name.replace(/\s+/g, "_").toLowerCase(); setPrefabName(suggested); setSavingPrefabForId(entity.id); } },
+      { divider: true as const },
       { label: "Rename", icon: "✎", onClick: () => { onSelect(entity.id); setRenamingId(entity.id); } },
       { label: "Delete", icon: "×", danger: true, onClick: () => onDeleteEntity(entity.id) },
     ]);
@@ -224,6 +248,57 @@ export default function Hierarchy({ scene, selectedId, selectedComponent, onSele
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", minHeight: 0 }}>
+      {/* Save as Prefab modal */}
+      {savingPrefabForId !== null && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.55)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+          onClick={() => setSavingPrefabForId(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "var(--paper-2)", border: "1px solid var(--rule)",
+              padding: "24px 28px", minWidth: "300px",
+              fontFamily: "var(--font-ui)",
+            }}
+          >
+            <div style={{ fontSize: "13px", color: "var(--ink)", marginBottom: "14px" }}>Save as Prefab</div>
+            <input
+              ref={prefabInputRef}
+              value={prefabName}
+              onChange={e => setPrefabName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter") handleSaveAsPrefab(prefabName);
+                if (e.key === "Escape") setSavingPrefabForId(null);
+              }}
+              placeholder="prefab_name"
+              style={{
+                width: "100%", height: "28px", padding: "0 8px",
+                background: "var(--paper-3)", border: "1px solid var(--amber)",
+                color: "var(--ink)", fontFamily: "var(--font-mono)",
+                fontSize: "12px", outline: "none", boxSizing: "border-box",
+              }}
+            />
+            <div style={{ fontSize: "11px", color: "var(--ink-4)", marginTop: "6px" }}>
+              Saved to <code>prefabs/{prefabName || "…"}.prefab</code>
+            </div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
+              <button onClick={() => setSavingPrefabForId(null)} style={modalBtnStyle}>Cancel</button>
+              <button
+                onClick={() => handleSaveAsPrefab(prefabName)}
+                disabled={!prefabName.trim()}
+                style={{ ...modalBtnStyle, background: "var(--amber)", color: "var(--paper-2)", border: "none" }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scene section header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -393,8 +468,15 @@ function EntityTreeItem({
             color: "var(--ink)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             marginLeft: "6px",
+            display: "flex", alignItems: "center", gap: "5px",
           }}>
             {entity.name}
+            {entity.prefab_source && (
+              <span
+                title={entity.prefab_source}
+                style={{ fontSize: "8px", color: "var(--amber)", flexShrink: 0, lineHeight: 1 }}
+              >◆</span>
+            )}
           </span>
         )}
 
@@ -518,6 +600,12 @@ function ComponentTreeItem({ component, componentIdx, entity, isSelected, onSele
     </div>
   );
 }
+
+const modalBtnStyle: React.CSSProperties = {
+  padding: "5px 14px", fontSize: "12px",
+  background: "var(--paper-3)", border: "1px solid var(--rule)",
+  color: "var(--ink)", cursor: "pointer", fontFamily: "var(--font-ui)",
+};
 
 // ─── Shared connector lines ───────────────────────────────────────────────────
 

@@ -434,6 +434,24 @@ pub async fn get_entity(State(state): State<AppState>, Path(id): Path<u64>) -> i
 }
 
 #[derive(Deserialize)]
+pub struct PrefabSourcePatch {
+    pub path: Option<String>,
+}
+
+// PATCH /scene/entity/:id/prefab_source
+pub async fn set_entity_prefab_source(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(body): Json<PrefabSourcePatch>,
+) -> impl IntoResponse {
+    let mut scene = state.scene.write().await;
+    match scene.entities.get_mut(&id) {
+        Some(entity) => { entity.prefab_source = body.path; StatusCode::OK.into_response() }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
 pub struct TransformPatch {
     pub x: Option<f32>,
     pub y: Option<f32>,

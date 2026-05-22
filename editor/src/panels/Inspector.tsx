@@ -169,6 +169,16 @@ export default function Inspector({ entity, selectedComponent, onSelectComponent
         </div>
       </div>
 
+      {/* Prefab source banner */}
+      {entity.prefab_source && (
+        <PrefabBanner
+          entityId={entity.id}
+          prefabSource={entity.prefab_source}
+          projectPath={projectPath}
+          onSceneChange={onSceneChange}
+        />
+      )}
+
       {/* Scrollable body */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {comp !== null && selectedComponent !== null ? (
@@ -823,7 +833,7 @@ function AudioFields({ comp, entityId, componentIdx, onSceneChange }: {
 
 // ─── Tilemap ──────────────────────────────────────────────────────────────────
 
-function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles }: {
+function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles, projectPath }: {
   comp: Extract<Component, { type: "Tilemap" }>;
   entityId: number; componentIdx: number; onSceneChange: () => void;
   projectFiles: ProjectFile[];
@@ -930,6 +940,8 @@ function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFil
           entityId={entityId}
           componentIdx={componentIdx}
           onClose={() => { setPainterOpen(false); onSceneChange(); }}
+          projectPath={projectPath}
+          onSceneChange={onSceneChange}
         />
       )}
     </>
@@ -1229,3 +1241,85 @@ function inputStyle(focused: boolean): CSSProperties {
     outline: "none",
   };
 }
+
+// ─── Prefab banner ────────────────────────────────────────────────────────────
+
+function PrefabBanner({ entityId, prefabSource, projectPath, onSceneChange }: {
+  entityId: number;
+  prefabSource: string;
+  projectPath?: string | null;
+  onSceneChange: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const prefabName = prefabSource.split("/").pop()?.replace(/\.prefab$/, "") ?? prefabSource;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try { await fn(); onSceneChange(); }
+    catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{
+      borderBottom: "1px solid var(--rule)",
+      padding: "10px 22px",
+      background: "rgba(180,140,60,0.07)",
+      flexShrink: 0,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+        <span style={{ fontSize: "11px", color: "var(--amber)" }}>◆</span>
+        <span style={{ fontSize: "12px", color: "var(--ink-3)", fontFamily: "var(--font-ui)" }}>Prefab instance</span>
+        <span style={{
+          flex: 1, fontSize: "11px", color: "var(--ink)",
+          fontFamily: "var(--font-mono)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>{prefabName}</span>
+      </div>
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        <button
+          disabled={busy}
+          onClick={() => run(() => invoke("update_prefab", { entityId }))}
+          style={prefabBtnStyle}
+          title="Save current state of this entity back to the prefab file"
+        >
+          ↑ Update Prefab
+        </button>
+        <button
+          disabled={busy || !projectPath}
+          onClick={() => run(() => invoke("sync_from_prefab", { projectPath, entityId }))}
+          style={prefabBtnStyle}
+          title="Replace components from the prefab file (Transform is preserved)"
+        >
+          ↓ Sync from Prefab
+        </button>
+        <button
+          disabled={busy}
+          onClick={() => run(() => invoke("unlink_from_prefab", { entityId }))}
+          style={{ ...prefabBtnStyle, color: "var(--ink-4)" }}
+          title="Remove the prefab link — entity becomes independent"
+        >
+          ⊘ Unlink
+        </button>
+      </div>
+      {error && (
+        <div style={{ marginTop: "6px", fontSize: "11px", color: "#e06c75", fontFamily: "var(--font-mono)" }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const prefabBtnStyle: CSSProperties = {
+  fontSize: "11px",
+  padding: "3px 8px",
+  background: "var(--paper-3)",
+  border: "1px solid var(--rule-2)",
+  color: "var(--ink)",
+  cursor: "pointer",
+  fontFamily: "var(--font-ui)",
+};

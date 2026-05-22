@@ -64,6 +64,7 @@ export interface Entity {
   active: boolean;
   staged: boolean;
   components: Component[];
+  prefab_source?: string;
 }
 
 export interface AnimClip {
@@ -655,6 +656,7 @@ export default function App() {
                   if (selectedId === id) { setSelectedId(null); setSelectedComponent(null); }
                   handleSceneChange();
                 }}
+                projectPath={projectPath}
               />
             )}
             {leftTab === "files" && (
@@ -663,6 +665,7 @@ export default function App() {
                 onOpenScript={handleOpenScript}
                 onOpenScene={handleOpenScene}
                 onFilesChange={setProjectFiles}
+                onSceneChange={handleSceneChange}
               />
             )}
             {leftTab === "history" && (

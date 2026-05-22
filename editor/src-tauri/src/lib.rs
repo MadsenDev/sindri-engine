@@ -59,6 +59,12 @@ pub fn run() {
             commands::save_project_settings,
             commands::get_editor_prefs,
             commands::save_editor_prefs,
+            commands::list_prefabs,
+            commands::save_as_prefab,
+            commands::instantiate_prefab,
+            commands::update_prefab,
+            commands::sync_from_prefab,
+            commands::unlink_from_prefab,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

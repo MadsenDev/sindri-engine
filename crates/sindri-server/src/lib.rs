@@ -34,6 +34,10 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
             "/scene/entity/:id",
             get(routes::get_entity).delete(routes::delete_entity),
         )
+        .route(
+            "/scene/entity/:id/prefab_source",
+            axum::routing::patch(routes::set_entity_prefab_source),
+        )
         .route("/scene/entity/:id/name", patch(routes::rename_entity))
         .route(
             "/scene/entity/:id/transform",

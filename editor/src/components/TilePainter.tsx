@@ -41,9 +41,13 @@ interface Props {
   entityId: number;
   componentIdx: number;
   onClose: () => void;
+  projectPath?: string | null;
+  onSceneChange?: () => void;
 }
 
-type PaintMode = "draw" | "erase" | "collision";
+interface PrefabInfo { name: string; path: string; }
+
+type PaintMode = "draw" | "erase" | "collision" | "stamp";
 
 function resolveTextureUrl(path: string): string {
   if (!path || path.startsWith("http") || path.startsWith("data:")) return path;
@@ -77,7 +81,7 @@ function drawTileOnCanvas(
   ctx.drawImage(img, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
 }
 
-export default function TilePainter({ comp, entityId, componentIdx, onClose }: Props) {
+export default function TilePainter({ comp, entityId, componentIdx, onClose, projectPath, onSceneChange }: Props) {
   const initLayers = () =>
     comp.layers.length > 0
       ? comp.layers.map(l => ({ ...l, tiles: [...l.tiles] }))
@@ -106,6 +110,8 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
   const pendingLayersRef = useRef<TileLayer[] | null>(null);
   const pendingPalettesRef = useRef<TilePalette[] | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [prefabs, setPrefabs] = useState<PrefabInfo[]>([]);
+  const [selectedPrefabPath, setSelectedPrefabPath] = useState<string | null>(null);
 
   useEffect(() => {
     const container = canvasContainerRef.current;
@@ -140,6 +146,11 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
   }, []);
+
+  useEffect(() => {
+    if (paintMode !== "stamp" || !projectPath) return;
+    invoke<PrefabInfo[]>("list_prefabs", { projectPath }).then(setPrefabs).catch(() => {});
+  }, [paintMode, projectPath]);
 
   const flush = useCallback(async (newLayers: TileLayer[] | null, newPalettes: TilePalette[] | null) => {
     const data: Record<string, unknown> = {};
@@ -317,12 +328,27 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
 
   const handleCanvasPointerUp = useCallback(() => { isPainting.current = false; panStartRef.current = null; }, []);
 
+  const handleStampClick = useCallback(async (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!selectedPrefabPath || !projectPath) return;
+    const tile = canvasToTile(e.clientX, e.clientY);
+    if (!tile) return;
+    // World position = tile center relative to tilemap entity origin (0,0)
+    const wx = (tile.col + 0.5) * comp.tile_width;
+    const wy = (tile.row + 0.5) * comp.tile_height;
+    try {
+      const newId = await invoke<number>("instantiate_prefab", { projectPath, prefabPath: selectedPrefabPath });
+      await invoke("patch_transform", { entityId: newId, x: wx, y: wy, scaleX: 1, scaleY: 1, rotation: 0 });
+      onSceneChange?.();
+    } catch (e) { console.error("stamp prefab failed:", e); }
+  }, [selectedPrefabPath, projectPath, canvasToTile, comp.tile_width, comp.tile_height, onSceneChange]);
+
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (paintMode === "stamp") { handleStampClick(e); return; }
     if (e.shiftKey && paintMode !== "collision") {
       const tile = canvasToTile(e.clientX, e.clientY);
       if (tile) floodFill(tile.idx);
     }
-  }, [paintMode, canvasToTile, floodFill]);
+  }, [paintMode, canvasToTile, floodFill, handleStampClick]);
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -401,7 +427,7 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
   const TILESET_CELL = Math.max(18, Math.min(48, Math.floor(240 / tsC)));
 
   const modeBtn = (mode: PaintMode): React.CSSProperties => ({
-    background: paintMode === mode ? (mode === "collision" ? "rgba(220,50,50,0.8)" : "var(--amber)") : "none",
+    background: paintMode === mode ? (mode === "collision" ? "rgba(220,50,50,0.8)" : mode === "stamp" ? "rgba(180,140,60,0.8)" : "var(--amber)") : "none",
     border: `1px solid ${paintMode === mode ? "transparent" : "var(--rule-2)"}`,
     color: paintMode === mode ? "var(--paper)" : "var(--ink-3)",
     fontFamily: "var(--font-mono)", fontSize: "10px", padding: "3px 8px", cursor: "pointer",
@@ -422,6 +448,7 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
             <button onClick={() => setPaintMode("draw")} style={modeBtn("draw")}>Draw</button>
             <button onClick={() => setPaintMode("erase")} style={modeBtn("erase")}>Erase</button>
             <button onClick={() => setPaintMode("collision")} style={modeBtn("collision")}>Collision</button>
+            {projectPath && <button onClick={() => setPaintMode("stamp")} style={modeBtn("stamp")}>Stamp</button>}
             <div style={{ width: 1, height: 16, background: "var(--rule-2)", margin: "0 2px" }} />
             <button onClick={() => {
               const tileCount = comp.map_cols * comp.map_rows;
@@ -458,8 +485,39 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
           {/* Left panel: palette + layers */}
           <div style={{ width: "240px", flexShrink: 0, borderRight: "1px solid var(--rule)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
+            {/* Stamp mode — prefab list */}
+            {paintMode === "stamp" && (
+              <>
+                <div style={{ padding: "5px 10px", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>Prefabs · click map to stamp</span>
+                </div>
+                <div style={{ overflow: "auto", flex: 1, padding: "4px 0" }}>
+                  {prefabs.length === 0 ? (
+                    <div style={{ padding: "10px", color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "10px" }}>
+                      No prefabs found in prefabs/
+                    </div>
+                  ) : (
+                    prefabs.map(p => (
+                      <div
+                        key={p.path}
+                        onClick={() => setSelectedPrefabPath(prev => prev === p.path ? null : p.path)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "7px",
+                          padding: "5px 10px", cursor: "pointer",
+                          background: selectedPrefabPath === p.path ? "var(--amber)" : "none",
+                        }}
+                      >
+                        <span style={{ fontSize: "9px", color: selectedPrefabPath === p.path ? "var(--paper)" : "var(--amber)" }}>◆</span>
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: selectedPrefabPath === p.path ? "var(--paper)" : "var(--ink)" }}>{p.name}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+
             {/* Palette tabs */}
-            {palettes.length > 1 && (
+            {paintMode !== "stamp" && palettes.length > 1 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "2px", padding: "5px 8px", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
                 {palettes.map((p, i) => (
                   <button key={i} onClick={() => { setSelectedPaletteIdx(i); setSelectedTileIdx(0); }} style={{
@@ -473,14 +531,16 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
             )}
 
             {/* Tileset label */}
+            {paintMode !== "stamp" && (
             <div style={{ padding: "5px 10px", borderBottom: "1px solid var(--rule)", flexShrink: 0 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--ink-4)" }}>
                 {selectedPalette ? `${selectedPalette.name || "Palette"} · ${tsC}×${tsR}${paintMode === "collision" ? " · click=solid" : ""}` : "No palettes — add in Inspector"}
               </span>
             </div>
+            )}
 
             {/* Tileset grid */}
-            <div style={{ overflow: "auto", flex: 1, padding: "6px" }}>
+            {paintMode !== "stamp" && <div style={{ overflow: "auto", flex: 1, padding: "6px" }}>
               {selectedPalette && selectedImg ? (
                 <div style={{ display: "grid", gridTemplateColumns: `repeat(${tsC}, ${TILESET_CELL}px)`, gap: 0, width: `${tsC * TILESET_CELL}px` }}>
                   {Array.from({ length: tsC * tsR }, (_, i) => {
@@ -515,7 +575,7 @@ export default function TilePainter({ comp, entityId, componentIdx, onClose }: P
                   {palettes.length === 0 ? "Add a palette in Inspector" : "Loading…"}
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Layer list */}
             <div style={{ borderTop: "1px solid var(--rule)", flexShrink: 0, maxHeight: "220px", display: "flex", flexDirection: "column" }}>
