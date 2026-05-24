@@ -285,6 +285,7 @@ fn file_kind_from_ext(ext: &str) -> &'static str {
         "sindri" => "scene",
         "animclips" => "animclips",
         "prefab" => "prefab",
+        "tilepallet" => "tilepallet",
         "png" | "jpg" | "jpeg" | "webp" | "bmp" => "image",
         "ogg" | "wav" | "mp3" | "flac" => "audio",
         _ => "other",
@@ -549,6 +550,59 @@ pub async fn write_anim_file(
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_tile_palette(
+    project_path: String,
+    image_relative_path: String,
+    name: String,
+    tileset_cols: u32,
+    tileset_rows: u32,
+    tile_width: u32,
+    tile_height: u32,
+    margin: u32,
+    spacing: u32,
+) -> Result<String, String> {
+    let stem = std::path::Path::new(&image_relative_path)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let dir = std::path::Path::new(&image_relative_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let rel = if dir.is_empty() {
+        format!("{}.tilepallet", stem)
+    } else {
+        format!("{}/{}.tilepallet", dir, stem)
+    };
+    let full = std::path::Path::new(&project_path).join(&rel);
+    let json = serde_json::json!({
+        "name": name,
+        "texture_path": image_relative_path,
+        "tileset_cols": tileset_cols,
+        "tileset_rows": tileset_rows,
+        "tile_width": tile_width,
+        "tile_height": tile_height,
+        "margin": margin,
+        "spacing": spacing,
+        "solid_tiles": []
+    });
+    std::fs::write(&full, serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(rel)
+}
+
+#[tauri::command]
+pub async fn read_tile_palette(
+    project_path: String,
+    relative_path: String,
+) -> Result<serde_json::Value, String> {
+    let full = std::path::Path::new(&project_path).join(&relative_path);
+    let content = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

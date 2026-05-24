@@ -24,6 +24,7 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
   const [pickingPaletteTex, setPickingPaletteTex] = useState<number | null>(null);
+  const [pickingPaletteFile, setPickingPaletteFile] = useState(false);
   const [paletteImages, setPaletteImages] = useState<Map<string, HTMLImageElement>>(new Map());
   const [prefabs, setPrefabs] = useState<PrefabInfo[]>([]);
   const [editingLayerName, setEditingLayerName] = useState<number | null>(null);
@@ -50,6 +51,27 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
   const addPalette = () => {
     const newPalette = { name: `Palette ${comp.palettes.length + 1}`, texture_path: "", tileset_cols: 4, tileset_rows: 4, margin: 0, spacing: 0, solid_tiles: [] };
     patch({ palettes: [...comp.palettes, newPalette] });
+  };
+
+  const loadPaletteFromFile = async (relativePath: string) => {
+    if (!projectPath) return;
+    try {
+      const data = await invoke<{ name: string; texture_path: string; tileset_cols: number; tileset_rows: number; margin?: number; spacing?: number; solid_tiles?: number[] }>(
+        "read_tile_palette", { projectPath, relativePath }
+      );
+      const newPalette = {
+        name: data.name || relativePath.split("/").pop()?.replace(/\.tilepallet$/, "") || "palette",
+        texture_path: data.texture_path || "",
+        tileset_cols: data.tileset_cols || 4,
+        tileset_rows: data.tileset_rows || 4,
+        margin: data.margin ?? 0,
+        spacing: data.spacing ?? 0,
+        solid_tiles: data.solid_tiles ?? [],
+      };
+      patch({ palettes: [...comp.palettes, newPalette] });
+    } catch (e) {
+      console.error("read_tile_palette failed:", e);
+    }
   };
 
   const removePalette = (i: number) => {
@@ -129,6 +151,11 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
         <FilePicker title="Pick tileset texture" kinds={["image"]} files={projectFiles}
           onSelect={p => { patchPalette(pickingPaletteTex!, { texture_path: p }); setPickingPaletteTex(null); }}
           onClose={() => setPickingPaletteTex(null)} />
+      )}
+      {pickingPaletteFile && (
+        <FilePicker title="Load .tilepallet" kinds={["tilepallet"]} files={projectFiles}
+          onSelect={p => { loadPaletteFromFile(p); setPickingPaletteFile(false); }}
+          onClose={() => setPickingPaletteFile(false)} />
       )}
 
       <NumberInputField label="tile w" value={comp.tile_width} onCommit={v => patch({ tile_width: v })} />
@@ -303,7 +330,10 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
         </button>
         {palettesOpen && (
           <div style={{ padding: "0 12px 8px" }}>
-            <button onClick={addPalette} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer", marginBottom: "6px" }}>+ Add palette</button>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+              <button onClick={addPalette} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>+ Add palette</button>
+              <button onClick={() => setPickingPaletteFile(true)} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>◧ Load .tilepallet</button>
+            </div>
             {comp.palettes.map((p, i) => (
               <div key={i} style={{ marginBottom: "8px", padding: "6px 8px", border: "1px solid var(--rule)", background: "rgba(0,0,0,0.15)" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>

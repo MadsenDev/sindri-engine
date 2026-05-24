@@ -59,6 +59,8 @@ pub fn run() {
             commands::delete_project_file,
             commands::rename_project_file,
             commands::write_anim_file,
+            commands::create_tile_palette,
+            commands::read_tile_palette,
             commands::read_text_file,
             commands::read_project_file,
             commands::get_project_settings,
