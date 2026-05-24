@@ -40,14 +40,7 @@ fn default_scene() -> Scene {
     let camera = scene.spawn("Main Camera");
     scene.add_component(
         camera,
-        sindri::component::Component::Transform(sindri::component::Transform {
-            x: 0.0,
-            y: 0.0,
-            scale_x: 1.0,
-            scale_y: 1.0,
-            rotation: 0.0,
-            z_index: 0,
-        }),
+        sindri::component::Component::Transform(sindri::component::Transform::default()),
     );
     scene.add_component(
         camera,
@@ -454,12 +447,21 @@ fn draw_scene_contents(
                     None => (white_texture, 1.0, 1.0),
                 };
                 let uv_rect = spritesheet_uv(col, row, cols, rows, s.margin, s.spacing, tex_w, tex_h);
+                let pw = s.width * t.scale_x;
+                let ph = s.height * t.scale_y;
+                let pdx = (0.5 - t.pivot_x) * pw;
+                let pdy = (0.5 - t.pivot_y) * ph;
+                let (cos_r, sin_r) = (t.rotation.cos(), t.rotation.sin());
+                let draw_pos = Vec2::new(
+                    pos.x + pdx * cos_r - pdy * sin_r,
+                    pos.y + pdx * sin_r + pdy * cos_r,
+                );
                 let transform = Transform2D {
-                    position: pos,
+                    position: draw_pos,
                     rotation: t.rotation,
                     scale: Vec2::new(
-                        s.width * t.scale_x * (if flip_x { -1.0 } else { 1.0 }) / tex_w,
-                        s.height * t.scale_y * (if flip_y { -1.0 } else { 1.0 }) / tex_h,
+                        pw * (if flip_x { -1.0 } else { 1.0 }) / tex_w,
+                        ph * (if flip_y { -1.0 } else { 1.0 }) / tex_h,
                     ),
                 };
                 r.draw_texture_region(frame, tex, Some(uv_rect), &transform, s.tint, false, &camera)?;
@@ -472,10 +474,19 @@ fn draw_scene_contents(
                     Some((h, tw, th)) => (h, tw as f32, th as f32),
                     None => (white_texture, 1.0, 1.0),
                 };
+                let pw = s.width * t.scale_x;
+                let ph = s.height * t.scale_y;
+                let pdx = (0.5 - t.pivot_x) * pw;
+                let pdy = (0.5 - t.pivot_y) * ph;
+                let (cos_r, sin_r) = (t.rotation.cos(), t.rotation.sin());
+                let draw_pos = Vec2::new(
+                    pos.x + pdx * cos_r - pdy * sin_r,
+                    pos.y + pdx * sin_r + pdy * cos_r,
+                );
                 let transform = Transform2D {
-                    position: pos,
+                    position: draw_pos,
                     rotation: t.rotation,
-                    scale: Vec2::new(s.width * t.scale_x / tex_w, s.height * t.scale_y / tex_h),
+                    scale: Vec2::new(pw / tex_w, ph / tex_h),
                 };
                 r.draw_texture_region(frame, tex, None, &transform, s.color, false, &camera)?;
             }

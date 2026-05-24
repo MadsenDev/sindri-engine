@@ -25,7 +25,15 @@ pub struct Transform {
     /// Render depth. Lower values draw first (behind). Default 0.
     #[serde(default)]
     pub z_index: i32,
+    /// Normalized pivot (0–1). (0.5, 0.5) = center. Defines which point on the
+    /// sprite sits at the transform position. Affects rendering only.
+    #[serde(default = "default_pivot")]
+    pub pivot_x: f32,
+    #[serde(default = "default_pivot")]
+    pub pivot_y: f32,
 }
+
+fn default_pivot() -> f32 { 0.5 }
 
 impl Default for Transform {
     fn default() -> Self {
@@ -36,6 +44,8 @@ impl Default for Transform {
             scale_y: 1.0,
             rotation: 0.0,
             z_index: 0,
+            pivot_x: 0.5,
+            pivot_y: 0.5,
         }
     }
 }

@@ -95,7 +95,7 @@ export interface TileLayer {
 }
 
 export type Component =
-  | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number; z_index?: number }
+  | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number; z_index?: number; pivot_x?: number; pivot_y?: number }
   | { type: "Sprite"; texture_path: string; width: number; height: number; flip_x: boolean; flip_y: boolean; color: [number, number, number, number] }
   | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; flip_x: boolean; flip_y: boolean; tint: [number, number, number, number]; clips: AnimClip[]; default_clip: string; margin?: number; spacing?: number }
   | { type: "PhysicsBody"; body_type: "Dynamic" | "Kinematic" | "Fixed"; lock_rotation: boolean; linear_damping: number; angular_damping: number; collision_layer: number; collision_mask: number; gravity_scale: number }

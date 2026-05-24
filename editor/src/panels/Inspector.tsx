@@ -474,8 +474,8 @@ function TransformFields({ comp, entityId, onSceneChange }: {
   const patch = async (field: string, value: string) => {
     const num = parseFloat(value);
     if (isNaN(num)) return;
-    const map: Record<string, string> = { x: "x", y: "y", scale_x: "scaleX", scale_y: "scaleY", rotation: "rotation", z_index: "zIndex" };
-    const args: Record<string, unknown> = { entityId, x: null, y: null, scaleX: null, scaleY: null, rotation: null, zIndex: null };
+    const map: Record<string, string> = { x: "x", y: "y", scale_x: "scaleX", scale_y: "scaleY", rotation: "rotation", z_index: "zIndex", pivot_x: "pivotX", pivot_y: "pivotY" };
+    const args: Record<string, unknown> = { entityId, x: null, y: null, scaleX: null, scaleY: null, rotation: null, zIndex: null, pivotX: null, pivotY: null };
     args[map[field]] = field === "z_index" ? Math.round(num) : num;
     try { await invoke("patch_transform", args); onSceneChange(); } catch {}
   };
@@ -485,6 +485,7 @@ function TransformFields({ comp, entityId, onSceneChange }: {
     { label: "scale",    fields: [{ key: "scale_x", value: comp.scale_x }, { key: "scale_y", value: comp.scale_y }] },
     { label: "rotation", fields: [{ key: "rotation", value: comp.rotation }] },
     { label: "z index",  fields: [{ key: "z_index", value: comp.z_index ?? 0, decimals: 0 }] },
+    { label: "pivot",    fields: [{ key: "pivot_x", value: comp.pivot_x ?? 0.5, decimals: 2 }, { key: "pivot_y", value: comp.pivot_y ?? 0.5, decimals: 2 }] },
   ];
 
   return (
