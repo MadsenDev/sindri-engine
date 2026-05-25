@@ -31,9 +31,9 @@ format cannot preserve it, or the AI can generate invalid partial state.
 | Animation (AnimatedSprite) | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Active |
 | Particles | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |
 | Lighting | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Experimental |
-| Pathfinding/Grid | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
+| Pathfinding/Grid | Yes | Yes | Yes | Yes | Yes | Partial | Partial | Partial | Yes | Yes | Active |
 | HUD/UI Primitives | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
-| InputMap | Yes | Yes | No | No | Partial | No | No | Partial | Yes | No | Active |
+| InputMap | Yes | Yes | Yes | Yes | Yes | Partial | Partial | Partial | Yes | Yes | Active |
 | Built-in gameplay markers | Yes | Yes | No | No | Partial | No | No | No | Yes | No | Active |
 | Component metadata registry | Partial | Partial | No | N/A | Partial | No | No | No | Yes | Partial | Prototype |
 | Scene Graph / Hierarchy | Partial | Partial | Yes | Yes | Yes | Partial | Partial | Partial | Yes | Yes | Active |
@@ -49,18 +49,21 @@ format cannot preserve it, or the AI can generate invalid partial state.
 This matrix is grounded in the current repo state:
 
 - Engine coverage comes from crate exports and implementations in `crates/sindri/src`, including built-in components, renderer systems, physics, scripting, scene APIs, command history, grids/pathfinding, HUD, audio, and camera systems.
-- Editor/server scene JSON currently supports `Transform`, `Sprite`, `AnimatedSprite`, `Tilemap`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource` through `sindri::component::Component`.
-- Editor hierarchy can add/remove all nine scene JSON components, and the server patch route can update all of them. The inspector exposes editable fields for each of them, including a tile painter modal for Tilemap.
-- The viewport understands `Transform`, `Sprite`, and `Collider` for preview/selection. It does not visualize engine tilemaps, particles, lights, animation, audio, pathfinding, HUD, or gameplay marker components.
+- Editor/server scene JSON currently supports `Transform`, `Sprite`, `AnimatedSprite`, `Tilemap`, `NavGrid`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource` through `sindri::component::Component`.
+- Editor hierarchy can add/remove all scene JSON components, and the server patch route can update all of them. The inspector exposes editable fields for each, including a canvas tile painter for Tilemap and a walkability grid editor for NavGrid.
+- Tilemap is fully supported: multi-palette via `.tilepallet` files, canvas painter with pan/zoom/draw/erase/flood fill/collision toggle, per-layer editing.
+- NavGrid (pathfinding) is fully supported: editor shows walkability grid gizmos, Lua `self:nav_grid()` facet and `self:find_path()` shortcut are live, A* and platformer jump-arc graph modes supported.
+- InputMap is fully supported: `input_map.json` at project root, editor InputMapEditor panel for creating/editing actions and bindings (keyboard, key axis, gamepad button, gamepad axis), Lua `input.pressed/just_pressed/just_released/axis` globals, `gilrs` gamepad polling.
+- The viewport understands `Transform`, `Sprite`, `Collider`, and `Tilemap` for preview/selection. It does not visualize particles, lights, animation clips, audio, or HUD components.
 - The Scene view now supports basic direct manipulation for `Transform` through Move, Scale, and Rotate tools, including simple gizmo hints, Shift snapping, and transform undo/redo. It does not yet have full axis-handle hit testing, multi-select, or prefab-style editing.
 - Scene editing has an explicit save command and dirty indicator in the editor shell, alongside server autosave while playback is stopped.
 - Play mode currently uses a separate native `wgpu` preview window owned by `sindri-server`. The editor Game tab is a status surface, not an embedded render surface.
 - Playback has explicit play/pause/stop control. Stop restores the edit-scene snapshot captured when playback starts, and autosave is suppressed while playback is not stopped.
 - Screenshot capture remains supported for AI/diagnostics, but it is now on-demand rather than a continuously polled editor viewport transport.
-- The server Lua runtime exposes the editor-scene subset used by live preview scripts, including direct `self.x`/`self.y` fields plus `vec2`, `self:transform()`, `self:sprite()`, and `self:camera()` helpers. This is still narrower than the core engine `ScriptRuntime`.
-- Runtime and Lua errors are now buffered server-side and exposed to the editor and AI, but they are still plain text logs rather than structured diagnostics with entity/script/source locations.
+- The server Lua runtime (`crates/sindri-server/src/lua_runtime.rs`) exposes `self:transform()`, `self:sprite()`, `self:camera()`, `self:physics()`, `self:animated_sprite()`, `self:tilemap()`, `self:nav_grid()`, `self:world()`, and `self:input()` facets, plus action-based `input.pressed/just_pressed/just_released/axis` globals. This is a separate runtime from the engine's `ScriptRuntime`.
+- Runtime and Lua errors are buffered server-side and exposed to the editor and AI, but remain plain text logs rather than structured diagnostics with entity/script/source locations.
 - `register_builtin_metadata()` currently registers only `Transform`, so runtime reflection is not yet the source of truth for the editor's full component set.
-- Scene serialization is split: `crates/sindri/src/scene.rs` serializes the editor-facing JSON component enum, while `scene_physics.rs` captures physics snapshots and generic component payload helpers. Engine-only typed components such as `TilemapComponent`, `AnimatedSprite`, particle systems, lights, and gameplay markers are not represented in the editor scene enum today.
+- Scene serialization covers `Transform`, `Sprite`, `AnimatedSprite`, `Tilemap`, `NavGrid`, `PhysicsBody`, `Collider`, `Script`, `Camera`, and `AudioSource`. Particles, lights, and gameplay markers are not in the editor scene enum.
 - AI actions in the editor/Tauri layer can create/delete/rename entities, edit transforms, write/attach scripts, add/remove scene JSON components, and patch all seven scene JSON component variants. The standalone `sindri-ai` crate has a narrower action enum than the editor prompt/action executor.
 - AI script-edit requests now receive the current open Lua tab when script context is enabled, and `#scripts/foo.lua` mentions auto-load that referenced script into the request context for the current prompt.
 

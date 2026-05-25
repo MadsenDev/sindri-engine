@@ -42,11 +42,14 @@ All components are variants of this enum. Serialised with `"type"` discriminant.
 pub enum Component {
     Transform(Transform),
     Sprite(Sprite),
+    AnimatedSprite(AnimatedSprite),
     PhysicsBody(PhysicsBody),
     Collider(Collider),
     Script(Script),
     Camera(Camera),
     AudioSource(AudioSource),
+    Tilemap(Tilemap),
+    NavGrid(NavGrid),
 }
 ```
 
@@ -58,6 +61,9 @@ pub struct Transform {
     pub scale_x: f32,  // default 1.0
     pub scale_y: f32,  // default 1.0
     pub rotation: f32, // radians, 0.0 = no rotation
+    pub z_index: i32,  // draw order (higher = drawn on top), default 0
+    pub pivot_x: f32,  // 0..1, rotation/scale pivot, default 0.5 (center)
+    pub pivot_y: f32,  // 0..1, rotation/scale pivot, default 0.5 (center)
 }
 ```
 Every visible entity needs a Transform. Positive Y is down in screen space.
@@ -153,17 +159,33 @@ The editor talks to the running engine exclusively through these routes. All bod
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/health` | `{"status":"ok","model":"qwen2.5-vl:7b"}` |
+| GET | `/health` | `{"status":"ok"}` |
 | GET | `/scene` | Full scene JSON |
-| PUT | `/scene` | Replace entire scene |
+| PUT | `/scene` | Replace scene |
+| POST | `/scene/open` | Load `.sindri` file |
+| POST | `/scene/save` | Save current scene |
 | GET | `/scene/entity/:id` | Single entity |
-| PATCH | `/scene/entity/:id/transform` | Body: `{x?, y?, scale_x?, scale_y?, rotation?}` |
-| POST | `/scene/entity` | Body: `{name, parent_id?}` → `{id}` |
-| DELETE | `/scene/entity/:id` | Removes entity, orphans children |
-| GET | `/screenshot` | `{"image": "<base64 PNG>"}` |
-| GET | `/scripts` | Array of script file paths |
-| GET | `/script?path=…` | Script file contents as text |
-| PUT | `/script?path=…` | Body: `{content}` |
+| PATCH | `/scene/entity/:id/transform` | Patch transform fields |
+| POST | `/scene/entity` | Create entity → `{id}` |
+| DELETE | `/scene/entity/:id` | Remove entity |
+| PATCH | `/scene/entity/:id/name` | Rename entity |
+| POST | `/scene/entity/:id/component` | Add component |
+| DELETE | `/scene/entity/:id/component` | Remove component (by type) |
+| PATCH | `/scene/entity/:id/component/:idx` | Patch component by index |
+| DELETE | `/scene/entity/:id/component/:idx` | Remove component by index |
+| PATCH | `/scene/entity/:id/staged` | Mark entity as staged |
+| POST | `/scene/staged/commit` | Commit staged changes |
+| POST | `/scene/staged/revert` | Revert staged changes |
+| GET | `/screenshot` | `{"image":"<base64 PNG>"}` |
+| GET | `/stream` | WebSocket MJPEG stream |
+| POST | `/control` | `{"action":"play"\|"pause"\|"stop"}` |
+| POST | `/gizmos` | `{"enabled":bool}` |
+| GET | `/debug/paths` | Per-entity pathfinding debug paths |
+| POST | `/input/keys` | Send keyboard state from browser |
+| GET | `/scripts` | List `.lua` paths |
+| GET | `/script?path=…` | Script content |
+| PUT | `/script?path=…` | Write script |
+| GET | `/errors` | Runtime error log |
 
 Port is `127.0.0.1:7878` by default, overridable via `SINDRI_PORT` env var.
 
@@ -217,16 +239,49 @@ function on_update(self, dt)    end  -- called every frame; dt = delta time in s
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `self:entity()` | integer | This entity's numeric ID |
-| `self:input()` | InputFacet | Keyboard/mouse input |
-| `self:transform()` | TransformFacet \| nil | Position/rotation/scale (nil if no Transform component) |
-| `self:physics()` | PhysicsFacet \| nil | Physics body (nil if no PhysicsBody component) |
-| `self:sprite()` | SpriteFacet \| nil | Sprite tint/visibility (nil if no Sprite component) |
-| `self:camera()` | CameraFacet \| nil | Camera control (nil if no Camera component) |
-| `self:position()` | Vec2 | Shortcut — entity world position |
-| `self:set_position(vec2)` | — | Shortcut — set entity world position |
-| `self:apply_impulse(vec2)` | — | Shortcut — apply physics impulse |
+| `self:input()` | InputFacet | Per-entity raw keyboard input (legacy) |
+| `self:transform()` | TransformFacet \| nil | Position/rotation/scale |
+| `self:physics()` | PhysicsFacet \| nil | Physics body |
+| `self:sprite()` | SpriteFacet \| nil | Sprite tint/visibility |
+| `self:animated_sprite()` | AnimatedSpriteFacet \| nil | Clip control |
+| `self:camera()` | CameraFacet \| nil | Camera control |
+| `self:tilemap()` | TilemapFacet \| nil | Tile queries/mutations |
+| `self:nav_grid()` | NavGridFacet \| nil | Pathfinding |
+| `self:world()` | WorldFacet | Scene queries/spawn/despawn |
+| `self:find_path(target)` | array \| nil | Shortcut to nav_grid pathfinding |
 
-### InputFacet — `self:input()`
+### `input` global — action-based input (preferred)
+
+Reads named actions from `input_map.json` in the project root. Actions are defined in the editor's Input tab.
+
+```lua
+input.pressed("action_name")       -- bool: any binding held
+input.just_pressed("action_name")  -- bool: first frame only
+input.just_released("action_name") -- bool: frame it was released
+input.axis("action_name")          -- -1..1 from KeyAxis or GamepadAxis binding
+```
+
+**`input_map.json` format** (edit via the editor's Input tab):
+```json
+{
+  "actions": [
+    { "name": "jump", "bindings": [
+        { "type": "key", "key": " " },
+        { "type": "gamepad_button", "button": "South" }
+    ]},
+    { "name": "move", "bindings": [
+        { "type": "key_axis", "negative": "a", "positive": "d" },
+        { "type": "gamepad_axis", "axis": "LeftStickX", "deadzone": 0.2 }
+    ]}
+  ]
+}
+```
+
+Binding types: `key`, `key_axis`, `gamepad_button`, `gamepad_axis`.
+
+### Raw input — `self:input()` (legacy)
+
+For cases where named actions aren't needed:
 
 ```lua
 local input = self:input()
@@ -235,7 +290,7 @@ input:is_key_pressed("Space")    -- bool: true only on the frame key was first p
 input:axis("A", "D")             -- float -1..1: neg key = -1, pos key = +1, both/neither = 0
 ```
 
-**Key name strings:** Single letters `"A"`–`"Z"` (uppercase). Arrows: `"Left"`, `"Right"`, `"Up"`, `"Down"`. Special: `"Space"`, `"Enter"`, `"Escape"`, `"Shift"`, `"Control"`, `"Alt"`. Digits: `"0"`–`"9"`.
+Raw key name strings: Single letters `"a"`–`"z"`. Arrows: `"ArrowLeft"`, `"ArrowRight"`, `"ArrowUp"`, `"ArrowDown"`. Special: `" "` (space), `"Enter"`, `"Escape"`. Also available as globals: `key_down(key)`, `key_pressed(key)`.
 
 ### TransformFacet — `self:transform()`
 
@@ -279,6 +334,32 @@ local spr = self:sprite()
 if spr == nil then return end
 spr:set_tint({r, g, b, a})      -- RGBA floats 0..1
 spr:set_visible(bool)
+```
+
+### NavGridFacet — `self:nav_grid()`
+
+```lua
+local nav = self:nav_grid()
+if nav == nil then return end
+nav:find_path({x,y}, {x,y})      -- returns [{x,y},...] or nil
+nav:is_walkable(tx, ty)           -- bool
+nav:set_walkable(tx, ty, bool)    -- queued
+nav:world_to_tile({x,y})          -- {x, y} tile coord
+nav:tile_to_world(tx, ty)         -- {x, y} world coord
+nav:build_from_tilemap(entity_id, {blocked_ids...})
+nav:fill_all(bool)
+```
+
+Shortcut: `self:find_path(target)` — calls nav_grid pathfinding directly, returns `[{x,y},...]` or nil.
+
+### WorldFacet — `self:world()`
+
+```lua
+local w = self:world()
+w:find_entity("name")             -- entity id or nil
+w:entity_transform("name")        -- {x, y, rotation} or nil
+w:spawn(name, x, y)               -- queued
+w:despawn(entity_id)              -- queued
 ```
 
 ### Global `vec2`

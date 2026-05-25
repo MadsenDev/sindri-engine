@@ -12,9 +12,6 @@ Assumption: "fully functional editor" means a credible authoring tool for scenes
 
 | Feature | Engine has | Editor status |
 |---|---|---|
-| **Tilemap** | `render/tilemap.rs` — `Tilemap` struct with tile grid, tileset UVs, world↔tile coords | ❌ No component, no inspector, no painter, no scene serialization |
-| **InputMap** | `InputMap` with named actions + axis bindings, `AxisBinding`, `Button` | ❌ No editor UI to configure action bindings |
-| **Pathfinding/Grid** | `grid.rs`, `pathfinding.rs` | ❌ No visualization or config |
 | **HUD/UI** | `HudLayer`, `HudPanel`, `HudText`, `HudSprite`, full layout system | ❌ Nothing |
 
 ### Partially supported (gaps)
@@ -32,6 +29,9 @@ Assumption: "fully functional editor" means a credible authoring tool for scenes
 
 ### Completed
 - ✅ **AnimatedSprite** — component, inspector, clip editor modal, spritesheet slicer, Lua `animated_sprite()` facet, runtime animation
+- ✅ **Tilemap** — multi-palette `.tilepallet` system, canvas painter with pan/zoom/draw/erase/flood fill/collision, per-layer editing, Lua `self:tilemap()` facet, u32 tile encoding
+- ✅ **InputMap** — `input_map.json` project config, InputMapEditor panel (keyboard, key axis, gamepad button/axis bindings), Lua `input.pressed/just_pressed/just_released/axis` globals, `gilrs` controller polling
+- ✅ **Pathfinding/NavGrid** — `NavGrid` component in inspector, walkability grid gizmos, A* and platformer jump-arc modes, Lua `self:nav_grid()` facet and `self:find_path()` shortcut
 
 ---
 
@@ -128,11 +128,9 @@ Missing capabilities:
 - previews beyond textures
 - script asset creation and validation
 - support for more asset classes such as audio, fonts, and script templates
-- tilemap editor (the engine supports `TilemapComponent` and tile rendering, but tiles cannot be painted or edited in the editor)
-- animation editor (the engine has a full `Animation`/`AnimatedSprite` system, but no clip authoring or timeline exists)
+- animation timeline editor (AnimatedSprite clips exist but there is no full timeline/state-machine authoring UI)
 - particle emitter editor (the engine has `ParticleSystem`/`ParticleEmitter`, but no property editing in the editor)
 - light placement (the engine has `DirectionalLight` and `PointLight` but they cannot be placed or configured from the editor)
-- input map editing (the engine has `InputMap`/`ActionId`/`AxisBinding`, but there is no editor UI to define action bindings)
 
 Recommendation:
 

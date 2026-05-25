@@ -3,12 +3,71 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use sindri::component::{BodyType, Component};
+use sindri::component::{BodyType, Component, TilePhysicsShape};
 use sindri::math::Vec2;
 use sindri::physics::{ColliderShape, PhysicsWorld, RigidBodyType as PhysicsBodyType};
 use sindri::scene::Scene;
 use sindri::world::EntityId;
+use sindri_server::input_map_config::{BindingEntry, InputMapConfig, SharedControllerState};
 use sindri_server::routes::{SharedDebugPaths, SharedErrors};
+
+// ── Save storage ─────────────────────────────────────────────────────────────
+
+struct SaveStorage {
+    data: HashMap<String, serde_json::Value>,
+    path: PathBuf,
+}
+
+impl SaveStorage {
+    fn load(path: PathBuf) -> Self {
+        let data = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<HashMap<String, serde_json::Value>>(&s).ok())
+            .unwrap_or_default();
+        Self { data, path }
+    }
+
+    fn flush(&self) {
+        if let Ok(json) = serde_json::to_string_pretty(&self.data) {
+            let _ = std::fs::write(&self.path, json);
+        }
+    }
+}
+
+// ── Deferred scene commands ───────────────────────────────────────────────────
+
+enum SpawnRequest {
+    Blank { name: String, x: f32, y: f32 },
+    Prefab { path: String, x: f32, y: f32 },
+}
+
+// ── Prefab instantiation ──────────────────────────────────────────────────────
+
+use sindri::entity::PrefabNode;
+
+fn instantiate_prefab_node(node: &PrefabNode, parent: Option<u64>, scene: &mut Scene, prefab_rel: &str) -> u64 {
+    let id = scene.next_id;
+    scene.next_id += 1;
+    scene.entities.insert(id, sindri::entity::Entity {
+        id,
+        name: node.name.clone(),
+        parent,
+        children: vec![],
+        components: node.components.clone(),
+        active: true,
+        staged: false,
+        prefab_source: Some(prefab_rel.to_string()),
+    });
+    if let Some(pid) = parent {
+        if let Some(p) = scene.entities.get_mut(&pid) {
+            p.children.push(id);
+        }
+    }
+    for child in &node.children {
+        instantiate_prefab_node(child, Some(id), scene, prefab_rel);
+    }
+    id
+}
 
 enum CameraCommand {
     SetActive(bool),
@@ -318,6 +377,84 @@ pub struct AnimState {
     pub flip_y: bool,
 }
 
+// ── InputMap helper functions ────────────────────────────────────────────────
+
+use sindri_server::input_map_config::ControllerState;
+
+fn action_is_held(
+    map: &InputMapConfig,
+    name: &str,
+    held_keys: &HashSet<String>,
+    ctrl: &ControllerState,
+) -> bool {
+    let Some(action) = map.actions.iter().find(|a| a.name == name) else {
+        return false;
+    };
+    action.bindings.iter().any(|b| match b {
+        BindingEntry::Key { key } => held_keys.contains(key),
+        BindingEntry::KeyAxis { negative, positive } => {
+            held_keys.contains(negative) || held_keys.contains(positive)
+        }
+        BindingEntry::GamepadButton { button } => {
+            ctrl.buttons_held.get(button).copied().unwrap_or(false)
+        }
+        BindingEntry::GamepadAxis { axis, deadzone } => {
+            ctrl.axes.get(axis).map(|v| v.abs() > *deadzone).unwrap_or(false)
+        }
+    })
+}
+
+fn action_just_pressed(
+    map: &InputMapConfig,
+    name: &str,
+    pressed_keys: &HashSet<String>,
+    ctrl: &ControllerState,
+) -> bool {
+    let Some(action) = map.actions.iter().find(|a| a.name == name) else {
+        return false;
+    };
+    action.bindings.iter().any(|b| match b {
+        BindingEntry::Key { key } => pressed_keys.contains(key),
+        BindingEntry::KeyAxis { negative, positive } => {
+            pressed_keys.contains(negative) || pressed_keys.contains(positive)
+        }
+        BindingEntry::GamepadButton { button } => {
+            ctrl.buttons_pressed.get(button).copied().unwrap_or(false)
+        }
+        BindingEntry::GamepadAxis { .. } => false,
+    })
+}
+
+fn action_axis(
+    map: &InputMapConfig,
+    name: &str,
+    held_keys: &HashSet<String>,
+    ctrl: &ControllerState,
+) -> f64 {
+    let Some(action) = map.actions.iter().find(|a| a.name == name) else {
+        return 0.0;
+    };
+    let mut value = 0.0f64;
+    for b in &action.bindings {
+        match b {
+            BindingEntry::KeyAxis { negative, positive } => {
+                let neg = if held_keys.contains(negative) { -1.0 } else { 0.0 };
+                let pos = if held_keys.contains(positive) { 1.0 } else { 0.0 };
+                value += neg + pos;
+            }
+            BindingEntry::GamepadAxis { axis, deadzone } => {
+                if let Some(&v) = ctrl.axes.get(axis) {
+                    if v.abs() > *deadzone {
+                        value += v as f64;
+                    }
+                }
+            }
+            BindingEntry::Key { .. } | BindingEntry::GamepadButton { .. } => {}
+        }
+    }
+    value.clamp(-1.0, 1.0)
+}
+
 pub struct LuaRuntime {
     lua: Lua,
     envs: HashMap<(u64, String), mlua::RegistryKey>,
@@ -330,16 +467,34 @@ pub struct LuaRuntime {
     prev_keys: HashSet<String>,
     errors: SharedErrors,
     pub debug_paths: SharedDebugPaths,
+    // InputMap: action-name → bindings
+    input_map: Arc<InputMapConfig>,
+    controller: SharedControllerState,
+    // Tracks which actions were held last frame (for just_released)
+    action_prev_held: Arc<std::sync::Mutex<HashSet<String>>>,
     // Velocity cache for script access — keyed by entity id
     pub velocities: HashMap<u64, (f32, f32)>,
     // Animation state per entity
     pub anim_states: HashMap<u64, AnimState>,
     physics: PhysicsWorld,
     physics_initialized: bool,
+    // Deferred spawn/despawn/scene-load requests (queued by Lua, applied after entity loop)
+    pending_spawns: Arc<std::sync::Mutex<Vec<SpawnRequest>>>,
+    pending_despawns: Arc<std::sync::Mutex<Vec<u64>>>,
+    pub pending_scene_load: Arc<std::sync::Mutex<Option<String>>>,
+    // Save/load persistent game data
+    storage: Arc<std::sync::Mutex<SaveStorage>>,
+    project_dir: PathBuf,
 }
 
 impl LuaRuntime {
-    pub fn new(errors: SharedErrors, debug_paths: SharedDebugPaths) -> anyhow::Result<Self> {
+    pub fn new(
+        errors: SharedErrors,
+        debug_paths: SharedDebugPaths,
+        input_map: InputMapConfig,
+        controller: SharedControllerState,
+        project_dir: PathBuf,
+    ) -> anyhow::Result<Self> {
         let lua = Lua::new();
 
         let print_fn = lua.create_function(|_, args: mlua::MultiValue| {
@@ -389,6 +544,165 @@ impl LuaRuntime {
 
         let pressed_keys: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
 
+        // `input` global table: action-based input queries
+        let actions_arc: Arc<InputMapConfig> = Arc::new(input_map.clone());
+        let action_prev_held: Arc<std::sync::Mutex<HashSet<String>>> =
+            Arc::new(std::sync::Mutex::new(HashSet::new()));
+        {
+            let input_tbl = lua.create_table()?;
+
+            // input.pressed(action_name) — true while any binding is held
+            {
+                let keys_ref = keys.clone();
+                let ctrl_ref = controller.clone();
+                let map = actions_arc.clone();
+                input_tbl.set("pressed", lua.create_function(move |_, name: String| {
+                    let held = keys_ref.read().map(|k| k.clone()).unwrap_or_default();
+                    let ctrl = ctrl_ref.read().map(|c| c.clone()).unwrap_or_default();
+                    Ok(action_is_held(&map, &name, &held, &ctrl))
+                })?)?;
+            }
+
+            // input.just_pressed(action_name) — true only on the first frame a binding fires
+            {
+                let pressed_ref = pressed_keys.clone();
+                let ctrl_ref = controller.clone();
+                let map = actions_arc.clone();
+                input_tbl.set("just_pressed", lua.create_function(move |_, name: String| {
+                    let pressed = pressed_ref.read().map(|k| k.clone()).unwrap_or_default();
+                    let ctrl = ctrl_ref.read().map(|c| c.clone()).unwrap_or_default();
+                    Ok(action_just_pressed(&map, &name, &pressed, &ctrl))
+                })?)?;
+            }
+
+            // input.just_released(action_name) — true on the frame a binding is released
+            // prev_held is updated each frame in update_key_globals
+            {
+                let keys_ref = keys.clone();
+                let ctrl_ref = controller.clone();
+                let map = actions_arc.clone();
+                let prev = action_prev_held.clone();
+                input_tbl.set("just_released", lua.create_function(move |_, name: String| {
+                    let held = keys_ref.read().map(|k| k.clone()).unwrap_or_default();
+                    let ctrl = ctrl_ref.read().map(|c| c.clone()).unwrap_or_default();
+                    let was_held = prev.lock().map(|p| p.contains(&name)).unwrap_or(false);
+                    let is_held = action_is_held(&map, &name, &held, &ctrl);
+                    Ok(was_held && !is_held)
+                })?)?;
+            }
+
+            // input.axis(action_name) — returns -1..1 for KeyAxis or GamepadAxis bindings
+            {
+                let keys_ref = keys.clone();
+                let ctrl_ref = controller.clone();
+                let map = actions_arc.clone();
+                input_tbl.set("axis", lua.create_function(move |_, name: String| {
+                    let held = keys_ref.read().map(|k| k.clone()).unwrap_or_default();
+                    let ctrl = ctrl_ref.read().map(|c| c.clone()).unwrap_or_default();
+                    Ok(action_axis(&map, &name, &held, &ctrl))
+                })?)?;
+            }
+
+            lua.globals().set("input", input_tbl)?;
+        }
+
+        // ── load_scene(path) global ───────────────────────────────────────
+        let pending_scene_load: Arc<std::sync::Mutex<Option<String>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        {
+            let psl = pending_scene_load.clone();
+            lua.globals().set(
+                "load_scene",
+                lua.create_function(move |_, path: String| {
+                    if let Ok(mut p) = psl.lock() {
+                        *p = Some(path);
+                    }
+                    Ok(())
+                })?,
+            )?;
+        }
+
+        // ── storage global ────────────────────────────────────────────────
+        let storage_path = project_dir.join("save_data.json");
+        let storage: Arc<std::sync::Mutex<SaveStorage>> =
+            Arc::new(std::sync::Mutex::new(SaveStorage::load(storage_path)));
+        {
+            let st = storage.clone();
+            let storage_tbl = lua.create_table()?;
+
+            let st_set = st.clone();
+            storage_tbl.set(
+                "set",
+                lua.create_function(move |_, (key, value): (String, mlua::Value)| {
+                    let json_val = match value {
+                        mlua::Value::String(s) => serde_json::Value::String(s.to_str().unwrap_or("").to_string()),
+                        mlua::Value::Integer(n) => serde_json::Value::Number(serde_json::Number::from(n)),
+                        mlua::Value::Number(n) => serde_json::Number::from_f64(n)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                        mlua::Value::Boolean(b) => serde_json::Value::Bool(b),
+                        _ => return Ok(()),
+                    };
+                    if let Ok(mut s) = st_set.lock() {
+                        s.data.insert(key, json_val);
+                        s.flush();
+                    }
+                    Ok(())
+                })?,
+            )?;
+
+            let st_get = st.clone();
+            storage_tbl.set(
+                "get",
+                lua.create_function(move |lua, key: String| {
+                    let s = st_get.lock().ok();
+                    let val = s.and_then(|s| s.data.get(&key).cloned());
+                    match val {
+                        Some(serde_json::Value::String(s)) => Ok(mlua::Value::String(lua.create_string(s.as_bytes())?)),
+                        Some(serde_json::Value::Number(n)) => {
+                            if let Some(i) = n.as_i64() {
+                                Ok(mlua::Value::Integer(i))
+                            } else {
+                                Ok(mlua::Value::Number(n.as_f64().unwrap_or(0.0)))
+                            }
+                        }
+                        Some(serde_json::Value::Bool(b)) => Ok(mlua::Value::Boolean(b)),
+                        _ => Ok(mlua::Value::Nil),
+                    }
+                })?,
+            )?;
+
+            let st_del = st.clone();
+            storage_tbl.set(
+                "delete",
+                lua.create_function(move |_, key: String| {
+                    if let Ok(mut s) = st_del.lock() {
+                        s.data.remove(&key);
+                        s.flush();
+                    }
+                    Ok(())
+                })?,
+            )?;
+
+            let st_save = st.clone();
+            storage_tbl.set(
+                "save",
+                lua.create_function(move |_, _: ()| {
+                    if let Ok(s) = st_save.lock() {
+                        s.flush();
+                    }
+                    Ok(())
+                })?,
+            )?;
+
+            lua.globals().set("storage", storage_tbl)?;
+        }
+
+        let pending_spawns: Arc<std::sync::Mutex<Vec<SpawnRequest>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let pending_despawns: Arc<std::sync::Mutex<Vec<u64>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+
         Ok(Self {
             lua,
             envs: HashMap::new(),
@@ -400,10 +714,18 @@ impl LuaRuntime {
             prev_keys: HashSet::new(),
             errors,
             debug_paths,
+            input_map: actions_arc,
+            controller,
+            action_prev_held,
             velocities: HashMap::new(),
             anim_states: HashMap::new(),
             physics: PhysicsWorld::new(),
             physics_initialized: false,
+            pending_spawns,
+            pending_despawns,
+            pending_scene_load,
+            storage,
+            project_dir,
         })
     }
 
@@ -424,6 +746,17 @@ impl LuaRuntime {
         let normalized: HashSet<String> = new_keys.iter().map(|k| normalize_key(k)).collect();
         let prev_normalized: HashSet<String> =
             self.prev_keys.iter().map(|k| normalize_key(k)).collect();
+
+        // Snapshot last frame's action-held set BEFORE updating key state, so that
+        // just_released() closures (which read action_prev_held) see the previous frame.
+        let ctrl = self.controller.read().map(|c| c.clone()).unwrap_or_default();
+        let prev_held_actions: HashSet<String> = self.input_map.actions.iter()
+            .filter(|a| action_is_held(&self.input_map, &a.name, &prev_normalized, &ctrl))
+            .map(|a| a.name.clone())
+            .collect();
+        if let Ok(mut prev) = self.action_prev_held.lock() {
+            *prev = prev_held_actions;
+        }
 
         // Update the shared normalized key set (used by key_down global and input facet)
         if let Ok(mut k) = self.keys.write() {
@@ -711,12 +1044,18 @@ impl LuaRuntime {
         self.physics = PhysicsWorld::new();
         self.physics_initialized = false;
         if let Ok(mut dp) = self.debug_paths.write() { dp.clear(); }
-        if let Ok(mut k) = self.keys.write() {
-            k.clear();
-        }
-        if let Ok(mut k) = self.pressed_keys.write() {
-            k.clear();
-        }
+        if let Ok(mut k) = self.keys.write() { k.clear(); }
+        if let Ok(mut k) = self.pressed_keys.write() { k.clear(); }
+        if let Ok(mut p) = self.action_prev_held.lock() { p.clear(); }
+        if let Ok(mut s) = self.pending_spawns.lock() { s.clear(); }
+        if let Ok(mut d) = self.pending_despawns.lock() { d.clear(); }
+        if let Ok(mut l) = self.pending_scene_load.lock() { *l = None; }
+        // storage is intentionally NOT cleared — save data persists across play sessions
+    }
+
+    /// Consume a pending scene-load path requested by a script via load_scene().
+    pub fn take_pending_scene_load(&mut self) -> Option<String> {
+        self.pending_scene_load.lock().ok().and_then(|mut l| l.take())
     }
 
     /// Step physics simulation and sync positions back to scene transforms.
@@ -773,20 +1112,45 @@ impl LuaRuntime {
                 if let Component::Transform(t) = c { Some(t) } else { None }
             }) else { continue };
 
-            // Auto-generate static colliders from Tilemap solid tiles
+            // Auto-generate static colliders from Tilemap tiles
             if let Some(tilemap) = entity.components.iter().find_map(|c| {
                 if let Component::Tilemap(tm) = c { Some(tm) } else { None }
             }) {
-                for (rect_idx, (cx, cy, hw, hh)) in tilemap.solid_rects().into_iter().enumerate() {
-                    let synthetic_id = entity_id.wrapping_mul(100_000).wrapping_add(rect_idx as u64 + 1);
+                let mut shape_idx = 0usize;
+
+                // Full tiles: greedy rect merge
+                for (cx, cy, hw, hh) in tilemap.solid_rects() {
+                    let synthetic_id = entity_id.wrapping_mul(100_000).wrapping_add(shape_idx as u64 + 1);
+                    shape_idx += 1;
                     let eid = EntityId(synthetic_id as u32);
                     let world_pos = Vec2::new(transform.x + cx, transform.y + cy);
                     if self.physics.create_body(eid, PhysicsBodyType::Fixed, world_pos, 0.0).is_err() {
                         continue;
                     }
-                    let shape = ColliderShape::Box { hx: hw, hy: hh };
-                    let _ = self.physics.add_collider_with_material(eid, shape, Vec2::new(0.0, 0.0), 1.0, 0.3, 0.0);
+                    let _ = self.physics.add_collider_with_material(eid, ColliderShape::Box { hx: hw, hy: hh }, Vec2::new(0.0, 0.0), 1.0, 0.3, 0.0);
                 }
+
+                // Custom shapes: Rect sub-boxes and Slope triangles
+                for tile_shape in tilemap.custom_tile_shapes() {
+                    let synthetic_id = entity_id.wrapping_mul(100_000).wrapping_add(shape_idx as u64 + 1);
+                    shape_idx += 1;
+                    let eid = EntityId(synthetic_id as u32);
+                    let (world_pos, collider_shape) = match tile_shape {
+                        TilePhysicsShape::Box { cx, cy, hx, hy } => (
+                            Vec2::new(transform.x + cx, transform.y + cy),
+                            ColliderShape::Box { hx, hy },
+                        ),
+                        TilePhysicsShape::Triangle { cx, cy, a, b, c } => (
+                            Vec2::new(transform.x + cx, transform.y + cy),
+                            ColliderShape::Triangle { a, b, c },
+                        ),
+                    };
+                    if self.physics.create_body(eid, PhysicsBodyType::Fixed, world_pos, 0.0).is_err() {
+                        continue;
+                    }
+                    let _ = self.physics.add_collider_with_material(eid, collider_shape, Vec2::new(0.0, 0.0), 1.0, 0.3, 0.0);
+                }
+
                 continue; // Tilemap entities don't also get a regular collider body
             }
 
@@ -1479,6 +1843,75 @@ impl LuaRuntime {
                     }
                 }
 
+                // self:world() — spawn, despawn, query entities
+                {
+                    let snap = entity_snapshot.clone();
+                    let sp = self.pending_spawns.clone();
+                    let dp = self.pending_despawns.clone();
+                    let project_dir = self.project_dir.clone();
+                    if let Ok(world_fn) = self.lua.create_function(move |lua, _: mlua::MultiValue| {
+                        let tbl = lua.create_table()?;
+
+                        // find_entity(name) → id or nil
+                        let snap2 = snap.clone();
+                        tbl.set("find_entity", lua.create_function(move |_, (_this, name): (Table, String)| {
+                            Ok(snap2.get(&name).map(|&(id, ..)| id))
+                        })?)?;
+
+                        // entity_transform(name) → {x, y, rotation} or nil
+                        let snap3 = snap.clone();
+                        tbl.set("entity_transform", lua.create_function(move |lua, (_this, name): (Table, String)| {
+                            if let Some(&(_, x, y, rot)) = snap3.get(&name) {
+                                let t = lua.create_table()?;
+                                t.set("x", x as f64)?;
+                                t.set("y", y as f64)?;
+                                t.set("rotation", rot as f64)?;
+                                Ok(mlua::Value::Table(t))
+                            } else {
+                                Ok(mlua::Value::Nil)
+                            }
+                        })?)?;
+
+                        // spawn(name, x, y) — creates a blank entity next frame
+                        let sp2 = sp.clone();
+                        tbl.set("spawn", lua.create_function(move |_, (_this, name, x, y): (Table, String, f32, f32)| {
+                            if let Ok(mut s) = sp2.lock() {
+                                s.push(SpawnRequest::Blank { name, x, y });
+                            }
+                            Ok(())
+                        })?)?;
+
+                        // spawn_prefab(prefab_rel_path, x, y) — instantiates a .prefab file
+                        let sp3 = sp.clone();
+                        tbl.set("spawn_prefab", lua.create_function(move |_, (_this, path, x, y): (Table, String, f32, f32)| {
+                            if let Ok(mut s) = sp3.lock() {
+                                s.push(SpawnRequest::Prefab { path, x, y });
+                            }
+                            Ok(())
+                        })?)?;
+
+                        // despawn(entity_id)
+                        let dp2 = dp.clone();
+                        tbl.set("despawn", lua.create_function(move |_, (_this, id): (Table, u64)| {
+                            if let Ok(mut d) = dp2.lock() {
+                                d.push(id);
+                            }
+                            Ok(())
+                        })?)?;
+
+                        // entity_count() → number
+                        let snap4 = snap.clone();
+                        tbl.set("entity_count", lua.create_function(move |_, _this: Table| {
+                            Ok(snap4.len())
+                        })?)?;
+
+                        let _ = project_dir; // keep alive inside closure
+                        Ok(Some(tbl))
+                    }) {
+                        let _ = self_tbl.set("world", world_fn);
+                    }
+                }
+
                 // on_start (once per script path per play session)
                 if !self.started.contains(&key) {
                     if let Ok(f) = env.get::<_, mlua::Function>("on_start") {
@@ -1572,6 +2005,70 @@ impl LuaRuntime {
                     apply_scene_commands(scene, entity_id, scene_commands);
                 }
             }
+        }
+
+        // ── Apply deferred spawn/despawn requests ─────────────────────────
+        let spawns: Vec<SpawnRequest> = self.pending_spawns
+            .lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+        let despawns: Vec<u64> = self.pending_despawns
+            .lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+
+        for req in spawns {
+            match req {
+                SpawnRequest::Blank { name, x, y } => {
+                    let id = scene.spawn(&name);
+                    scene.add_component(id, Component::Transform(sindri::component::Transform {
+                        x, y,
+                        scale_x: 1.0, scale_y: 1.0,
+                        rotation: 0.0, z_index: 0,
+                        pivot_x: 0.5, pivot_y: 0.5,
+                    }));
+                }
+                SpawnRequest::Prefab { path, x, y } => {
+                    let full_path = if std::path::Path::new(&path).is_absolute() {
+                        PathBuf::from(&path)
+                    } else {
+                        self.project_dir.join(&path)
+                    };
+                    match std::fs::read_to_string(&full_path)
+                        .ok()
+                        .and_then(|s| serde_json::from_str::<PrefabNode>(&s).ok())
+                    {
+                        Some(mut node) => {
+                            // Override root transform to requested position
+                            let has_transform = node.components.iter().any(|c| matches!(c, Component::Transform(_)));
+                            if has_transform {
+                                for c in &mut node.components {
+                                    if let Component::Transform(t) = c {
+                                        t.x = x; t.y = y;
+                                    }
+                                }
+                            } else {
+                                node.components.insert(0, Component::Transform(sindri::component::Transform {
+                                    x, y, scale_x: 1.0, scale_y: 1.0,
+                                    rotation: 0.0, z_index: 0, pivot_x: 0.5, pivot_y: 0.5,
+                                }));
+                            }
+                            instantiate_prefab_node(&node, None, scene, &path);
+                        }
+                        None => {
+                            self.report_error(format!("[lua] spawn_prefab: could not load '{path}'"));
+                        }
+                    }
+                }
+            }
+        }
+
+        for id in despawns {
+            let eid = EntityId(id as u32);
+            if self.physics_initialized {
+                let _ = self.physics.remove_body(eid);
+            }
+            scene.remove_entity(id);
+            // Evict cached script state so scripts restart if entity is re-added
+            self.envs.retain(|(eid, _), _| *eid != id);
+            self.started.retain(|(eid, _)| *eid != id);
+            self.missing_scripts.retain(|(eid, _)| *eid != id);
         }
     }
 

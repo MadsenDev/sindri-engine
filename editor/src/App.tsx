@@ -6,6 +6,8 @@ import ProposalsLane from "./panels/ProposalsLane";
 import Viewport, { type TransformChange, type ColliderChange } from "./panels/Viewport";
 import ScriptEditor from "./panels/ScriptEditor";
 import FileBrowser from "./panels/FileBrowser";
+import TilePaletteEditor from "./components/TilePaletteEditor";
+import InputMapEditor from "./panels/InputMapEditor";
 import WelcomeScreen from "./screens/WelcomeScreen";
 import { ContextMenuProvider } from "./components/ContextMenu";
 import CmdK from "./components/CmdK";
@@ -76,6 +78,15 @@ export interface AnimClip {
   looping: boolean;
 }
 
+export type TileColliderShape =
+  | { type: "none" }
+  | { type: "full" }
+  | { type: "rect"; x: number; y: number; w: number; h: number }
+  | { type: "slope_cut_tl" }
+  | { type: "slope_cut_tr" }
+  | { type: "slope_cut_bl" }
+  | { type: "slope_cut_br" };
+
 export interface TilePalette {
   name: string;
   texture_path: string;
@@ -84,6 +95,8 @@ export interface TilePalette {
   margin: number;
   spacing: number;
   solid_tiles: number[];
+  tile_colliders?: Record<number, TileColliderShape>;
+  disabled_tiles?: number[];
 }
 
 export interface TileLayer {
@@ -181,10 +194,12 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("project");
   const [projectSettings, setProjectSettings] = useState<{ name: string; resolution_width: number; resolution_height: number; pixel_art_mode: boolean } | null>(null);
   const [playbackState, setPlaybackState] = useState<PlaybackState>("stopped");
-  const [leftTab, setLeftTab] = useState<"scene" | "files" | "history">("scene");
+  const [leftTab, setLeftTab] = useState<"scene" | "files" | "input" | "history">("scene");
   const [projectFiles, setProjectFiles] = useState<{ path: string; kind: string; name: string }[]>([]);
   const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
   const [sceneDirty, setSceneDirty] = useState(false);
+  const [activePalettePath, setActivePalettePath] = useState<string | null>(null);
+  const [activePaletteCreate, setActivePaletteCreate] = useState<string | null>(null);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   const [cmdKOpen, setCmdKOpen] = useState(false);
@@ -633,7 +648,7 @@ export default function App() {
               gap: "20px",
               flexShrink: 0,
             }}>
-              {(["scene", "files", "history"] as const).map(tab => (
+              {(["scene", "files", "input", "history"] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setLeftTab(tab)}
@@ -676,9 +691,14 @@ export default function App() {
                 projectPath={projectPath}
                 onOpenScript={handleOpenScript}
                 onOpenScene={handleOpenScene}
+                onOpenPalette={setActivePalettePath}
+                onCreatePalette={setActivePaletteCreate}
                 onFilesChange={setProjectFiles}
                 onSceneChange={handleSceneChange}
               />
+            )}
+            {leftTab === "input" && (
+              <InputMapEditor projectPath={projectPath} />
             )}
             {leftTab === "history" && (
               <HistoryPanel undoLabels={undoLabels} redoLabels={redoLabels} onUndo={undoTransform} onRedo={redoTransform} />
@@ -741,6 +761,7 @@ export default function App() {
                 projectPath={projectPath}
                 tilemapEdit={tilemapEdit}
                 onTilemapEditChange={setTilemapEdit}
+                onOpenPalette={setActivePalettePath}
                 onAskAI={(prompt, mode) => {
                   setCmdKInit(mode === "send" ? { message: prompt } : { input: prompt });
                   setCmdKOpen(true);
@@ -813,6 +834,22 @@ export default function App() {
           50% { opacity: 1; transform: translateY(-3px); }
         }
       `}</style>
+
+      {activePalettePath && projectPath && (
+        <TilePaletteEditor
+          palettePath={activePalettePath}
+          projectPath={projectPath}
+          onClose={() => setActivePalettePath(null)}
+        />
+      )}
+      {activePaletteCreate && projectPath && (
+        <TilePaletteEditor
+          initialTexturePath={activePaletteCreate}
+          projectPath={projectPath}
+          onClose={() => setActivePaletteCreate(null)}
+          onSaved={() => setActivePaletteCreate(null)}
+        />
+      )}
     </ContextMenuProvider>
   );
 }

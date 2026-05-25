@@ -218,6 +218,27 @@ impl Default for AnimatedSprite {
     }
 }
 
+/// Per-tile collision shape within a palette.
+/// Overrides the simple `solid_tiles` flag when present.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TileColliderShape {
+    /// No collision.
+    None,
+    /// Full tile box.
+    Full,
+    /// Sub-rectangle in 0..1 tile space (x/y = top-left offset, w/h = size).
+    Rect { x: f32, y: f32, w: f32, h: f32 },
+    /// 45° slope: top-left corner cut. Solid = TR+BL+BR. Floor ramp going up-right.
+    SlopeCutTl,
+    /// 45° slope: top-right corner cut. Solid = TL+BL+BR. Floor ramp going up-left.
+    SlopeCutTr,
+    /// 45° slope: bottom-left corner cut. Solid = TL+TR+BR. Ceiling ramp.
+    SlopeCutBl,
+    /// 45° slope: bottom-right corner cut. Solid = TL+TR+BL. Ceiling ramp.
+    SlopeCutBr,
+}
+
 /// A single palette (tileset texture + metadata) used by a Tilemap.
 /// Matches the `.tilepallet` file format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,15 +257,45 @@ pub struct TilePalette {
     /// Pixel gap between tiles
     #[serde(default)]
     pub spacing: u32,
-    /// 0-based tile indices within this palette that are solid (for physics/pathfinding)
+    /// 0-based tile indices within this palette that are solid (boolean flag, backward compat).
+    /// Overridden per-tile by `tile_colliders`.
     #[serde(default)]
     pub solid_tiles: Vec<u16>,
+    /// Per-tile collider shapes. Keys are 0-based tile indices (as strings in JSON).
+    /// Takes precedence over `solid_tiles` for matching indices.
+    #[serde(default)]
+    pub tile_colliders: std::collections::HashMap<u16, TileColliderShape>,
+    /// Tile indices hidden from the painter (still painted if already placed).
+    #[serde(default)]
+    pub disabled_tiles: Vec<u16>,
 }
 
 impl TilePalette {
     pub fn tile_count(&self) -> u32 {
         self.tileset_cols * self.tileset_rows
     }
+
+    /// Effective collider shape for a tile index.
+    /// `tile_colliders` overrides `solid_tiles`.
+    pub fn effective_collider(&self, tile_idx: u16) -> TileColliderShape {
+        if let Some(shape) = self.tile_colliders.get(&tile_idx) {
+            return shape.clone();
+        }
+        if self.solid_tiles.contains(&tile_idx) {
+            TileColliderShape::Full
+        } else {
+            TileColliderShape::None
+        }
+    }
+}
+
+/// Physics shape emitted per-tile for non-Full colliders.
+/// Position is in local tilemap space (origin = tilemap entity top-left).
+pub enum TilePhysicsShape {
+    /// Axis-aligned box. cx/cy = center, hx/hy = half-extents.
+    Box { cx: f32, cy: f32, hx: f32, hy: f32 },
+    /// Triangle. cx/cy = rigid-body origin. a/b/c in local body space.
+    Triangle { cx: f32, cy: f32, a: [f32; 2], b: [f32; 2], c: [f32; 2] },
 }
 
 /// Encode a (palette_id, tile_idx) pair into a u32 cell value.
@@ -311,7 +362,7 @@ pub struct Tilemap {
 }
 
 impl Tilemap {
-    /// Returns true if the tile at (col, row) is solid in any layer.
+    /// Returns true if the tile at (col, row) has any collision shape in any layer.
     pub fn is_tile_solid(&self, col: u32, row: u32) -> bool {
         let idx = (row * self.map_cols + col) as usize;
         for layer in &self.layers {
@@ -320,22 +371,44 @@ impl Tilemap {
             let (palette_id, tile_idx) = decode_tile(v);
             if palette_id == 0 { continue; }
             if let Some(pal) = self.palettes.get((palette_id - 1) as usize) {
-                if pal.solid_tiles.contains(&(tile_idx as u16)) { return true; }
+                if pal.effective_collider(tile_idx as u16) != TileColliderShape::None {
+                    return true;
+                }
             }
         }
         false
     }
 
-    /// Greedy rectangle merge over solid tiles.
-    /// Returns a list of (cx, cy, half_w, half_h) in local tilemap space (origin at top-left).
+    /// Returns the collider shape for the top-most non-empty tile at (col, row), or None.
+    fn tile_collider_at(&self, col: u32, row: u32) -> Option<TileColliderShape> {
+        let idx = (row * self.map_cols + col) as usize;
+        for layer in self.layers.iter().rev() {
+            let v = layer.tiles.get(idx).copied().unwrap_or(0);
+            if v == 0 { continue; }
+            let (palette_id, tile_idx) = decode_tile(v);
+            if palette_id == 0 { continue; }
+            if let Some(pal) = self.palettes.get((palette_id - 1) as usize) {
+                let shape = pal.effective_collider(tile_idx as u16);
+                if shape != TileColliderShape::None {
+                    return Some(shape);
+                }
+            }
+        }
+        None
+    }
+
+    /// Greedy rectangle merge over Full-collider tiles.
+    /// Returns (cx, cy, half_w, half_h) in local tilemap space.
     pub fn solid_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let cols = self.map_cols as usize;
         let rows = self.map_rows as usize;
         let tw = self.tile_width;
         let th = self.tile_height;
 
-        let solid: Vec<bool> = (0..rows).flat_map(|r| {
-            (0..cols).map(move |c| self.is_tile_solid(c as u32, r as u32))
+        let full: Vec<bool> = (0..rows).flat_map(|r| {
+            (0..cols).map(move |c| {
+                matches!(self.tile_collider_at(c as u32, r as u32), Some(TileColliderShape::Full))
+            })
         }).collect();
 
         let mut consumed = vec![false; cols * rows];
@@ -345,31 +418,28 @@ impl Tilemap {
             let mut col = 0;
             while col < cols {
                 let idx = row * cols + col;
-                if solid[idx] && !consumed[idx] {
+                if full[idx] && !consumed[idx] {
                     let run_start = col;
-                    while col < cols && solid[row * cols + col] && !consumed[row * cols + col] {
+                    while col < cols && full[row * cols + col] && !consumed[row * cols + col] {
                         col += 1;
                     }
                     let run_end = col;
-
                     let mut run_height = 1;
                     'down: loop {
                         let next_row = row + run_height;
                         if next_row >= rows { break; }
                         for c in run_start..run_end {
-                            if !solid[next_row * cols + c] || consumed[next_row * cols + c] {
+                            if !full[next_row * cols + c] || consumed[next_row * cols + c] {
                                 break 'down;
                             }
                         }
                         run_height += 1;
                     }
-
                     for r in row..row + run_height {
                         for c in run_start..run_end {
                             consumed[r * cols + c] = true;
                         }
                     }
-
                     let hw = (run_end - run_start) as f32 * tw * 0.5;
                     let hh = run_height as f32 * th * 0.5;
                     let cx = run_start as f32 * tw + hw;
@@ -382,6 +452,64 @@ impl Tilemap {
         }
 
         rects
+    }
+
+    /// Per-tile physics shapes for Rect and Slope colliders (non-Full tiles).
+    /// Returns shapes in local tilemap space (origin = entity top-left corner).
+    pub fn custom_tile_shapes(&self) -> Vec<TilePhysicsShape> {
+        let tw = self.tile_width;
+        let th = self.tile_height;
+        let hw = tw * 0.5;
+        let hh = th * 0.5;
+        let mut shapes = Vec::new();
+
+        for row in 0..self.map_rows {
+            for col in 0..self.map_cols {
+                let shape = match self.tile_collider_at(col, row) {
+                    Some(s @ TileColliderShape::Rect { .. }) => s,
+                    Some(s @ TileColliderShape::SlopeCutTl) => s,
+                    Some(s @ TileColliderShape::SlopeCutTr) => s,
+                    Some(s @ TileColliderShape::SlopeCutBl) => s,
+                    Some(s @ TileColliderShape::SlopeCutBr) => s,
+                    _ => continue,
+                };
+
+                let tile_cx = col as f32 * tw + hw;
+                let tile_cy = row as f32 * th + hh;
+
+                match shape {
+                    TileColliderShape::Rect { x, y, w, h } => {
+                        let rect_cx = -hw + (x + w * 0.5) * tw;
+                        let rect_cy = -hh + (y + h * 0.5) * th;
+                        shapes.push(TilePhysicsShape::Box {
+                            cx: tile_cx + rect_cx,
+                            cy: tile_cy + rect_cy,
+                            hx: w * tw * 0.5,
+                            hy: h * th * 0.5,
+                        });
+                    }
+                    TileColliderShape::SlopeCutTl => shapes.push(TilePhysicsShape::Triangle {
+                        cx: tile_cx, cy: tile_cy,
+                        a: [hw, -hh], b: [-hw, hh], c: [hw, hh],
+                    }),
+                    TileColliderShape::SlopeCutTr => shapes.push(TilePhysicsShape::Triangle {
+                        cx: tile_cx, cy: tile_cy,
+                        a: [-hw, -hh], b: [-hw, hh], c: [hw, hh],
+                    }),
+                    TileColliderShape::SlopeCutBl => shapes.push(TilePhysicsShape::Triangle {
+                        cx: tile_cx, cy: tile_cy,
+                        a: [-hw, -hh], b: [hw, -hh], c: [hw, hh],
+                    }),
+                    TileColliderShape::SlopeCutBr => shapes.push(TilePhysicsShape::Triangle {
+                        cx: tile_cx, cy: tile_cy,
+                        a: [-hw, -hh], b: [hw, -hh], c: [-hw, hh],
+                    }),
+                    _ => {}
+                }
+            }
+        }
+
+        shapes
     }
 }
 

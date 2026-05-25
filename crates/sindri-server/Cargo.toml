@@ -15,3 +15,4 @@ sindri = { path = "../sindri" }
 image = { workspace = true }
 mlua = { workspace = true }
 winit = { workspace = true }
+gilrs = "0.11"

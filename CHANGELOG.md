@@ -3,7 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
-### Added
+
+### Added (2026-05)
+- **InputMap system** — Project-level `input_map.json` with named actions and bindings (keyboard, key axis, gamepad button/axis). `gilrs` background thread for controller polling at ~120Hz. Lua `input.pressed/just_pressed/just_released/axis` globals. Tauri `read_input_map`/`write_input_map` commands. Editor InputMapEditor panel in the left-panel Input tab with custom dropdown selects, key capture, and dirty-state save.
+- **Tilemap redesign** — Multi-palette tilemap system replacing single-texture approach. `.tilepallet` JSON sidecar files (right-click PNG in FileBrowser → Create Tile Palette). Canvas-based TilePainter replacing 2500-div DOM painter. Pan/zoom, draw/erase/flood fill/collision toggle modes. u32 tile encoding (upper 16 bits = palette_id, lower 16 bits = tile_idx). Per-layer editing. Full editor integration: inspector palette management, FileBrowser .tilepallet creation.
+- **NavGrid / Pathfinding editor integration** — `NavGrid` scene component with cols/rows/cell_size/walkable/mode fields. Editor walkability grid gizmos (green/red overlay, click to toggle). A* TopDown and platformer jump-arc graph modes. Lua `self:nav_grid()` facet and `self:find_path()` shortcut. Debug path visualization in editor.
+- **Transform pivot and z-index** — `Transform` gains `pivot_x`, `pivot_y` (0..1, default 0.5), and `z_index` (i32 draw order). Renderer and Viewport use world-space pivot resolution.
+- **Prefab system** — Save entity subtrees as `.prefab` files. Instantiate, update, sync from prefab, unlink. Ghost preview on stamp. Correct world coordinate parenting to tilemap.
+- **Custom titlebar** — Native titlebar replaced with custom Tauri-rendered bar.
+
+### Added (earlier)
 - **Sindri rename and workspace migration** - Moved the engine from the old Forge2D crate layout into the Sindri workspace structure.
 - **Engine improvement pass** - Completed all tasks from `IMPROVEMENTS.md`.
   - Added `PhysicsWorld::sync_transforms()` for physics-to-transform synchronization.

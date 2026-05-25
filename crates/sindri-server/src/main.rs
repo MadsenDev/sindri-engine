@@ -2,6 +2,7 @@ use sindri::component::Component;
 use sindri::math::{Camera2D, Transform2D, Vec2};
 use sindri::render::{Renderer, TextureHandle};
 use sindri::scene::Scene;
+use sindri_server::input_map_config::{ControllerState, InputMapConfig, SharedControllerState};
 use sindri_server::routes::{PlaybackMode, PlaybackState, SharedErrors, SharedGizmos, SharedPlayback};
 use sindri_server::{serve, AppState, SharedScene};
 mod lua_runtime;
@@ -570,6 +571,69 @@ fn key_name(event: &KeyEvent) -> Option<String> {
     }
 }
 
+/// Spawn a background thread that polls gilrs for gamepad events and writes to SharedControllerState.
+fn spawn_controller_thread(state: SharedControllerState) {
+    std::thread::Builder::new()
+        .name("sindri-controller".into())
+        .spawn(move || {
+            let gilrs = match gilrs::Gilrs::new() {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[controller] gilrs init failed: {e}");
+                    return;
+                }
+            };
+            let mut gilrs = gilrs;
+            let mut buttons_held: std::collections::HashMap<String, bool> = Default::default();
+            let sleep_dur = std::time::Duration::from_millis(8);
+            loop {
+                let mut pressed_this_poll: std::collections::HashMap<String, bool> = Default::default();
+                let mut axes: std::collections::HashMap<String, f32> = Default::default();
+
+                while let Some(gilrs::Event { event, .. }) = gilrs.next_event() {
+                    match event {
+                        gilrs::EventType::ButtonPressed(btn, _) => {
+                            let name = format!("{btn:?}");
+                            buttons_held.insert(name.clone(), true);
+                            pressed_this_poll.insert(name, true);
+                        }
+                        gilrs::EventType::ButtonReleased(btn, _) => {
+                            buttons_held.remove(&format!("{btn:?}"));
+                        }
+                        gilrs::EventType::AxisChanged(axis, value, _) => {
+                            axes.insert(format!("{axis:?}"), value);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Merge persisted axis values from active gamepads
+                for (_id, gamepad) in gilrs.gamepads() {
+                    for axis in [
+                        gilrs::Axis::LeftStickX,
+                        gilrs::Axis::LeftStickY,
+                        gilrs::Axis::RightStickX,
+                        gilrs::Axis::RightStickY,
+                        gilrs::Axis::LeftZ,
+                        gilrs::Axis::RightZ,
+                    ] {
+                        if let Some(data) = gamepad.axis_data(axis) {
+                            axes.entry(format!("{axis:?}")).or_insert(data.value());
+                        }
+                    }
+                }
+
+                if let Ok(mut s) = state.write() {
+                    s.axes = axes;
+                    s.buttons_pressed = pressed_this_poll;
+                    s.buttons_held = buttons_held.clone();
+                }
+                std::thread::sleep(sleep_dur);
+            }
+        })
+        .ok();
+}
+
 fn update_runtime(
     lua: &mut LuaRuntime,
     shared_scene: &SharedScene,
@@ -599,6 +663,25 @@ fn update_runtime(
         lua.step_physics(&mut scene, gx, gy, dt);
         lua.update(&mut scene, scripts_dir, dt, &keys);
     }
+
+    // Handle load_scene() requested by a script
+    if let Some(scene_rel) = lua.take_pending_scene_load() {
+        let project_dir = scripts_dir.parent().unwrap_or(scripts_dir);
+        let full_path = if std::path::Path::new(&scene_rel).is_absolute() {
+            std::path::PathBuf::from(&scene_rel)
+        } else {
+            project_dir.join(&scene_rel)
+        };
+        match Scene::load(&full_path) {
+            Ok(mut new_scene) => {
+                sindri_server::routes::normalize_scene_cameras(&mut new_scene);
+                *shared_scene.blocking_write() = new_scene;
+                lua.reset();
+            }
+            Err(e) => eprintln!("[lua] load_scene('{scene_rel}') failed: {e}"),
+        }
+    }
+
     {
         let mut scene = shared_scene.blocking_write();
         update_scene_camera_runtime(&mut scene, dt);
@@ -615,6 +698,8 @@ fn run_preview_window(
     errors: SharedErrors,
     gizmos: SharedGizmos,
     debug_paths: sindri_server::routes::SharedDebugPaths,
+    input_map: InputMapConfig,
+    controller: SharedControllerState,
 ) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     let mut window_attributes = Window::default_attributes();
@@ -628,7 +713,7 @@ fn run_preview_window(
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     println!("native play window ready");
 
-    let mut lua = LuaRuntime::new(errors.clone(), debug_paths)?;
+    let mut lua = LuaRuntime::new(errors.clone(), debug_paths, input_map, controller, project_dir.to_path_buf())?;
     let mut camera_runtime = CameraRuntime::default();
     let mut render_state = RenderState::new(project_dir.to_path_buf());
     let mut last_tick = std::time::Instant::now();
@@ -716,6 +801,8 @@ fn run_headless(
     errors: SharedErrors,
     gizmos: SharedGizmos,
     debug_paths: sindri_server::routes::SharedDebugPaths,
+    input_map: InputMapConfig,
+    controller: SharedControllerState,
     frame_tx: tokio::sync::broadcast::Sender<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let project_settings = ProjectSettings::load(&project_dir);
@@ -723,8 +810,8 @@ fn run_headless(
     renderer.set_pixel_art_mode(project_settings.pixel_art_mode);
     let white_texture = renderer.load_texture_from_rgba(&[255, 255, 255, 255], 1, 1)?;
     let mut camera_runtime = CameraRuntime::default();
-    let mut render_state = RenderState::new(project_dir);
-    let mut lua = LuaRuntime::new(errors.clone(), debug_paths)?;
+    let mut render_state = RenderState::new(project_dir.clone());
+    let mut lua = LuaRuntime::new(errors.clone(), debug_paths, input_map, controller, project_dir)?;
     let mut last_tick = std::time::Instant::now();
     let mut was_stopped = true;
     let frame_interval = std::time::Duration::from_millis(33);
@@ -799,6 +886,9 @@ fn main() -> anyhow::Result<()> {
     let shared_gizmos: SharedGizmos = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let shared_debug_paths: sindri_server::routes::SharedDebugPaths =
         Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    let input_map = InputMapConfig::load(&project_dir);
+    let shared_controller: SharedControllerState = Arc::new(std::sync::RwLock::new(ControllerState::default()));
+    spawn_controller_thread(shared_controller.clone());
 
     let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<Vec<u8>>(4);
     let frame_tx_opt: Option<tokio::sync::broadcast::Sender<Vec<u8>>> = if headless {
@@ -907,6 +997,8 @@ fn main() -> anyhow::Result<()> {
             shared_errors,
             shared_gizmos,
             shared_debug_paths,
+            input_map,
+            shared_controller,
             frame_tx,
         )
     } else {
@@ -919,6 +1011,8 @@ fn main() -> anyhow::Result<()> {
             shared_errors,
             shared_gizmos,
             shared_debug_paths,
+            input_map,
+            shared_controller,
         )
     }
 }

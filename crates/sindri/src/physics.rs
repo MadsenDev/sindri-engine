@@ -24,6 +24,8 @@ pub enum ColliderShape {
     Box { hx: f32, hy: f32 },
     Circle { radius: f32 },
     CapsuleY { half_height: f32, radius: f32 },
+    /// Triangle collider. Vertices are in the body's local space.
+    Triangle { a: [f32; 2], b: [f32; 2], c: [f32; 2] },
 }
 
 /// Engine-facing collision event. Uses EntityId only.
@@ -692,10 +694,12 @@ impl PhysicsWorld {
         match s {
             ColliderShape::Box { hx, hy } => SharedShape::cuboid(hx, hy),
             ColliderShape::Circle { radius } => SharedShape::ball(radius),
-            ColliderShape::CapsuleY {
-                half_height,
-                radius,
-            } => SharedShape::capsule_y(half_height, radius),
+            ColliderShape::CapsuleY { half_height, radius } => SharedShape::capsule_y(half_height, radius),
+            ColliderShape::Triangle { a, b, c } => SharedShape::triangle(
+                nalgebra::Point2::new(a[0], a[1]),
+                nalgebra::Point2::new(b[0], b[1]),
+                nalgebra::Point2::new(c[0], c[1]),
+            ),
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod input_map_config;
 pub mod routes;
 
 use axum::{

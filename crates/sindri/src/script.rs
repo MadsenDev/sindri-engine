@@ -1098,10 +1098,14 @@ impl UserData for WorldFacet {
             let size = match shape {
                 ColliderShape::Box { hx, hy } => Vec2::new(hx * 2.0, hy * 2.0),
                 ColliderShape::Circle { radius } => Vec2::new(radius * 2.0, radius * 2.0),
-                ColliderShape::CapsuleY {
-                    half_height,
-                    radius,
-                } => Vec2::new(radius * 2.0, half_height * 2.0 + radius * 2.0),
+                ColliderShape::CapsuleY { half_height, radius } => Vec2::new(radius * 2.0, half_height * 2.0 + radius * 2.0),
+                ColliderShape::Triangle { a, b, c } => {
+                    let min_x = a[0].min(b[0]).min(c[0]);
+                    let max_x = a[0].max(b[0]).max(c[0]);
+                    let min_y = a[1].min(b[1]).min(c[1]);
+                    let max_y = a[1].max(b[1]).max(c[1]);
+                    Vec2::new(max_x - min_x, max_y - min_y)
+                }
             };
             Ok(size)
         });

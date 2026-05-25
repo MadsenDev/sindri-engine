@@ -61,6 +61,7 @@ pub fn run() {
             commands::write_anim_file,
             commands::create_tile_palette,
             commands::read_tile_palette,
+            commands::write_tile_palette,
             commands::read_text_file,
             commands::read_project_file,
             commands::get_project_settings,
@@ -74,6 +75,9 @@ pub fn run() {
             commands::update_prefab,
             commands::sync_from_prefab,
             commands::unlink_from_prefab,
+            // Input map
+            commands::read_input_map,
+            commands::write_input_map,
             // Ollama suggestions
             commands::list_ollama_models,
             commands::ensure_suggestion_model,

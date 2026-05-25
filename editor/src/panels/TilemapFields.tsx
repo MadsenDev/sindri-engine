@@ -12,7 +12,7 @@ function resolveTextureUrl(path: string): string {
 
 interface PrefabInfo { name: string; path: string; }
 
-export default function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles, projectPath, tilemapEdit, onTilemapEditChange }: {
+export default function TilemapFields({ comp, entityId, componentIdx, onSceneChange, projectFiles, projectPath, tilemapEdit, onTilemapEditChange, onOpenPalette }: {
   comp: Extract<Component, { type: "Tilemap" }>;
   entityId: number; componentIdx: number; onSceneChange: () => void;
   projectFiles: ProjectFile[];
@@ -21,6 +21,7 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
   entityY?: number;
   tilemapEdit: TilemapEdit;
   onTilemapEditChange: (e: TilemapEdit) => void;
+  onOpenPalette?: (path: string) => void;
 }) {
   const patch = useComponentPatch(entityId, componentIdx, onSceneChange);
   const [pickingPaletteTex, setPickingPaletteTex] = useState<number | null>(null);
@@ -60,7 +61,7 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
         "read_tile_palette", { projectPath, relativePath }
       );
       const newPalette = {
-        name: data.name || relativePath.split("/").pop()?.replace(/\.tilepallet$/, "") || "palette",
+        name: data.name || relativePath.split("/").pop()?.replace(/\.tilepal$/, "") || "palette",
         texture_path: data.texture_path || "",
         tileset_cols: data.tileset_cols || 4,
         tileset_rows: data.tileset_rows || 4,
@@ -153,7 +154,7 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
           onClose={() => setPickingPaletteTex(null)} />
       )}
       {pickingPaletteFile && (
-        <FilePicker title="Load .tilepallet" kinds={["tilepallet"]} files={projectFiles}
+        <FilePicker title="Load .tilepal" kinds={["tilepal"]} files={projectFiles}
           onSelect={p => { loadPaletteFromFile(p); setPickingPaletteFile(false); }}
           onClose={() => setPickingPaletteFile(false)} />
       )}
@@ -232,6 +233,8 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
                 width: `${tsC * CELL}px`,
               }}>
                 {Array.from({ length: tsC * tsR }, (_, i) => {
+                  const isDisabled = pal.disabled_tiles?.includes(i);
+                  if (isDisabled && tilemapEdit.mode !== "collision") return null;
                   const m = pal.margin ?? 0;
                   const s = pal.spacing ?? 0;
                   const iw = palImg.naturalWidth;
@@ -249,11 +252,11 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
                     bgY = -(m + Math.floor(i / tsC) * (ch + s)) / ih * bgH;
                   }
                   const isSelected = tilemapEdit.tileIdx === i && tilemapEdit.mode !== "collision";
-                  const isSolid = pal.solid_tiles.includes(i);
+                  const isSolid = pal.solid_tiles.includes(i) || (pal.tile_colliders?.[i] && pal.tile_colliders[i].type !== "none");
                   return (
                     <div
                       key={i}
-                      title={`Tile #${i}${isSolid ? " (solid)" : ""}`}
+                      title={`Tile #${i}${isSolid ? " (solid)" : ""}${isDisabled ? " (hidden)" : ""}`}
                       onClick={() => tilemapEdit.mode === "collision" ? toggleSolidTile(i) : set({ tileIdx: i, ...(tilemapEdit.mode === "erase" ? { mode: "draw" } : {}) })}
                       style={{
                         width: CELL, height: CELL, position: "relative", cursor: "pointer", boxSizing: "border-box",
@@ -263,6 +266,7 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
                         outline: isSelected ? "2px solid var(--amber)" : isSolid ? "2px solid rgba(220,80,80,0.8)" : "1px solid rgba(255,255,255,0.05)",
                         outlineOffset: "-2px",
                         imageRendering: "pixelated",
+                        opacity: isDisabled ? 0.4 : 1,
                       }}
                     >
                       {isSolid && <div style={{ position: "absolute", inset: 0, background: "rgba(220,60,60,0.25)", pointerEvents: "none" }} />}
@@ -332,7 +336,7 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
           <div style={{ padding: "0 12px 8px" }}>
             <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
               <button onClick={addPalette} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>+ Add palette</button>
-              <button onClick={() => setPickingPaletteFile(true)} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>◧ Load .tilepallet</button>
+              <button onClick={() => setPickingPaletteFile(true)} style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "10px", padding: "2px 8px", cursor: "pointer" }}>◧ Load .tilepal</button>
             </div>
             {comp.palettes.map((p, i) => (
               <div key={i} style={{ marginBottom: "8px", padding: "6px 8px", border: "1px solid var(--rule)", background: "rgba(0,0,0,0.15)" }}>
@@ -341,9 +345,22 @@ export default function TilemapFields({ comp, entityId, componentIdx, onSceneCha
                     defaultValue={p.name}
                     placeholder={`Palette ${i + 1}`}
                     onBlur={e => patchPalette(i, { name: e.currentTarget.value })}
-                    style={{ fontFamily: "var(--font-mono)", fontSize: "10px", background: "none", border: "none", borderBottom: "1px solid var(--rule-2)", color: "var(--ink-2)", width: "120px", outline: "none", padding: "1px 2px" }}
+                    style={{ fontFamily: "var(--font-mono)", fontSize: "10px", background: "none", border: "none", borderBottom: "1px solid var(--rule-2)", color: "var(--ink-2)", width: "100px", outline: "none", padding: "1px 2px" }}
                   />
-                  <button onClick={() => removePalette(i)} style={{ background: "none", border: "none", color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "14px", cursor: "pointer", padding: "0 2px" }}>×</button>
+                  <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                    {p.texture_path && onOpenPalette && (() => {
+                      const stem = p.texture_path.replace(/\.[^.]+$/, "");
+                      const palPath = `${stem}.tilepal`;
+                      return (
+                        <button
+                          onClick={() => onOpenPalette(palPath)}
+                          title="Edit palette"
+                          style={{ background: "none", border: "1px solid var(--rule-2)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "9px", cursor: "pointer", padding: "1px 4px", borderRadius: "2px" }}
+                        >Edit</button>
+                      );
+                    })()}
+                    <button onClick={() => removePalette(i)} style={{ background: "none", border: "none", color: "var(--ink-4)", fontFamily: "var(--font-mono)", fontSize: "14px", cursor: "pointer", padding: "0 2px" }}>×</button>
+                  </div>
                 </div>
                 <BrowseInputField label="tex" value={p.texture_path} placeholder="(none)" onCommit={v => patchPalette(i, { texture_path: v })} onBrowse={() => setPickingPaletteTex(i)} />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", marginTop: "6px" }}>

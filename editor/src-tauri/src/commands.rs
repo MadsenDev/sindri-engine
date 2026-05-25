@@ -285,7 +285,7 @@ fn file_kind_from_ext(ext: &str) -> &'static str {
         "sindri" => "scene",
         "animclips" => "animclips",
         "prefab" => "prefab",
-        "tilepallet" => "tilepallet",
+        "tilepal" => "tilepal",
         "png" | "jpg" | "jpeg" | "webp" | "bmp" => "image",
         "ogg" | "wav" | "mp3" | "flac" => "audio",
         _ => "other",
@@ -574,9 +574,9 @@ pub async fn create_tile_palette(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     let rel = if dir.is_empty() {
-        format!("{}.tilepallet", stem)
+        format!("{}.tilepal", stem)
     } else {
-        format!("{}/{}.tilepallet", dir, stem)
+        format!("{}/{}.tilepal", dir, stem)
     };
     let full = std::path::Path::new(&project_path).join(&rel);
     let json = serde_json::json!({
@@ -603,6 +603,17 @@ pub async fn read_tile_palette(
     let full = std::path::Path::new(&project_path).join(&relative_path);
     let content = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
     serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn write_tile_palette(
+    project_path: String,
+    relative_path: String,
+    data: serde_json::Value,
+) -> Result<(), String> {
+    let full = std::path::Path::new(&project_path).join(&relative_path);
+    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    std::fs::write(&full, json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -956,6 +967,25 @@ pub async fn sync_from_prefab(project_path: String, entity_id: u64) -> Result<()
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+// ── input_map ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn read_input_map(project_path: String) -> Result<serde_json::Value, String> {
+    let path = std::path::Path::new(&project_path).join("input_map.json");
+    if !path.exists() {
+        return Ok(serde_json::json!({ "actions": [] }));
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn write_input_map(project_path: String, data: serde_json::Value) -> Result<(), String> {
+    let path = std::path::Path::new(&project_path).join("input_map.json");
+    let text = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

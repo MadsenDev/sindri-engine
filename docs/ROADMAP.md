@@ -15,14 +15,12 @@ Sindri has reached a point where it has **enough subsystems to build real games*
 These are **not yet implemented**. They may be added if a reference game forces them:
 
 ### Animation System
-- Sprite sheet animation
-- Tweening utilities
-- State-driven animation graphs
-- Timing utilities beyond delta/fixed
+- ✅ Sprite sheet animation — `AnimatedSprite` component with named clips, frame timing, looping/one-shot, Lua `self:animated_sprite()` facet, full editor support (clip editor, spritesheet slicer)
+- Tweening utilities — not built in; use delta time manually
+- State-driven animation graphs — not yet
+- Timing utilities beyond delta/fixed — not yet
 
-**Status:** Not implemented yet. You can implement basic animation using delta time and sprite swapping. A minimal animation system would be added if a platformer or action game requires it.
-
-**Workaround:** Use delta time to track frame timing and swap sprites manually, or use a library like `keyframe` for tweens.
+**Status:** Core sprite animation is implemented and editor-ready. State machines and tweening are not built in.
 
 ### Advanced UI Framework
 - Layout system (anchors, padding, constraints)

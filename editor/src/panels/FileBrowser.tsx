@@ -35,6 +35,8 @@ interface Props {
   projectPath: string | null;
   onOpenScript: (path: string) => void;
   onOpenScene: (path: string) => void;
+  onOpenPalette?: (path: string) => void;
+  onCreatePalette?: (imagePath: string) => void;
   onFilesChange?: (files: { path: string; kind: string; name: string }[]) => void;
   onSceneChange?: () => void;
 }
@@ -46,7 +48,7 @@ const FILE_ICON: Record<string, string> = {
   animclips:  "▶",
   audio:      "♪",
   prefab:     "◆",
-  tilepallet: "◧",
+  tilepal: "◧",
   other:      "·",
 };
 
@@ -74,11 +76,10 @@ const toolbarBtnStyle: React.CSSProperties = {
   padding: "1px 7px", cursor: "pointer",
 };
 
-export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onFilesChange, onSceneChange }: Props) {
+export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, onOpenPalette, onCreatePalette, onFilesChange, onSceneChange }: Props) {
   const [tree, setTree] = useState<FileNode | null>(null);
   const [spriteEditorPath, setSpriteEditorPath] = useState<string | null>(null);
   const [spriteEditorComp, setSpriteEditorComp] = useState<AnimatedSpriteComp | null>(null);
-  const [paletteDraft, setPaletteDraft] = useState<{ imagePath: string; name: string; cols: string; rows: string; tileW: string; tileH: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["scripts", "scenes", "assets"]));
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null);
@@ -167,6 +168,7 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
     if (node.kind === "script") onOpenScript(node.path);
     else if (node.kind === "scene") onOpenScene(node.path);
     else if (node.kind === "prefab") handleInstantiatePrefab(node.path);
+    else if (node.kind === "tilepal") onOpenPalette?.(node.path);
   };
 
   const handleInstantiatePrefab = async (prefabPath: string) => {
@@ -179,27 +181,6 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
     }
   };
 
-  const commitCreatePalette = async () => {
-    if (!paletteDraft || !projectPath) { setPaletteDraft(null); return; }
-    const { imagePath, name, cols, rows, tileW, tileH } = paletteDraft;
-    setPaletteDraft(null);
-    try {
-      await invoke("create_tile_palette", {
-        projectPath,
-        imageRelativePath: imagePath,
-        name: name || imagePath.split("/").pop()?.replace(/\.[^.]+$/, "") || "palette",
-        tilesetCols: parseInt(cols) || 4,
-        tilesetRows: parseInt(rows) || 4,
-        tileWidth: parseInt(tileW) || 16,
-        tileHeight: parseInt(tileH) || 16,
-        margin: 0,
-        spacing: 0,
-      });
-      await refresh();
-    } catch (e) {
-      console.error("create_tile_palette failed:", e);
-    }
-  };
 
   const handleDrop = async (e: React.DragEvent, targetFolderPath: string) => {
     e.preventDefault();
@@ -257,10 +238,7 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
               setSpriteEditorComp(initial);
               setSpriteEditorPath(node.path);
             }},
-            { label: "Create Tile Palette…", icon: "◧", onClick: () => {
-              const stem = node.name.replace(/\.[^.]+$/, "");
-              setPaletteDraft({ imagePath: node.path, name: stem, cols: "4", rows: "4", tileW: "16", tileH: "16" });
-            }},
+            { label: "Create Tile Palette…", icon: "◧", onClick: () => onCreatePalette?.(node.path) },
           ]
         : []),
       ...(node.is_dir ? [
@@ -456,43 +434,6 @@ export default function FileBrowser({ projectPath, onOpenScript, onOpenScene, on
           </>
         )}
       </div>
-
-      {paletteDraft && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }} onClick={() => setPaletteDraft(null)}>
-          <div style={{
-            background: "var(--paper)", border: "1px solid var(--rule)",
-            padding: "20px 24px", minWidth: "280px", display: "flex", flexDirection: "column", gap: "12px",
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: "13px", fontFamily: "var(--font-ui)", color: "var(--ink)", fontWeight: 500 }}>
-              Create Tile Palette
-            </div>
-            <div style={{ fontSize: "10px", fontFamily: "var(--font-mono)", color: "var(--ink-3)" }}>
-              {paletteDraft.imagePath}
-            </div>
-            {(["name", "cols", "rows", "tileW", "tileH"] as const).map(field => {
-              const labels: Record<string, string> = { name: "name", cols: "columns", rows: "rows", tileW: "tile width", tileH: "tile height" };
-              return (
-                <div key={field} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ width: "72px", fontSize: "11px", color: "var(--ink-3)", fontFamily: "var(--font-ui)", flexShrink: 0 }}>{labels[field]}</span>
-                  <input
-                    value={paletteDraft[field]}
-                    onChange={e => setPaletteDraft({ ...paletteDraft, [field]: e.target.value })}
-                    onKeyDown={e => { if (e.key === "Enter") commitCreatePalette(); if (e.key === "Escape") setPaletteDraft(null); }}
-                    style={{ flex: 1, height: "22px", background: "var(--bg-1)", border: "1px solid var(--rule)", color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "0 6px", outline: "none" }}
-                  />
-                </div>
-              );
-            })}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "4px" }}>
-              <button onClick={() => setPaletteDraft(null)} style={{ background: "none", border: "1px solid var(--rule)", color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "3px 10px", cursor: "pointer" }}>Cancel</button>
-              <button onClick={commitCreatePalette} style={{ background: "var(--moss)", border: "none", color: "var(--paper)", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "3px 10px", cursor: "pointer" }}>Create</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {spriteEditorPath && spriteEditorComp && (
         <AnimClipEditor

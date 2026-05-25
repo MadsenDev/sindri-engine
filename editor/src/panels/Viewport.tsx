@@ -1016,7 +1016,7 @@ function drawEntity(
     | { type: "Transform"; x: number; y: number; scale_x: number; scale_y: number; rotation: number }
     | undefined;
   const sprite = entity.components.find(c => c.type === "Sprite") as
-    | { type: "Sprite"; width: number; height: number; color: [number, number, number, number] }
+    | { type: "Sprite"; texture_path: string; width: number; height: number; flip_x: boolean; flip_y: boolean; color: [number, number, number, number] }
     | undefined;
   const animSprite = entity.components.find(c => c.type === "AnimatedSprite") as
     | { type: "AnimatedSprite"; texture_path: string; cols: number; rows: number; width: number; height: number; tint: [number,number,number,number]; clips: { name: string; start_frame: number; end_frame: number; fps: number; looping: boolean }[]; default_clip: string; flip_x: boolean; flip_y: boolean }
@@ -1231,8 +1231,33 @@ function drawEntity(
       ctx.fillStyle = "rgba(77,166,255,0.25)";
       ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
     }
+  } else if (sprite?.texture_path && imgCache) {
+    // Regular sprite with texture
+    let img = imgCache.get(sprite.texture_path);
+    if (img === undefined) {
+      const el = new Image();
+      el.onload = () => imgCache.set(sprite.texture_path, el);
+      el.onerror = () => imgCache.set(sprite.texture_path, null);
+      imgCache.set(sprite.texture_path, null);
+      el.src = sprite.texture_path.startsWith("/") ? sprite.texture_path : `http://localhost:7878/assets/${sprite.texture_path}`;
+      img = null;
+    }
+    if (img) {
+      const t = sprite.color;
+      ctx.globalAlpha = t[3];
+      if (sprite.flip_x || sprite.flip_y) {
+        ctx.scale(sprite.flip_x ? -1 : 1, sprite.flip_y ? -1 : 1);
+      }
+      ctx.drawImage(img, -screenW / 2, -screenH / 2, screenW, screenH);
+      ctx.globalAlpha = 1;
+    } else {
+      // Texture loading — show tinted placeholder
+      const t = sprite.color;
+      ctx.fillStyle = `rgba(${Math.round(t[0]*255)},${Math.round(t[1]*255)},${Math.round(t[2]*255)},0.25)`;
+      ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
+    }
   } else {
-    // Regular sprite or placeholder fill
+    // No texture — solid color fill or generic placeholder
     const color = sprite
       ? `rgba(${Math.round(sprite.color[0]*255)},${Math.round(sprite.color[1]*255)},${Math.round(sprite.color[2]*255)},${(sprite.color[3]*0.5).toFixed(2)})`
       : "rgba(77,166,255,0.25)";
@@ -1240,22 +1265,24 @@ function drawEntity(
     ctx.fillRect(-screenW / 2, -screenH / 2, screenW, screenH);
   }
 
-  // Entity outline
-  const outlineColor = isSelected
-    ? SELECTED_COLOR
-    : sprite ? `rgba(${Math.round(sprite.color[0]*255)},${Math.round(sprite.color[1]*255)},${Math.round(sprite.color[2]*255)},0.9)`
-    : ENTITY_COLOR;
-  ctx.strokeStyle = outlineColor;
-  ctx.lineWidth = isSelected ? 2 : 1;
-  ctx.strokeRect(-screenW / 2, -screenH / 2, screenW, screenH);
+  // Entity outline — always for selected, gizmos-gated otherwise
+  if (gizmos || isSelected) {
+    const outlineColor = isSelected
+      ? SELECTED_COLOR
+      : sprite ? `rgba(${Math.round(sprite.color[0]*255)},${Math.round(sprite.color[1]*255)},${Math.round(sprite.color[2]*255)},0.9)`
+      : ENTITY_COLOR;
+    ctx.strokeStyle = outlineColor;
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeRect(-screenW / 2, -screenH / 2, screenW, screenH);
+  }
   ctx.restore();
 
   if (isSelected && activeTool && activeTool !== "select") {
     drawToolGizmo(ctx, sx, sy, activeTool, cam.zoom);
   }
 
-  // Collider outline (rotates with entity)
-  if (collider) {
+  // Collider outline — always shown when editing, gizmos-gated otherwise
+  if (collider && (gizmos || isSelected)) {
     const activeCollider = colliderDraft ?? collider;
     const { sx: colCx, sy: colCy } = worldToScreen(
       tx + activeCollider.offset_x,
@@ -1276,7 +1303,6 @@ function drawEntity(
     ctx.strokeRect(-colW / 2, -colH / 2, colW, colH);
     ctx.setLineDash([]);
 
-    // Handles at edge midpoints in local space
     if (editingCollider) {
       const handles: [number, number][] = [
         [-colW / 2, 0],
@@ -1296,14 +1322,16 @@ function drawEntity(
     ctx.restore();
   }
 
-  // Origin dot
-  ctx.fillStyle = isSelected ? SELECTED_COLOR : ENTITY_COLOR;
-  ctx.beginPath();
-  ctx.arc(sx, sy, isSelected ? 3.5 : 2.5, 0, Math.PI * 2);
-  ctx.fill();
+  // Origin dot — always for selected, gizmos-gated otherwise
+  if (gizmos || isSelected) {
+    ctx.fillStyle = isSelected ? SELECTED_COLOR : ENTITY_COLOR;
+    ctx.beginPath();
+    ctx.arc(sx, sy, isSelected ? 3.5 : 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  // Name label (only when not too zoomed out)
-  if (cam.zoom > 0.3) {
+  // Name label — gizmos-gated
+  if (gizmos && cam.zoom > 0.3) {
     ctx.font = `${Math.min(11, Math.max(9, cam.zoom * 10))}px monospace`;
     ctx.fillStyle = isSelected ? SELECTED_COLOR : LABEL_COLOR;
     ctx.fillText(entity.name, sx + screenW / 2 + 4, sy - screenH / 2 + 10);

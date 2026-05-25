@@ -249,3 +249,57 @@ Sindri tracks input state per frame, ensuring:
 - **`is_key_down()`** returns `true` for all frames the key is held
 
 This makes it easy to distinguish between "key held" and "key just pressed" without manual state tracking.
+
+---
+
+## Lua Scripting Input (sindri-server runtime)
+
+> The following applies to **Lua scripts** running under `sindri-server`, not to Rust game code.
+
+### Action-based input (preferred)
+
+Actions are defined in `input_map.json` at the project root and edited in the editor's **Input** tab.
+
+```lua
+-- Check action state
+input.pressed("jump")           -- bool: any bound key/button currently held
+input.just_pressed("jump")      -- bool: true only on the first frame
+input.just_released("jump")     -- bool: true only on the frame it was released
+input.axis("move")              -- -1..1 from a key_axis or gamepad_axis binding
+```
+
+### `input_map.json` format
+
+```json
+{
+  "actions": [
+    { "name": "jump", "bindings": [
+        { "type": "key", "key": " " },
+        { "type": "gamepad_button", "button": "South" }
+    ]},
+    { "name": "move", "bindings": [
+        { "type": "key_axis", "negative": "a", "positive": "d" },
+        { "type": "gamepad_axis", "axis": "LeftStickX", "deadzone": 0.2 }
+    ]}
+  ]
+}
+```
+
+Binding types:
+- `key` — single key held check, `"key"` field is the raw key name (e.g. `"a"`, `" "`, `"ArrowLeft"`)
+- `key_axis` — two keys mapped to −1/+1, `"negative"` and `"positive"` fields
+- `gamepad_button` — `"button"` field: `South`, `North`, `East`, `West`, `LeftTrigger`, `RightTrigger`, `LeftThumb`, `RightThumb`, `Start`, `Select`, `DPadUp`, `DPadDown`, `DPadLeft`, `DPadRight`
+- `gamepad_axis` — `"axis"` field: `LeftStickX`, `LeftStickY`, `RightStickX`, `RightStickY`, `LeftZ`, `RightZ`; `"deadzone"` float (default 0.2)
+
+### Raw key globals (legacy)
+
+```lua
+key_down("ArrowLeft")    -- bool, key currently held
+key_pressed("Space")     -- bool, pressed this frame only (raw key name)
+```
+
+Raw key names match browser `KeyboardEvent.key` values: `"a"`–`"z"`, `"0"`–`"9"`, `"ArrowLeft"`, `"ArrowRight"`, `"ArrowUp"`, `"ArrowDown"`, `" "` (space), `"Enter"`, `"Escape"`, `"Shift"`, `"Control"`, `"Alt"`, `"Tab"`.
+
+### Editor configuration
+
+Open the **Input** tab in the left panel to add/edit/remove actions and their bindings. Supports live capture for keyboard bindings. Changes are saved to `input_map.json` and take effect immediately on the next play session.

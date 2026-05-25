@@ -410,6 +410,14 @@ impl Renderer {
                             self.draw_polygon_no_occlusion(frame, &points, color, camera)?;
                         }
                     }
+                    ColliderShape::Triangle { a, b, c } => {
+                        let pts = [Vec2::new(a[0], a[1]), Vec2::new(b[0], b[1]), Vec2::new(c[0], c[1])];
+                        let points: Vec<_> = pts
+                            .into_iter()
+                            .map(|p| body_pos + rotate_vec2(offset + p, body_rot))
+                            .collect();
+                        self.draw_polygon_no_occlusion(frame, &points, color, camera)?;
+                    }
                 }
             }
         }

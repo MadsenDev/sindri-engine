@@ -1,10 +1,72 @@
 # Pathfinding
 
+Sindri includes both a **NavGrid scene component** (editor + Lua) and a lower-level **Rust A* API** for game code.
+
+---
+
+## NavGrid Component (Editor + Lua)
+
+The `NavGrid` component is the primary way to add pathfinding to a scene. Add it to any entity in the editor. It stores walkability state and supports two pathfinding modes.
+
+### Component fields
+
+```rust
+pub struct NavGrid {
+    pub cols: u32,
+    pub rows: u32,
+    pub cell_size: f32,
+    pub walkable: Vec<bool>,     // flat array, row-major
+    pub mode: NavGridMode,       // TopDown | Platformer
+}
+```
+
+`NavGridMode::TopDown` — 8-directional A* pathfinding.
+`NavGridMode::Platformer` — Jump-arc graph pathfinding for platformer games.
+
+### Lua API — `self:nav_grid()`
+
+```lua
+local nav = self:nav_grid()
+if nav == nil then return end
+
+-- Pathfinding
+nav:find_path({x,y}, {x,y})          -- returns [{x,y},...] or nil (world coords)
+nav:is_walkable(tx, ty)               -- bool
+nav:set_walkable(tx, ty, bool)        -- queued update
+
+-- Coordinate conversion
+nav:world_to_tile({x,y})              -- {x, y} tile coord
+nav:tile_to_world(tx, ty)             -- {x, y} world coord
+
+-- Bulk operations
+nav:build_from_tilemap(entity_id, {blocked_tile_ids...})  -- auto-fill walkability from tilemap
+nav:fill_all(bool)                    -- set all cells walkable/blocked
+```
+
+Shortcut (no need to get the nav_grid):
+```lua
+local path = self:find_path({x = target_x, y = target_y})
+if path then
+    -- path is [{x,y}, ...] world positions
+end
+```
+
+### Editor support
+
+- Add a `NavGrid` component in the inspector — set cols, rows, cell_size, and mode
+- Editor renders walkability gizmos (green = walkable, red = blocked) as an overlay in the scene view
+- Click cells in the gizmo to toggle walkability (when NavGrid entity is selected)
+- `nav:build_from_tilemap()` auto-populates walkability from a Tilemap entity's solid tiles
+
+---
+
+## Rust A* API (game code)
+
 Sindri includes an A* pathfinding implementation for finding optimal paths on 2D grids.
 
 ## Overview
 
-The pathfinding system provides:
+The Rust pathfinding system provides:
 - **A* algorithm** - Optimal pathfinding with heuristic search
 - **8-directional movement** - Supports diagonal movement
 - **Grid-based** - Works with discrete grid cells

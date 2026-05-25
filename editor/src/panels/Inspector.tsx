@@ -95,9 +95,10 @@ interface Props {
   projectPath?: string | null;
   tilemapEdit?: TilemapEdit;
   onTilemapEditChange?: (e: TilemapEdit) => void;
+  onOpenPalette?: (path: string) => void;
 }
 
-export default function Inspector({ entity, selectedComponent, onSelectComponent, onSceneChange, onOpenScript, onAskAI, suggestionModel, projectFiles = [], projectPath, tilemapEdit, onTilemapEditChange }: Props) {
+export default function Inspector({ entity, selectedComponent, onSelectComponent, onSceneChange, onOpenScript, onAskAI, suggestionModel, projectFiles = [], projectPath, tilemapEdit, onTilemapEditChange, onOpenPalette }: Props) {
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[] | null>(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -210,6 +211,7 @@ export default function Inspector({ entity, selectedComponent, onSelectComponent
             projectPath={projectPath}
             tilemapEdit={tilemapEdit}
             onTilemapEditChange={onTilemapEditChange}
+            onOpenPalette={onOpenPalette}
           />
         ) : (
           <>
@@ -400,7 +402,7 @@ function EmptyInspector({ onAskAI }: { onAskAI?: (prompt: string, mode: "send" |
 
 // ─── Single component view ────────────────────────────────────────────────────
 
-function ComponentView({ entity, component, componentIdx, onBack, onSceneChange, onOpenScript, projectFiles, projectPath, tilemapEdit, onTilemapEditChange }: {
+function ComponentView({ entity, component, componentIdx, onBack, onSceneChange, onOpenScript, projectFiles, projectPath, tilemapEdit, onTilemapEditChange, onOpenPalette }: {
   entity: Entity;
   component: Component;
   componentIdx: number;
@@ -411,6 +413,7 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
   projectPath?: string | null;
   tilemapEdit?: TilemapEdit;
   onTilemapEditChange?: (e: TilemapEdit) => void;
+  onOpenPalette?: (path: string) => void;
 }) {
   const icon = COMPONENT_ICON[component.type] ?? "·";
 
@@ -455,7 +458,7 @@ function ComponentView({ entity, component, componentIdx, onBack, onSceneChange,
         {component.type === "Tilemap"     && (() => {
           const t = entity.components.find(c => c.type === "Transform") as Extract<Component, { type: "Transform" }> | undefined;
           const te = tilemapEdit ?? { paletteIdx: 0, tileIdx: 0, layerIdx: 0, mode: "draw" as const, selectedPrefabPath: null };
-          return <TilemapFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} projectPath={projectPath} entityX={t?.x ?? 0} entityY={t?.y ?? 0} tilemapEdit={te} onTilemapEditChange={onTilemapEditChange ?? (() => {})} />;
+          return <TilemapFields comp={component} entityId={entity.id} componentIdx={componentIdx} onSceneChange={onSceneChange} projectFiles={projectFiles} projectPath={projectPath} entityX={t?.x ?? 0} entityY={t?.y ?? 0} tilemapEdit={te} onTilemapEditChange={onTilemapEditChange ?? (() => {})} onOpenPalette={onOpenPalette} />;
         })()}
       </div>
     </>
