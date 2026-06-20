@@ -36,12 +36,20 @@ pub(crate) fn provider_api_key(provider: &str) -> Result<String, String> {
     }
 }
 
-pub(crate) fn emit_ai_stream(app: &tauri::AppHandle, request_id: &str, kind: &str, text: impl Into<String>) {
-    let _ = app.emit("ai://stream", AiStreamEvent {
-        request_id: request_id.to_string(),
-        kind: kind.to_string(),
-        text: text.into(),
-    });
+pub(crate) fn emit_ai_stream(
+    app: &tauri::AppHandle,
+    request_id: &str,
+    kind: &str,
+    text: impl Into<String>,
+) {
+    let _ = app.emit(
+        "ai://stream",
+        AiStreamEvent {
+            request_id: request_id.to_string(),
+            kind: kind.to_string(),
+            text: text.into(),
+        },
+    );
 }
 
 pub(crate) async fn request_ai_text(
@@ -58,7 +66,30 @@ pub(crate) async fn request_ai_text(
     }?;
 
     if text.trim().is_empty() {
-        Err(format!("{provider} returned an empty response for model `{model}`"))
+        Err(format!(
+            "{provider} returned an empty response for model `{model}`"
+        ))
+    } else {
+        Ok(text)
+    }
+}
+
+pub(crate) async fn request_ai_json_text(
+    client: &reqwest::Client,
+    provider: &str,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    let text = match provider {
+        "openai" => request_openai_text_with_json_mode(client, model, messages).await,
+        "openrouter" => request_openrouter_text_with_json_mode(client, model, messages).await,
+        _ => request_ai_text(client, provider, model, messages).await,
+    }?;
+
+    if text.trim().is_empty() {
+        Err(format!(
+            "{provider} returned an empty JSON response for model `{model}`"
+        ))
     } else {
         Ok(text)
     }
@@ -101,15 +132,36 @@ async fn request_openai_text(
     model: &str,
     messages: Vec<serde_json::Value>,
 ) -> Result<String, String> {
+    request_openai_text_inner(client, model, messages, false).await
+}
+
+async fn request_openai_text_with_json_mode(
+    client: &reqwest::Client,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    request_openai_text_inner(client, model, messages, true).await
+}
+
+async fn request_openai_text_inner(
+    client: &reqwest::Client,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+    json_mode: bool,
+) -> Result<String, String> {
     let key = provider_api_key("openai")?;
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false
+    });
+    if json_mode {
+        body["response_format"] = serde_json::json!({ "type": "json_object" });
+    }
     let resp = client
         .post("https://api.openai.com/v1/chat/completions")
         .bearer_auth(key)
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "stream": false
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -120,7 +172,9 @@ async fn request_openai_text(
     value["choices"][0]["message"]["content"]
         .as_str()
         .map(str::to_string)
-        .ok_or_else(|| format!("OpenAI response did not include choices[0].message.content: {value}"))
+        .ok_or_else(|| {
+            format!("OpenAI response did not include choices[0].message.content: {value}")
+        })
 }
 
 /// Extract a readable message from an OpenRouter error response.
@@ -143,17 +197,38 @@ async fn request_openrouter_text(
     model: &str,
     messages: Vec<serde_json::Value>,
 ) -> Result<String, String> {
+    request_openrouter_text_inner(client, model, messages, false).await
+}
+
+async fn request_openrouter_text_with_json_mode(
+    client: &reqwest::Client,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    request_openrouter_text_inner(client, model, messages, true).await
+}
+
+async fn request_openrouter_text_inner(
+    client: &reqwest::Client,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+    json_mode: bool,
+) -> Result<String, String> {
     let key = provider_api_key("openrouter")?;
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false
+    });
+    if json_mode {
+        body["response_format"] = serde_json::json!({ "type": "json_object" });
+    }
     let resp = client
         .post("https://openrouter.ai/api/v1/chat/completions")
         .bearer_auth(key)
         .header("HTTP-Referer", "https://sindri.gg")
         .header("X-Title", "Sindri Engine")
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "stream": false
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -164,7 +239,9 @@ async fn request_openrouter_text(
     value["choices"][0]["message"]["content"]
         .as_str()
         .map(str::to_string)
-        .ok_or_else(|| format!("OpenRouter response did not include choices[0].message.content: {value}"))
+        .ok_or_else(|| {
+            format!("OpenRouter response did not include choices[0].message.content: {value}")
+        })
 }
 
 fn anthropic_content_from_openai(content: &serde_json::Value) -> serde_json::Value {
@@ -306,7 +383,12 @@ pub(crate) async fn stream_ollama_text(
                 visible = visible.replace("</think>", "");
             }
             if !visible.is_empty() {
-                emit_ai_stream(&app, &request_id, if in_think { "thinking" } else { "delta" }, visible);
+                emit_ai_stream(
+                    &app,
+                    &request_id,
+                    if in_think { "thinking" } else { "delta" },
+                    visible,
+                );
             }
         }
     }
@@ -341,12 +423,16 @@ pub(crate) async fn stream_openai_text(
         while let Some(pos) = buffer.find('\n') {
             let line = buffer[..pos].trim().to_string();
             buffer = buffer[pos + 1..].to_string();
-            let Some(data) = line.strip_prefix("data: ") else { continue; };
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
             if data == "[DONE]" {
                 continue;
             }
             let value: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
-            let delta = value["choices"][0]["delta"]["content"].as_str().unwrap_or("");
+            let delta = value["choices"][0]["delta"]["content"]
+                .as_str()
+                .unwrap_or("");
             if !delta.is_empty() {
                 full.push_str(delta);
                 emit_ai_stream(&app, &request_id, "delta", delta);
@@ -385,10 +471,16 @@ pub(crate) async fn stream_openrouter_text(
         while let Some(pos) = buffer.find('\n') {
             let line = buffer[..pos].trim().to_string();
             buffer = buffer[pos + 1..].to_string();
-            let Some(data) = line.strip_prefix("data: ") else { continue; };
-            if data == "[DONE]" { continue; }
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            if data == "[DONE]" {
+                continue;
+            }
             let value: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
-            let delta = value["choices"][0]["delta"]["content"].as_str().unwrap_or("");
+            let delta = value["choices"][0]["delta"]["content"]
+                .as_str()
+                .unwrap_or("");
             if !delta.is_empty() {
                 full.push_str(delta);
                 emit_ai_stream(&app, &request_id, "delta", delta);
@@ -446,7 +538,9 @@ pub(crate) async fn stream_anthropic_text(
         while let Some(pos) = buffer.find('\n') {
             let line = buffer[..pos].trim().to_string();
             buffer = buffer[pos + 1..].to_string();
-            let Some(data) = line.strip_prefix("data: ") else { continue; };
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
             let value: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
             let delta = &value["delta"];
             match delta["type"].as_str() {
@@ -475,7 +569,9 @@ pub async fn get_ai_provider_status() -> Result<Vec<AiProviderStatus>, String> {
     Ok(vec![
         AiProviderStatus {
             provider: "ollama".into(),
-            configured: reqwest::get("http://localhost:11434/api/tags").await.is_ok(),
+            configured: reqwest::get("http://localhost:11434/api/tags")
+                .await
+                .is_ok(),
             default_model: "qwen2.5-coder:7b".into(),
         },
         AiProviderStatus {
@@ -505,7 +601,9 @@ pub async fn save_ai_api_key(provider: String, api_key: String) -> Result<(), St
     if api_key.is_empty() {
         return Err("API key cannot be empty".into());
     }
-    keychain_entry(&provider)?.set_password(api_key).map_err(|e| e.to_string())
+    keychain_entry(&provider)?
+        .set_password(api_key)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

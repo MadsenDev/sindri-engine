@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::{ContextFlags, OpenScriptContext};
-use super::client::{default_cloud_model, request_ai_text};
+use super::client::{default_cloud_model, request_ai_json_text};
 use super::spritesheet::analyze_spritesheet_for_message;
+use super::{ContextFlags, OpenScriptContext};
 use crate::engine_client::engine_url;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -141,7 +141,11 @@ async fn resolve_entity_id(
 // ── Script helpers ────────────────────────────────────────────────────────────
 
 pub(crate) async fn read_script_backup(client: &reqwest::Client, path: &str) -> ScriptBackup {
-    match client.get(engine_url(&format!("/script?path={}", path))).send().await {
+    match client
+        .get(engine_url(&format!("/script?path={}", path)))
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => ScriptBackup {
             path: path.to_string(),
             existed: true,
@@ -173,12 +177,45 @@ fn looks_like_edit_request(message: &str) -> bool {
     }
     let lower = message.to_lowercase();
     [
-        "add ", "make ", "create ", "update ", "change ", "fix ", "remove ", "delete ",
-        "attach ", "write ", "set ", "move ", "rename ", "jump", "script",
-        "connect", "rotate with", "follow", "can you",
+        "add ",
+        "make ",
+        "create ",
+        "update ",
+        "change ",
+        "fix ",
+        "remove ",
+        "delete ",
+        "attach ",
+        "write ",
+        "set ",
+        "move ",
+        "rename ",
+        "jump",
+        "script",
+        "connect",
+        "rotate with",
+        "follow",
     ]
     .iter()
     .any(|needle| lower.contains(needle))
+}
+
+fn extract_json_object(raw_text: &str) -> Option<&str> {
+    let raw_after_think = if let Some(end) = raw_text.find("</think>") {
+        raw_text[end + 8..].trim()
+    } else {
+        raw_text.trim()
+    };
+
+    let stripped = raw_after_think
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    let start = stripped.find('{')?;
+    let end = stripped.rfind('}').map(|i| i + 1)?;
+    (start < end).then_some(&stripped[start..end])
 }
 
 fn looks_like_player_jump_request(message: &str) -> bool {
@@ -191,19 +228,20 @@ async fn stage_player_jump_fallback(
     scene_json: Option<&str>,
     open_script: Option<&OpenScriptContext>,
 ) -> Result<Option<ProposalChange>, String> {
-    let scene = match scene_json.and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok()) {
-        Some(scene) => scene,
-        None => fetch_scene(client).await?,
-    };
+    let scene =
+        match scene_json.and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok()) {
+            Some(scene) => scene,
+            None => fetch_scene(client).await?,
+        };
 
-    let Some(player) = scene["entities"]
-        .as_object()
-        .and_then(|entities| entities.values().find(|entity| {
-            entity["name"].as_str()
+    let Some(player) = scene["entities"].as_object().and_then(|entities| {
+        entities.values().find(|entity| {
+            entity["name"]
+                .as_str()
                 .map(|name| name.eq_ignore_ascii_case("player"))
                 .unwrap_or(false)
-        }))
-    else {
+        })
+    }) else {
         return Ok(None);
     };
 
@@ -240,7 +278,10 @@ async fn stage_player_jump_fallback(
     for (idx, component) in components.iter().enumerate() {
         if component["type"].as_str() == Some("Script") {
             client
-                .patch(engine_url(&format!("/scene/entity/{}/component/{}", player_id, idx)))
+                .patch(engine_url(&format!(
+                    "/scene/entity/{}/component/{}",
+                    player_id, idx
+                )))
                 .json(&serde_json::json!({ "path": script_path }))
                 .send()
                 .await
@@ -522,7 +563,10 @@ pub async fn generate_proposal(
         };
         resp.and_then(|v| {
             v["errors"].as_array().map(|errs| {
-                errs.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("\n")
+                errs.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
             })
         })
     } else {
@@ -531,8 +575,11 @@ pub async fn generate_proposal(
 
     let is_animation_request = {
         let lower = message.to_lowercase();
-        lower.contains("anim") || lower.contains("sprite") || lower.contains("clip")
-            || lower.contains("frame") || lower.contains("spritesheet")
+        lower.contains("anim")
+            || lower.contains("sprite")
+            || lower.contains("clip")
+            || lower.contains("frame")
+            || lower.contains("spritesheet")
     };
     let spritesheet = if is_animation_request {
         analyze_spritesheet_for_message(&message, scene.as_deref()).await
@@ -544,18 +591,32 @@ pub async fn generate_proposal(
     let provider = provider.unwrap_or_else(|| "ollama".to_string());
     let model = model.unwrap_or_else(|| {
         if provider == "ollama" {
-            if use_vision { "qwen2.5-vl:7b" } else { "qwen2.5-coder:7b" }.to_string()
+            if use_vision {
+                "qwen2.5-vl:7b"
+            } else {
+                "qwen2.5-coder:7b"
+            }
+            .to_string()
         } else {
             default_cloud_model(&provider).to_string()
         }
     });
 
     let spritesheet_guidance = if let Some(ref ss) = spritesheet {
-        let row_desc: Vec<String> = ss.frames_per_row.iter().enumerate()
+        let row_desc: Vec<String> = ss
+            .frames_per_row
+            .iter()
+            .enumerate()
             .map(|(i, &n)| {
                 let start = i as u32 * ss.cols;
                 let end = start + n - 1;
-                format!("  row {i}: {n} frames (start_frame={start}, end_frame={end})", i=i, n=n, start=start, end=end)
+                format!(
+                    "  row {i}: {n} frames (start_frame={start}, end_frame={end})",
+                    i = i,
+                    n = n,
+                    start = start,
+                    end = end
+                )
             })
             .collect();
         format!(
@@ -666,30 +727,34 @@ Rules:
 
     let mut messages: Vec<serde_json::Value> =
         vec![serde_json::json!({ "role": "system", "content": system_prompt })];
-    let recent_history = if history.len() > 10 { &history[history.len() - 10..] } else { &history[..] };
+    let recent_history = if history.len() > 10 {
+        &history[history.len() - 10..]
+    } else {
+        &history[..]
+    };
     messages.extend_from_slice(recent_history);
     messages.push(serde_json::json!({ "role": "user", "content": user_content }));
 
-    let raw_text = request_ai_text(&client, &provider, &model, messages).await?;
+    let raw_text = request_ai_json_text(&client, &provider, &model, messages).await?;
     if raw_text.trim().is_empty() {
-        return Err(format!("{provider} returned an empty proposal response for model `{model}`"));
+        return Err(format!(
+            "{provider} returned an empty proposal response for model `{model}`"
+        ));
     }
 
-    let raw_after_think = if let Some(end) = raw_text.find("</think>") {
-        raw_text[end + 8..].trim().to_string()
-    } else {
-        raw_text.trim().to_string()
+    let Some(json_slice) = extract_json_object(&raw_text) else {
+        if !looks_like_edit_request(&message) {
+            return Ok(ProposalResponse {
+                prompt: message,
+                summary: raw_text.trim().to_string(),
+                changes: Vec::new(),
+            });
+        }
+        let preview: String = raw_text.chars().take(500).collect();
+        return Err(format!(
+            "AI response did not include proposal JSON for that edit request. Response preview: {preview}"
+        ));
     };
-
-    let stripped = raw_after_think
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-
-    let json_start = stripped.find('{').unwrap_or(0);
-    let json_end = stripped.rfind('}').map(|i| i + 1).unwrap_or(stripped.len());
-    let json_slice = if json_start < json_end { &stripped[json_start..json_end] } else { stripped };
 
     let parsed: serde_json::Value = serde_json::from_str(json_slice).map_err(|err| {
         let preview: String = raw_text.chars().take(500).collect();
@@ -701,7 +766,11 @@ Rules:
 
     let mut changes: Vec<ProposalChange> = Vec::new();
     for (i, c) in changes_raw.iter().enumerate() {
-        let id = c["id"].as_str().unwrap_or(&format!("c{}", i + 1)).trim().to_string();
+        let id = c["id"]
+            .as_str()
+            .unwrap_or(&format!("c{}", i + 1))
+            .trim()
+            .to_string();
         let label = c["label"].as_str().unwrap_or("Change").trim().to_string();
         let detail = c["detail"].as_str().unwrap_or("").trim().to_string();
 
@@ -753,8 +822,14 @@ Rules:
             } else {
                 let supported_action = matches!(
                     action_type,
-                    "edit_transform" | "delete_entity" | "write_script" | "rename_entity"
-                        | "add_component" | "remove_component" | "patch_component" | "attach_script"
+                    "edit_transform"
+                        | "delete_entity"
+                        | "write_script"
+                        | "rename_entity"
+                        | "add_component"
+                        | "remove_component"
+                        | "patch_component"
+                        | "attach_script"
                 );
                 if !supported_action {
                     eprintln!("[generate_proposal] skipped unsupported action type: {action_type}");
@@ -781,23 +856,37 @@ Rules:
                         if !script_new_contents.iter().any(|c| c.path == path) {
                             let new_content = client
                                 .get(engine_url(&format!("/script?path={}", path)))
-                                .send().await
+                                .send()
+                                .await
                                 .ok()
-                                .and_then(|r| if r.status().is_success() { Some(r) } else { None });
+                                .and_then(|r| {
+                                    if r.status().is_success() {
+                                        Some(r)
+                                    } else {
+                                        None
+                                    }
+                                });
                             let content = if let Some(r) = new_content {
                                 r.text().await.unwrap_or_default()
                             } else {
                                 action["content"].as_str().unwrap_or("").to_string()
                             };
-                            script_new_contents.push(ScriptNewContent { path: path.to_string(), content });
+                            script_new_contents.push(ScriptNewContent {
+                                path: path.to_string(),
+                                content,
+                            });
                         }
                     }
                 }
 
                 let modifies_entity = matches!(
                     action_type,
-                    "add_component" | "remove_component" | "patch_component"
-                        | "edit_transform" | "rename_entity" | "attach_script"
+                    "add_component"
+                        | "remove_component"
+                        | "patch_component"
+                        | "edit_transform"
+                        | "rename_entity"
+                        | "attach_script"
                 );
                 if modifies_entity {
                     if let Ok(entity_id) = resolve_entity_id(action, &client).await {
@@ -837,7 +926,9 @@ Rules:
     }
 
     if changes.is_empty() && looks_like_player_jump_request(&message) {
-        if let Some(fallback) = stage_player_jump_fallback(&client, scene.as_deref(), open_script.as_ref()).await? {
+        if let Some(fallback) =
+            stage_player_jump_fallback(&client, scene.as_deref(), open_script.as_ref()).await?
+        {
             summary = "Staged jump controls for the player script.".to_string();
             changes.push(fallback);
         }
@@ -897,7 +988,11 @@ Rules:
         }
     }
 
-    Ok(ProposalResponse { prompt: message, summary, changes })
+    Ok(ProposalResponse {
+        prompt: message,
+        summary,
+        changes,
+    })
 }
 
 // ── Staged change management ──────────────────────────────────────────────────
@@ -911,7 +1006,11 @@ pub async fn commit_staged_change(
     change_id: Option<String>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
-    let all_ids: Vec<u64> = entity_ids.iter().chain(modified_entity_ids.iter()).copied().collect();
+    let all_ids: Vec<u64> = entity_ids
+        .iter()
+        .chain(modified_entity_ids.iter())
+        .copied()
+        .collect();
     if !all_ids.is_empty() {
         client
             .post(engine_url("/scene/staged/commit"))
@@ -955,7 +1054,9 @@ pub async fn revert_staged_change(
         let scene_path = async {
             let r = reqwest::get(engine_url("/scene/path")).await?;
             r.text().await
-        }.await.unwrap_or_default();
+        }
+        .await
+        .unwrap_or_default();
         let scene_path = scene_path.trim_matches('"').to_string();
         for backup in &script_backups {
             if let Some(project_root) = std::path::Path::new(&scene_path).parent() {
@@ -974,7 +1075,9 @@ pub async fn revert_staged_change(
         let scene_path = async {
             let r = reqwest::get(engine_url("/scene/path")).await?;
             r.text().await
-        }.await.unwrap_or_default();
+        }
+        .await
+        .unwrap_or_default();
         let scene_path = scene_path.trim_matches('"').to_string();
         for path in &script_paths {
             if let Some(project_root) = std::path::Path::new(&scene_path).parent() {
@@ -1008,7 +1111,10 @@ async fn remove_change_from_proposal(change_id: Option<&str>) {
     if remaining == 0 {
         let _ = std::fs::remove_file(&proposal_path);
     } else {
-        let _ = std::fs::write(&proposal_path, serde_json::to_string_pretty(&parsed).unwrap_or_default());
+        let _ = std::fs::write(
+            &proposal_path,
+            serde_json::to_string_pretty(&parsed).unwrap_or_default(),
+        );
     }
 }
 
@@ -1043,13 +1149,19 @@ pub async fn get_pending_proposal() -> Result<Option<ProposalResponse>, String> 
         Err(_) => return Ok(None),
     };
     let scene: serde_json::Value = serde_json::from_str(&scene_json).unwrap_or_default();
-    let has_staged = scene["entities"].as_object()
-        .map(|ents| ents.values().any(|e| e["staged"].as_bool().unwrap_or(false)))
+    let has_staged = scene["entities"]
+        .as_object()
+        .map(|ents| {
+            ents.values()
+                .any(|e| e["staged"].as_bool().unwrap_or(false))
+        })
         .unwrap_or(false);
-    let has_script_changes = parsed["changes"].as_array()
+    let has_script_changes = parsed["changes"]
+        .as_array()
         .map(|changes| {
             changes.iter().any(|change| {
-                change["new_script_paths"].as_array()
+                change["new_script_paths"]
+                    .as_array()
                     .map(|paths| !paths.is_empty())
                     .unwrap_or(false)
             })
@@ -1061,40 +1173,61 @@ pub async fn get_pending_proposal() -> Result<Option<ProposalResponse>, String> 
     }
     let prompt = parsed["prompt"].as_str().unwrap_or("").to_string();
     let summary = parsed["summary"].as_str().unwrap_or("").to_string();
-    let changes = parsed["changes"].as_array().cloned().unwrap_or_default()
+    let changes = parsed["changes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
         .into_iter()
         .enumerate()
         .map(|(i, c)| ProposalChange {
-            id: c["id"].as_str().unwrap_or(&format!("c{}", i + 1)).to_string(),
+            id: c["id"]
+                .as_str()
+                .unwrap_or(&format!("c{}", i + 1))
+                .to_string(),
             label: c["label"].as_str().unwrap_or("Change").to_string(),
             detail: c["detail"].as_str().unwrap_or("").to_string(),
-            staged_entity_ids: c["staged_entity_ids"].as_array()
+            staged_entity_ids: c["staged_entity_ids"]
+                .as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
                 .unwrap_or_default(),
-            modified_entity_ids: c["modified_entity_ids"].as_array()
+            modified_entity_ids: c["modified_entity_ids"]
+                .as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
                 .unwrap_or_default(),
-            new_script_paths: c["new_script_paths"].as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            new_script_paths: c["new_script_paths"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
-            script_backups: c["script_backups"].as_array()
+            script_backups: c["script_backups"]
+                .as_array()
                 .map(|a| {
                     a.iter()
                         .filter_map(|v| serde_json::from_value::<ScriptBackup>(v.clone()).ok())
                         .collect()
                 })
                 .unwrap_or_default(),
-            script_new_contents: c["script_new_contents"].as_array()
+            script_new_contents: c["script_new_contents"]
+                .as_array()
                 .map(|a| {
                     a.iter()
-                        .filter_map(|v| Some(ScriptNewContent {
-                            path: v["path"].as_str()?.to_string(),
-                            content: v["content"].as_str().unwrap_or("").to_string(),
-                        }))
+                        .filter_map(|v| {
+                            Some(ScriptNewContent {
+                                path: v["path"].as_str()?.to_string(),
+                                content: v["content"].as_str().unwrap_or("").to_string(),
+                            })
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
         })
         .collect();
-    Ok(Some(ProposalResponse { prompt, summary, changes }))
+    Ok(Some(ProposalResponse {
+        prompt,
+        summary,
+        changes,
+    }))
 }
