@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0d1117; }
+  body { font-family: "Pixelify Sans", monospace; }
+  a { color: #c4beae; text-decoration: none; }
+  a:hover { color: #e6e1d4; }
+  ::selection { background: rgba(240,192,80,0.22); }
+  html { scroll-behavior: smooth; }
+  @keyframes sndr-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @media (max-width: 860px) {
+    .sndr-nav { display: none !important; }
+    .sndr-status { display: none !important; }
+  }
+  @media (max-width: 560px) {
+    .sndr-gh-label { display: none !important; }
+  }
+</style>
+</helmet>
+
+<div style="min-height: 100vh; background: #0d1117; color: #e6e1d4; font-family: 'Pixelify Sans', monospace; overflow-x: hidden;" data-screen-label="Sindri landing page">
+
+  <!-- ─── topbar ─── -->
+  <header data-screen-label="Topbar" style="position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 24px; height: 56px; padding: 0 clamp(16px, 4vw, 28px); background: #0d1117; border-bottom: 1px solid #2a3038;">
+    <a href="#top" style="display: inline-flex; align-items: center; gap: 10px; color: #e6e1d4; flex: none;">
+      <img src="assets/sindri-forge-dark.svg" alt="Sindri forge mark" style="width: 22px; height: 22px; display: block;">
+      <span style="font-weight: 700; font-size: 16px; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1;">S<span style="color: #f0c050;">I</span>NDRI</span>
+    </a>
+    <nav class="sndr-nav" style="display: flex; gap: 20px; font-size: 13px;">
+      <a href="#features" style="color: #8a8580;" style-hover="color: #e6e1d4;">features</a>
+      <a href="#ai" style="color: #8a8580;" style-hover="color: #e6e1d4;">ai flow</a>
+      <a href="#philosophy" style="color: #8a8580;" style-hover="color: #e6e1d4;">philosophy</a>
+      <a href="#scripting" style="color: #8a8580;" style-hover="color: #e6e1d4;">scripting</a>
+      <a href="#pixel" style="color: #8a8580;" style-hover="color: #e6e1d4;">pixel</a>
+    </nav>
+    <div style="flex: 1;"></div>
+    <div class="sndr-status" style="display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: #5a554e;">
+      <span style="width: 6px; height: 6px; background: #9bb070; display: inline-block;"></span>
+      <span>engine {{ engineVersion }} · ready</span>
+    </div>
+    <a href="https://github.com/vardirhq/sindri-engine" target="_blank" style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px solid #2a3038; background: #161b22; color: #e6e1d4; font-size: 12.5px; flex: none;" style-hover="background: #1e2530;">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M6 13v-2c-2.5.7-3.5-1-3.5-1-.4-1-1-1.3-1-1.3M9.5 13v-2.2c0-.6.2-1 .5-1.3 2-.2 4-1 4-4.2 0-.9-.3-1.7-.8-2.3.1-.2.4-1.1-.1-2.2 0 0-.7-.2-2.3.9a8 8 0 0 0-4.2 0C5 .6 4.3.8 4.3.8c-.5 1.1-.2 2-.1 2.2-.5.6-.8 1.4-.8 2.3 0 3.2 2 4 4 4.2"></path></svg>
+      <span class="sndr-gh-label">GitHub</span>
+    </a>
+  </header>
+
+  <!-- ─── hero ─── -->
+  <section id="top" data-screen-label="Hero" style="position: relative; border-bottom: 1px solid #2a3038;">
+    <div style="position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(230,225,212,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(230,225,212,0.04) 1px, transparent 1px), linear-gradient(rgba(230,225,212,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(230,225,212,0.08) 1px, transparent 1px); background-size: 40px 40px, 40px 40px, 200px 200px, 200px 200px;"></div>
+    <div style="position: relative; max-width: 1060px; margin: 0 auto; padding: clamp(56px, 9vw, 104px) clamp(16px, 4vw, 28px) clamp(48px, 7vw, 80px); display: flex; flex-direction: column; gap: 28px; align-items: flex-start;">
+      <div style="display: inline-flex; align-items: center; gap: 10px; border: 1px solid #2a3038; background: #161b22; padding: 6px 12px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #c4beae;">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#f0c050" stroke-width="1.4" stroke-linecap="square"><path d="M8 1v4M8 11v4M1 8h4M11 8h4M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2"></path></svg>
+        <span>ai-as-peer · 2d engine · rust · lua</span>
+      </div>
+      <h1 style="margin: 0; font-weight: 700; font-size: clamp(38px, 7.2vw, 76px); line-height: 1.06; letter-spacing: -0.01em; color: #e6e1d4; text-wrap: balance;">rust owns the engine.<br>lua owns gameplay.<br>the <span style="color: #f0c050;">ai</span> understands both.</h1>
+      <p style="margin: 0; max-width: 560px; font-size: clamp(14px, 2vw, 16px); line-height: 1.55; color: #c4beae;">Sindri is a 2d game engine, editor workspace, and local AI-assisted tooling stack written in Rust. The AI lives inside the workspace as a peer — every action lands as a reviewable proposal, so you stay in control.</p>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+        <a href="https://github.com/vardirhq/sindri-engine" target="_blank" style="display: inline-flex; align-items: center; height: 42px; padding: 0 20px; background: #e6e1d4; color: #0d1117; font-weight: 600; font-size: 14px;" style-hover="background: #c4beae; color: #0d1117;">View on GitHub</a>
+        <a href="https://github.com/vardirhq/sindri-engine/tree/main/docs" target="_blank" style="display: inline-flex; align-items: center; height: 42px; padding: 0 20px; border: 1px solid #2a3038; background: #161b22; color: #e6e1d4; font-size: 14px;" style-hover="background: #1e2530;">Read the docs</a>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; letter-spacing: 0.06em; color: #5a554e;">
+        <span>wgpu</span><span>·</span><span>rapier2d</span><span>·</span><span>lua 5.4</span><span>·</span><span>ollama · local-first</span><span>·</span><span>mit / apache-2.0</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── features ─── -->
+  <section id="features" data-screen-label="Features" style="background: #161b22; border-bottom: 1px solid #2a3038;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">01</span>
+        <span style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">what the engine already does</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 1px; background: #2a3038; border: 1px solid #2a3038;">
+        <sc-for list="{{ features }}" as="f" hint-placeholder-count="8">
+          <div style="background: #0d1117; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;" style-hover="background: #1e2530;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="display: inline-flex; color: #8a8580;">{{ f.icon }}</span>
+              <span style="font-weight: 600; font-size: 15px; color: #e6e1d4;">{{ f.title }}</span>
+            </div>
+            <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #8a8580;">{{ f.body }}</p>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: 0.06em; color: #5a554e;">{{ f.meta }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── ai flow ─── -->
+  <section id="ai" data-screen-label="AI flow" style="border-bottom: 1px solid #2a3038;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">02</span>
+        <span style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">ai flow · proposals, not actions</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <h2 style="margin: 0; font-weight: 600; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.15; color: #e6e1d4; text-wrap: balance;">Every AI action lands as a <span style="color: #f0c050;">reviewable proposal</span>.</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #c4beae;">The assistant is a peer collaborator with full agency over the project — it can stage scenes, scripts, and components. But nothing touches your project until you accept it. No cloud, no API key: everything runs locally through Ollama.</p>
+          <div style="display: flex; flex-direction: column; gap: 1px; background: #1f242c; border: 1px solid #1f242c;">
+            <sc-for list="{{ aiSteps }}" as="s" hint-placeholder-count="3">
+              <div style="display: flex; gap: 14px; padding: 14px 16px; background: #0d1117; align-items: baseline;">
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #f0c050; flex: none;">{{ s.n }}</span>
+                <div style="display: flex; flex-direction: column; gap: 3px;">
+                  <span style="font-weight: 600; font-size: 13.5px; color: #e6e1d4;">{{ s.title }}</span>
+                  <span style="font-size: 12.5px; line-height: 1.5; color: #8a8580;">{{ s.body }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <!-- proposal card mock -->
+        <div style="border: 1px solid #2a3038; background: #161b22; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #2a3038;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#f0c050" stroke-width="1.4" stroke-linecap="square"><path d="M8 1v4M8 11v4M1 8h4M11 8h4M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2"></path></svg>
+            <span style="font-weight: 600; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">AI proposal · awaiting review</span>
+            <div style="flex: 1;"></div>
+            <span style="width: 6px; height: 6px; background: #f0c050; display: inline-block; animation: sndr-pulse 2s infinite;"></span>
+          </div>
+          <div style="padding: 14px 16px; border-bottom: 1px solid #1f242c;">
+            <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #e6e1d4;">Make the drone follow the beacon and play a chime when it gets close.</p>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">you · cmd-k</span>
+          </div>
+          <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #1f242c;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 6px; border: 1px solid #2a3038; background: #242b36; color: #c4beae;">script</span>
+              <span style="font-size: 12.5px; color: #e6e1d4;">Rewrite update() to chase target</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">drone.lua</span>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.7; overflow-x: auto;">
+              <div style="color: #e05555; background: rgba(224,85,85,0.07); padding: 0 8px;">- local speed = 0</div>
+              <div style="color: #f0c050; background: rgba(240,192,80,0.10); padding: 0 8px;">+ local target = world:find("Beacon")</div>
+              <div style="color: #f0c050; background: rgba(240,192,80,0.10); padding: 0 8px;">+ self:move_towards(target, 140 * dt)</div>
+            </div>
+          </div>
+          <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #1f242c;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 6px; border: 1px solid #2a3038; background: #242b36; color: #c4beae;">component</span>
+              <span style="font-size: 12.5px; color: #e6e1d4;">Add AudioSource · chime.ogg</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">Drone</span>
+            </div>
+            <div style="border: 1.5px dashed #f0c050; background: rgba(240,192,80,0.06); padding: 8px 10px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c4beae;">ghost · AudioSource { clip: "chime.ogg", range: 96 }</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px;">
+            <button style="height: 30px; padding: 0 14px; white-space: nowrap; border: 1px solid #2a3038; background: #e6e1d4; color: #0d1117; font-family: 'Pixelify Sans', monospace; font-weight: 600; font-size: 12.5px; cursor: pointer;" style-hover="background: #c4beae;">Accept all</button>
+            <button style="height: 30px; padding: 0 14px; white-space: nowrap; border: 1px solid #2a3038; background: #161b22; color: #c4beae; font-family: 'Pixelify Sans', monospace; font-size: 12.5px; cursor: pointer;" style-hover="background: #1e2530;">Reject all</button>
+            <button style="height: 30px; padding: 0 14px; white-space: nowrap; border: 1px solid #2a3038; background: #161b22; color: #c4beae; font-family: 'Pixelify Sans', monospace; font-size: 12.5px; cursor: pointer;" style-hover="background: #1e2530;">Refine…</button>
+            <div style="flex: 1;"></div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">2 changes pending</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── philosophy ─── -->
+  <section id="philosophy" data-screen-label="Philosophy" style="background: #161b22; border-bottom: 1px solid #2a3038;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">03</span>
+        <span style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">philosophy · on layering</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 18px;">
+          <h2 style="margin: 0; font-weight: 600; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; color: #e6e1d4; text-wrap: balance;">Not a giant everything-engine. A cohesive workflow.</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #c4beae;">The goal is not just to render sprites. The goal is to make gameplay iteration, scripting, tooling, and editor workflows feel cohesive. Rust is the right layer for the parts you write once and lean on forever; Lua is the right layer for the gameplay you rewrite twenty times a day.</p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <sc-for list="{{ pillars }}" as="p" hint-placeholder-count="4">
+              <div style="display: flex; gap: 10px; align-items: baseline;">
+                <span style="color: #9bb070; font-family: 'JetBrains Mono', monospace; font-size: 12px;">■</span>
+                <span style="font-size: 13.5px; line-height: 1.5; color: #c4beae;">{{ p }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="border: 1px solid #2a3038; background: #0d1117; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #1f242c;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">workspace</span>
+          </div>
+          <pre style="margin: 0; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7; color: #c4beae; overflow-x: auto;">crates/
+  sindri/          <span style="color: #5a554e;">engine core</span>
+  sindri-server/   <span style="color: #5a554e;">local engine/editor http server</span>
+  sindri-ai/       <span style="color: #5a554e;">ollama client + ai action types</span>
+
+editor/            <span style="color: #5a554e;">tauri 2 + react editor</span>
+examples/          <span style="color: #5a554e;">curated examples, not subsystem spam</span>
+docs/              <span style="color: #5a554e;">engine documentation</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── scripting ─── -->
+  <section id="scripting" data-screen-label="Scripting" style="border-bottom: 1px solid #2a3038;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">04</span>
+        <span style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">scripting · lua with hot reload</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start;">
+        <div style="border: 1px solid #2a3038; background: #161b22; min-width: 0; order: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #2a3038;">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8a8580" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M5 4L2 8l3 4M11 4l3 4-3 4"></path></svg>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8a8580;">player.lua</span>
+            <div style="flex: 1;"></div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #9bb070;">● hot reload</span>
+          </div>
+          <div style="margin: 0; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7; color: #c4beae; overflow-x: auto; white-space: pre;">
+  <div><span style="color: #8a8580;">local</span> speed = params.speed <span style="color: #8a8580;">or</span> <span style="color: #6dbcdb;">220.0</span></div>
+  <div>&nbsp;</div>
+  <div><span style="color: #8a8580;">function</span> <span style="color: #e6e1d4;">on_update</span>(self, dt)</div>
+  <div>  <span style="color: #8a8580;">local</span> input = self:input()</div>
+  <div>  <span style="color: #8a8580;">local</span> transform = self:transform()</div>
+  <div>&nbsp;</div>
+  <div>  <span style="color: #8a8580;">local</span> move = input:axis(<span style="color: #9bb070;">"A"</span>, <span style="color: #9bb070;">"D"</span>)</div>
+  <div>  <span style="color: #8a8580;">local</span> pos = transform:position()</div>
+  <div>&nbsp;</div>
+  <div>  transform:set_position(</div>
+  <div>    vec2(pos.x + move * speed * dt, pos.y)</div>
+  <div>  )</div>
+  <div><span style="color: #8a8580;">end</span></div>
+</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 18px;">
+          <h2 style="margin: 0; font-weight: 600; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; color: #e6e1d4; text-wrap: balance;">Entity-attached scripts. Save the file, see it live.</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #c4beae;">Lua 5.4 through mlua, with lifecycle callbacks, deferred world mutation, collision and trigger callbacks, and physics, camera, animation, and tilemap helpers. Scripts hot-reload while the game runs.</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <sc-for list="{{ scriptUses }}" as="u" hint-placeholder-count="6">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 8px; border: 1px solid #2a3038; background: #161b22; color: #8a8580;">{{ u }}</span>
+            </sc-for>
+          </div>
+          <div style="border: 1px solid #2a3038; background: #161b22;">
+            <div style="padding: 10px 14px; border-bottom: 1px solid #1f242c; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">quick start</div>
+            <pre style="margin: 0; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.8; color: #c4beae; overflow-x: auto;"><span style="color: #5a554e;">$</span> cargo run -p hello_sindri
+<span style="color: #5a554e;">$</span> cargo run -p scripted_asteroids</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── examples ─── -->
+  <section id="examples" data-screen-label="Examples" style="background: #161b22; border-bottom: 1px solid #2a3038;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">05</span>
+        <span style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">curated example suite</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 1px; background: #2a3038; border: 1px solid #2a3038;">
+        <sc-for list="{{ examples }}" as="ex" hint-placeholder-count="5">
+          <a href="{{ ex.url }}" target="_blank" style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 14px 18px; background: #0d1117; color: #c4beae;" style-hover="background: #1e2530;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: #e6e1d4; min-width: 180px;">{{ ex.name }}</span>
+            <span style="font-size: 13px; color: #8a8580;">{{ ex.purpose }}</span>
+          </a>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── sindri pixel ─── -->
+  <section id="pixel" data-screen-label="Sindri Pixel" style="border-bottom: 1px solid #2a3038;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">06</span>
+        <span style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8580;">sindri pixel · coming soon</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 18px; align-items: flex-start;">
+          <div style="display: inline-flex; align-items: center; gap: 8px; border: 1px solid #2a3038; background: #161b22; padding: 5px 10px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c4beae;">
+            <span style="width: 6px; height: 6px; background: #d4541e; display: inline-block;"></span>
+            <span>in development · coming soon</span>
+          </div>
+          <h2 style="margin: 0; font-weight: 600; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; color: #e6e1d4; text-wrap: balance;">A pixel-art editor that speaks Sindri.</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #c4beae;">Sindri Pixel is a companion sprite and pixel-art editor, built on the Dream Pixel editor. The plan: draw sprites, animate frames, and hand them straight to your Sindri scenes — same local-first stack, same workspace.</p>
+          <a href="https://github.com/vardirhq/sindri-pixel" target="_blank" style="display: inline-flex; align-items: center; height: 38px; padding: 0 18px; border: 1px solid #2a3038; background: #161b22; color: #e6e1d4; font-size: 13px;" style-hover="background: #1e2530;">Follow on GitHub</a>
+        </div>
+        <div style="border: 1px solid #2a3038; background: #161b22; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #2a3038;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8a8580;">sprite · drone.png · 16 × 16</span>
+            <div style="flex: 1;"></div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #5a554e;">4 frames</span>
+          </div>
+          <div style="padding: clamp(20px, 4vw, 36px); display: flex; justify-content: center; background-image: linear-gradient(rgba(230,225,212,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(230,225,212,0.04) 1px, transparent 1px); background-size: 20px 20px;">
+            <div style="display: grid; grid-template-columns: repeat(8, clamp(14px, 3vw, 22px)); grid-auto-rows: clamp(14px, 3vw, 22px); border: 1px solid #2a3038;">
+              <sc-for list="{{ pixelGrid }}" as="c" hint-placeholder-count="64">
+                <span style="background: {{ c }}; display: block;"></span>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── footer ─── -->
+  <footer data-screen-label="Footer" style="background: #0d1117;">
+    <div style="max-width: 1060px; margin: 0 auto; padding: clamp(36px, 6vw, 56px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; flex-wrap: wrap; gap: 28px 56px; justify-content: space-between; align-items: flex-start;">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: inline-flex; align-items: center; gap: 10px;">
+            <img src="assets/sindri-forge-dark.svg" alt="" style="width: 20px; height: 20px; display: block;">
+            <span style="font-weight: 700; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase;">S<span style="color: #f0c050;">I</span>NDRI</span>
+          </div>
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5a554e;">a vardir project · mit / apache-2.0</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 28px 48px;">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-weight: 600; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #5a554e;">sindri</span>
+            <a href="https://github.com/vardirhq/sindri-engine" target="_blank" style="font-size: 13px; color: #8a8580;" style-hover="color: #e6e1d4;">sindri-engine</a>
+            <a href="https://github.com/vardirhq/sindri-pixel" target="_blank" style="font-size: 13px; color: #8a8580;" style-hover="color: #e6e1d4;">sindri-pixel</a>
+            <a href="https://github.com/vardirhq/sindri-engine/tree/main/docs" target="_blank" style="font-size: 13px; color: #8a8580;" style-hover="color: #e6e1d4;">docs</a>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-weight: 600; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #5a554e;">vardir</span>
+            <a href="https://geyma.vardir.no/" target="_blank" style="font-size: 13px; color: #8a8580;" style-hover="color: #e6e1d4;">geyma · file manager</a>
+            <a href="https://github.com/vardirhq" target="_blank" style="font-size: 13px; color: #8a8580;" style-hover="color: #e6e1d4;">github.com/vardirhq</a>
+          </div>
+        </div>
+      </div>
+      <div style="border-top: 1px solid #1f242c; padding-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: #5a554e;">
+        <span>engine {{ engineVersion }}</span><span>·</span><span>local-first</span><span>·</span><span>no external ai api required</span>
+      </div>
+    </div>
+  </footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;engineVersion&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;v0.1.4&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Content&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const icon = (paths) => React.createElement(
+      "svg",
+      { width: 15, height: 15, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "square", strokeLinejoin: "miter" },
+      React.createElement("path", { d: paths })
+    );
+
+    const features = [
+      { icon: icon("M1.5 2.5h13v11h-13zM1.5 10l3.5-3 3 2.5 3-4 3 2.5"), title: "Hardware-accelerated 2d rendering", body: "Batched sprites, shapes, tilemaps, particles, text, and lighting on top of wgpu. Offscreen rendering and screenshots included.", meta: "wgpu" },
+      { icon: icon("M8 2.5l5 3v5l-5 3-5-3v-5zM8 8v5.5M3 5.5L8 8l5-2.5"), title: "Rapier2D physics", body: "Rigid bodies, colliders, triggers, and collision callbacks wired into the world and exposed to scripts.", meta: "rapier2d" },
+      { icon: icon("M5 4L2 8l3 4M11 4l3 4-3 4"), title: "Lua scripting with hot reload", body: "Entity-attached scripts with lifecycle callbacks and deferred world mutation. Save the file, keep playing.", meta: "lua 5.4 · mlua" },
+      { icon: icon("M8 1v4M8 11v4M1 8h4M11 8h4M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2"), title: "Local AI tooling", body: "AI-assisted entity and scene actions through Ollama. Runs on your machine — no external API required.", meta: "ollama · local-first" },
+      { icon: icon("M2 3h12M2 8h12M2 13h12M5 3v10"), title: "Lightweight world / ECS", body: "World + EntityId, immutable and mutable queries, built-in gameplay components, and a fluent EntityBuilder.", meta: "world · entitybuilder" },
+      { icon: icon("M3 2.5h10v11H3zM3 6h10M6 6v7.5"), title: "Scene serialization", body: "Scenes save and load through the editor, with undo/redo commands and editor/runtime parity tracking.", meta: ".sndr scenes" },
+      { icon: icon("M2 14V9l3-3 3 3 3-6 3 5v6z"), title: "Cameras, grids, pathfinding", body: "Camera zoom, bounds, world/screen conversion, typed grids, and A* pathfinding out of the box.", meta: "camera2d · a*" },
+      { icon: icon("M2 12c2-1 2-6 4-6s2 4 4 4 2-6 4-6M2 4h3M11 12h3"), title: "Audio and input", body: "Audio through rodio; frame-accurate input with action mapping for keyboard and beyond.", meta: "rodio" }
+    ];
+
+    const aiSteps = [
+      { n: "01", title: "Ask", body: "Cmd-K: \u201cAsk Sindri to build something\u2026\u201d \u2014 or point at an entity and describe the behavior you want." },
+      { n: "02", title: "Review", body: "The AI stages scripts, components, and entities as ghosts \u2014 dashed outlines and diffs, scoped to your project." },
+      { n: "03", title: "Accept or reject", body: "Accept all, reject all, or refine per change. Nothing lands in the scene until you say so." }
+    ];
+
+    const pillars = [
+      "fast gameplay iteration",
+      "lightweight ECS-style workflows",
+      "editor/runtime convergence",
+      "adoption parity between engine, editor, and AI tooling"
+    ];
+
+    const scriptUses = ["player controllers", "enemy logic", "triggers", "camera behavior", "weapons", "editor-attached behavior"];
+
+    const gh = "https://github.com/vardirhq/sindri-engine/tree/main/examples/";
+    const examples = [
+      { name: "hello_sindri", purpose: "minimal onboarding", url: gh + "hello_sindri" },
+      { name: "platformer", purpose: "rust-first gameplay and physics", url: gh + "platformer" },
+      { name: "scripted_asteroids", purpose: "lua scripting and hot reload flagship", url: gh + "scripted_asteroids" },
+      { name: "editor_scene", purpose: "scene loading and editor workflow", url: gh + "editor_scene" },
+      { name: "rendering", purpose: "particles, lighting, camera effects", url: gh + "rendering" }
+    ];
+
+    // 8x8 drone sprite: . = transparent (paper-2), colors from entity palette
+    const _ = "#161b22", O = "#d4541e", C = "#6dbcdb", S = "#a8a298", K = "#0d1117";
+    const pixelGrid = [
+      _, _, S, S, S, S, _, _,
+      _, S, K, C, C, K, S, _,
+      S, K, C, C, C, C, K, S,
+      S, C, C, K, K, C, C, S,
+      S, C, C, K, K, C, C, S,
+      S, K, C, C, C, C, K, S,
+      _, S, K, O, O, K, S, _,
+      _, _, S, O, O, S, _, _
+    ];
+
+    return {
+      engineVersion: this.props.engineVersion ?? "v0.1.4",
+      features, aiSteps, pillars, scriptUses, examples, pixelGrid
+    };
+  }
+}
+</script>
+</body>
+</html>

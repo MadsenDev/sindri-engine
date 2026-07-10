@@ -4,10 +4,581 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sindri — 2d game engine + ai-as-peer editor</title>
+<meta name="description" content="Sindri is a 2d game engine, editor workspace, and local AI-assisted tooling stack written in Rust. Rust owns the engine, Lua owns gameplay, the AI understands both.">
 <link rel="icon" href="assets/sindri-forge-dark.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0d1117; }
+  body { font-family: "Pixelify Sans", monospace; }
+  a { color: #c4beae; text-decoration: none; }
+  a:hover { color: #e6e1d4; }
+  ::selection { background: rgba(240,192,80,0.22); }
+  html { scroll-behavior: smooth; }
+  @keyframes sndr-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @media (max-width: 860px) {
+    .sndr-nav { display: none !important; }
+    .sndr-status { display: none !important; }
+  }
+  @media (max-width: 560px) {
+    .sndr-gh-label { display: none !important; }
+  }
+</style>
 </head>
 <body>
-<div id="root"></div>
-<script type="module" src="/src/main.jsx"></script>
+<div class="sc-host" data-sc-name="design"><div data-dc-tpl="4" style="min-height: 100vh; background: rgb(13, 17, 23); color: rgb(230, 225, 212); font-family: &quot;Pixelify Sans&quot;, monospace; overflow-x: hidden;">
+
+  
+  <header data-dc-tpl="5" style="position: sticky; top: 0px; z-index: 10; display: flex; align-items: center; gap: 24px; height: 56px; padding: 0px clamp(16px, 4vw, 28px); background: rgb(13, 17, 23); border-bottom: 1px solid rgb(42, 48, 56);">
+    <a data-dc-tpl="6" href="#top" style="display: inline-flex; align-items: center; gap: 10px; color: rgb(230, 225, 212); flex: 0 0 auto;">
+      <img data-dc-tpl="7" src="assets/sindri-forge-dark.svg" alt="Sindri forge mark" style="width: 22px; height: 22px; display: block;">
+      <span data-dc-tpl="8" style="font-weight: 700; font-size: 16px; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1;">S<span data-dc-tpl="9" style="color: rgb(240, 192, 80);">I</span>NDRI</span>
+    </a>
+    <nav data-dc-tpl="10" class="sndr-nav" style="display: flex; gap: 20px; font-size: 13px;">
+      <a data-dc-tpl="11" href="#features" class="scp0" style="color: rgb(138, 133, 128);">features</a>
+      <a data-dc-tpl="12" href="#ai" class="scp0" style="color: rgb(138, 133, 128);">ai flow</a>
+      <a data-dc-tpl="13" href="#philosophy" class="scp0" style="color: rgb(138, 133, 128);">philosophy</a>
+      <a data-dc-tpl="14" href="#scripting" class="scp0" style="color: rgb(138, 133, 128);">scripting</a>
+      <a data-dc-tpl="15" href="#pixel" class="scp0" style="color: rgb(138, 133, 128);">pixel</a>
+    </nav>
+    <div data-dc-tpl="16" style="flex: 1 1 0%;"></div>
+    <div data-dc-tpl="17" class="sndr-status" style="display: flex; align-items: center; gap: 8px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; letter-spacing: 0.06em; color: rgb(90, 85, 78);">
+      <span data-dc-tpl="18" style="width: 6px; height: 6px; background: rgb(155, 176, 112); display: inline-block;"></span>
+      <span data-dc-tpl="19">engine <span class="sc-interp">v0.1.4</span> · ready</span>
+    </div>
+    <a data-dc-tpl="20" href="https://github.com/vardirhq/sindri-engine" target="_blank" class="scp1" style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0px 12px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(230, 225, 212); font-size: 12.5px; flex: 0 0 auto;">
+      <svg data-dc-tpl="21" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path data-dc-tpl="22" d="M6 13v-2c-2.5.7-3.5-1-3.5-1-.4-1-1-1.3-1-1.3M9.5 13v-2.2c0-.6.2-1 .5-1.3 2-.2 4-1 4-4.2 0-.9-.3-1.7-.8-2.3.1-.2.4-1.1-.1-2.2 0 0-.7-.2-2.3.9a8 8 0 0 0-4.2 0C5 .6 4.3.8 4.3.8c-.5 1.1-.2 2-.1 2.2-.5.6-.8 1.4-.8 2.3 0 3.2 2 4 4 4.2"></path></svg>
+      <span data-dc-tpl="23" class="sndr-gh-label">GitHub</span>
+    </a>
+  </header>
+
+  
+  <section data-dc-tpl="24" id="top" style="position: relative; border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="25" style="position: absolute; inset: 0px; pointer-events: none; background-image: linear-gradient(rgba(230, 225, 212, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(230, 225, 212, 0.04) 1px, transparent 1px), linear-gradient(rgba(230, 225, 212, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(230, 225, 212, 0.08) 1px, transparent 1px); background-size: 40px 40px, 40px 40px, 200px 200px, 200px 200px;"></div>
+    <div data-dc-tpl="26" style="position: relative; max-width: 1060px; margin: 0px auto; padding: clamp(56px, 9vw, 104px) clamp(16px, 4vw, 28px) clamp(48px, 7vw, 80px); display: flex; flex-direction: column; gap: 28px; align-items: flex-start;">
+      <div data-dc-tpl="27" style="display: inline-flex; align-items: center; gap: 10px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); padding: 6px 12px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11.5px; color: rgb(196, 190, 174);">
+        <svg data-dc-tpl="28" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#f0c050" stroke-width="1.4" stroke-linecap="square"><path data-dc-tpl="29" d="M8 1v4M8 11v4M1 8h4M11 8h4M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2"></path></svg>
+        <span data-dc-tpl="30">ai-as-peer · 2d engine · rust · lua</span>
+      </div>
+      <h1 data-dc-tpl="31" style="margin: 0px; font-weight: 700; font-size: clamp(38px, 7.2vw, 76px); line-height: 1.06; letter-spacing: -0.01em; color: rgb(230, 225, 212); text-wrap: balance;">rust owns the engine.<br data-dc-tpl="32">lua owns gameplay.<br data-dc-tpl="33">the <span data-dc-tpl="34" style="color: rgb(240, 192, 80);">ai</span> understands both.</h1>
+      <p data-dc-tpl="35" style="margin: 0px; max-width: 560px; font-size: clamp(14px, 2vw, 16px); line-height: 1.55; color: rgb(196, 190, 174);">Sindri is a 2d game engine, editor workspace, and local AI-assisted tooling stack written in Rust. The AI lives inside the workspace as a peer — every action lands as a reviewable proposal, so you stay in control.</p>
+      <div data-dc-tpl="36" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+        <a data-dc-tpl="37" href="https://github.com/vardirhq/sindri-engine" target="_blank" class="scp2" style="display: inline-flex; align-items: center; height: 42px; padding: 0px 20px; background: rgb(230, 225, 212); color: rgb(13, 17, 23); font-weight: 600; font-size: 14px;">View on GitHub</a>
+        <a data-dc-tpl="38" href="https://github.com/vardirhq/sindri-engine/tree/main/docs" target="_blank" class="scp1" style="display: inline-flex; align-items: center; height: 42px; padding: 0px 20px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(230, 225, 212); font-size: 14px;">Read the docs</a>
+      </div>
+      <div data-dc-tpl="39" style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);">
+        <span data-dc-tpl="40">wgpu</span><span data-dc-tpl="41">·</span><span data-dc-tpl="42">rapier2d</span><span data-dc-tpl="43">·</span><span data-dc-tpl="44">lua 5.4</span><span data-dc-tpl="45">·</span><span data-dc-tpl="46">ollama · local-first</span><span data-dc-tpl="47">·</span><span data-dc-tpl="48">mit / apache-2.0</span>
+      </div>
+    </div>
+  </section>
+
+  
+  <section data-dc-tpl="49" id="features" style="background: rgb(22, 27, 34); border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="50" style="max-width: 1060px; margin: 0px auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="51" style="display: flex; align-items: baseline; gap: 14px;">
+        <span data-dc-tpl="52" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">01</span>
+        <span data-dc-tpl="53" style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">what the engine already does</span>
+      </div>
+      <div data-dc-tpl="54" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 1px; background: rgb(42, 48, 56); border: 1px solid rgb(42, 48, 56);">
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M1.5 2.5h13v11h-13zM1.5 10l3.5-3 3 2.5 3-4 3 2.5"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Hardware-accelerated 2d rendering</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Batched sprites, shapes, tilemaps, particles, text, and lighting on top of wgpu. Offscreen rendering and screenshots included.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">wgpu</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M8 2.5l5 3v5l-5 3-5-3v-5zM8 8v5.5M3 5.5L8 8l5-2.5"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Rapier2D physics</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Rigid bodies, colliders, triggers, and collision callbacks wired into the world and exposed to scripts.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">rapier2d</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M5 4L2 8l3 4M11 4l3 4-3 4"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Lua scripting with hot reload</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Entity-attached scripts with lifecycle callbacks and deferred world mutation. Save the file, keep playing.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">lua 5.4 · mlua</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M8 1v4M8 11v4M1 8h4M11 8h4M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Local AI tooling</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">AI-assisted entity and scene actions through Ollama. Runs on your machine — no external API required.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">ollama · local-first</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M2 3h12M2 8h12M2 13h12M5 3v10"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Lightweight world / ECS</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">World + EntityId, immutable and mutable queries, built-in gameplay components, and a fluent EntityBuilder.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">world · entitybuilder</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M3 2.5h10v11H3zM3 6h10M6 6v7.5"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Scene serialization</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Scenes save and load through the editor, with undo/redo commands and editor/runtime parity tracking.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">.sndr scenes</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M2 14V9l3-3 3 3 3-6 3 5v6z"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Cameras, grids, pathfinding</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Camera zoom, bounds, world/screen conversion, typed grids, and A* pathfinding out of the box.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">camera2d · a*</span></span>
+          </div>
+        
+          <div data-dc-tpl="56" class="scp1" style="background: rgb(13, 17, 23); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+            <div data-dc-tpl="57" style="display: flex; align-items: center; gap: 10px;">
+              <span data-dc-tpl="58" style="display: inline-flex; color: rgb(138, 133, 128);"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M2 12c2-1 2-6 4-6s2 4 4 4 2-6 4-6M2 4h3M11 12h3"></path></svg></span>
+              <span data-dc-tpl="59" style="font-weight: 600; font-size: 15px; color: rgb(230, 225, 212);"><span class="sc-interp">Audio and input</span></span>
+            </div>
+            <p data-dc-tpl="60" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Audio through rodio; frame-accurate input with action mapping for keyboard and beyond.</span></p>
+            <span data-dc-tpl="61" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgb(90, 85, 78);"><span class="sc-interp">rodio</span></span>
+          </div>
+        
+      </div>
+    </div>
+  </section>
+
+  
+  <section data-dc-tpl="62" id="ai" style="border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="63" style="max-width: 1060px; margin: 0px auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="64" style="display: flex; align-items: baseline; gap: 14px;">
+        <span data-dc-tpl="65" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">02</span>
+        <span data-dc-tpl="66" style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">ai flow · proposals, not actions</span>
+      </div>
+      <div data-dc-tpl="67" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start;">
+        <div data-dc-tpl="68" style="display: flex; flex-direction: column; gap: 20px;">
+          <h2 data-dc-tpl="69" style="margin: 0px; font-weight: 600; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.15; color: rgb(230, 225, 212); text-wrap: balance;">Every AI action lands as a <span data-dc-tpl="70" style="color: rgb(240, 192, 80);">reviewable proposal</span>.</h2>
+          <p data-dc-tpl="71" style="margin: 0px; font-size: 14px; line-height: 1.6; color: rgb(196, 190, 174);">The assistant is a peer collaborator with full agency over the project — it can stage scenes, scripts, and components. But nothing touches your project until you accept it. No cloud, no API key: everything runs locally through Ollama.</p>
+          <div data-dc-tpl="72" style="display: flex; flex-direction: column; gap: 1px; background: rgb(31, 36, 44); border: 1px solid rgb(31, 36, 44);">
+            
+              <div data-dc-tpl="74" style="display: flex; gap: 14px; padding: 14px 16px; background: rgb(13, 17, 23); align-items: baseline;">
+                <span data-dc-tpl="75" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(240, 192, 80); flex: 0 0 auto;"><span class="sc-interp">01</span></span>
+                <div data-dc-tpl="76" style="display: flex; flex-direction: column; gap: 3px;">
+                  <span data-dc-tpl="77" style="font-weight: 600; font-size: 13.5px; color: rgb(230, 225, 212);"><span class="sc-interp">Ask</span></span>
+                  <span data-dc-tpl="78" style="font-size: 12.5px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Cmd-K: “Ask Sindri to build something…” — or point at an entity and describe the behavior you want.</span></span>
+                </div>
+              </div>
+            
+              <div data-dc-tpl="74" style="display: flex; gap: 14px; padding: 14px 16px; background: rgb(13, 17, 23); align-items: baseline;">
+                <span data-dc-tpl="75" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(240, 192, 80); flex: 0 0 auto;"><span class="sc-interp">02</span></span>
+                <div data-dc-tpl="76" style="display: flex; flex-direction: column; gap: 3px;">
+                  <span data-dc-tpl="77" style="font-weight: 600; font-size: 13.5px; color: rgb(230, 225, 212);"><span class="sc-interp">Review</span></span>
+                  <span data-dc-tpl="78" style="font-size: 12.5px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">The AI stages scripts, components, and entities as ghosts — dashed outlines and diffs, scoped to your project.</span></span>
+                </div>
+              </div>
+            
+              <div data-dc-tpl="74" style="display: flex; gap: 14px; padding: 14px 16px; background: rgb(13, 17, 23); align-items: baseline;">
+                <span data-dc-tpl="75" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(240, 192, 80); flex: 0 0 auto;"><span class="sc-interp">03</span></span>
+                <div data-dc-tpl="76" style="display: flex; flex-direction: column; gap: 3px;">
+                  <span data-dc-tpl="77" style="font-weight: 600; font-size: 13.5px; color: rgb(230, 225, 212);"><span class="sc-interp">Accept or reject</span></span>
+                  <span data-dc-tpl="78" style="font-size: 12.5px; line-height: 1.5; color: rgb(138, 133, 128);"><span class="sc-interp">Accept all, reject all, or refine per change. Nothing lands in the scene until you say so.</span></span>
+                </div>
+              </div>
+            
+          </div>
+        </div>
+        
+        <div data-dc-tpl="79" style="border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); min-width: 0px;">
+          <div data-dc-tpl="80" style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid rgb(42, 48, 56);">
+            <svg data-dc-tpl="81" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#f0c050" stroke-width="1.4" stroke-linecap="square"><path data-dc-tpl="82" d="M8 1v4M8 11v4M1 8h4M11 8h4M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2"></path></svg>
+            <span data-dc-tpl="83" style="font-weight: 600; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">AI proposal · awaiting review</span>
+            <div data-dc-tpl="84" style="flex: 1 1 0%;"></div>
+            <span data-dc-tpl="85" style="width: 6px; height: 6px; background: rgb(240, 192, 80); display: inline-block; animation: 2s ease 0s infinite normal none running sndr-pulse;"></span>
+          </div>
+          <div data-dc-tpl="86" style="padding: 14px 16px; border-bottom: 1px solid rgb(31, 36, 44);">
+            <p data-dc-tpl="87" style="margin: 0px; font-size: 13px; line-height: 1.5; color: rgb(230, 225, 212);">Make the drone follow the beacon and play a chime when it gets close.</p>
+            <span data-dc-tpl="88" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">you · cmd-k</span>
+          </div>
+          <div data-dc-tpl="89" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid rgb(31, 36, 44);">
+            <div data-dc-tpl="90" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span data-dc-tpl="91" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10px; padding: 2px 6px; border: 1px solid rgb(42, 48, 56); background: rgb(36, 43, 54); color: rgb(196, 190, 174);">script</span>
+              <span data-dc-tpl="92" style="font-size: 12.5px; color: rgb(230, 225, 212);">Rewrite update() to chase target</span>
+              <span data-dc-tpl="93" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">drone.lua</span>
+            </div>
+            <div data-dc-tpl="94" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; line-height: 1.7; overflow-x: auto;">
+              <div data-dc-tpl="95" style="color: rgb(224, 85, 85); background: rgba(224, 85, 85, 0.07); padding: 0px 8px;">- local speed = 0</div>
+              <div data-dc-tpl="96" style="color: rgb(240, 192, 80); background: rgba(240, 192, 80, 0.1); padding: 0px 8px;">+ local target = world:find("Beacon")</div>
+              <div data-dc-tpl="97" style="color: rgb(240, 192, 80); background: rgba(240, 192, 80, 0.1); padding: 0px 8px;">+ self:move_towards(target, 140 * dt)</div>
+            </div>
+          </div>
+          <div data-dc-tpl="98" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid rgb(31, 36, 44);">
+            <div data-dc-tpl="99" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span data-dc-tpl="100" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10px; padding: 2px 6px; border: 1px solid rgb(42, 48, 56); background: rgb(36, 43, 54); color: rgb(196, 190, 174);">component</span>
+              <span data-dc-tpl="101" style="font-size: 12.5px; color: rgb(230, 225, 212);">Add AudioSource · chime.ogg</span>
+              <span data-dc-tpl="102" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">Drone</span>
+            </div>
+            <div data-dc-tpl="103" style="border: 1.5px dashed rgb(240, 192, 80); background: rgba(240, 192, 80, 0.06); padding: 8px 10px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(196, 190, 174);">ghost · AudioSource { clip: "chime.ogg", range: 96 }</div>
+          </div>
+          <div data-dc-tpl="104" style="display: flex; align-items: center; gap: 8px; padding: 12px 16px;">
+            <button data-dc-tpl="105" class="scp3" style="height: 30px; padding: 0px 14px; white-space: nowrap; border: 1px solid rgb(42, 48, 56); background: rgb(230, 225, 212); color: rgb(13, 17, 23); font-family: &quot;Pixelify Sans&quot;, monospace; font-weight: 600; font-size: 12.5px; cursor: pointer;">Accept all</button>
+            <button data-dc-tpl="106" class="scp1" style="height: 30px; padding: 0px 14px; white-space: nowrap; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(196, 190, 174); font-family: &quot;Pixelify Sans&quot;, monospace; font-size: 12.5px; cursor: pointer;">Reject all</button>
+            <button data-dc-tpl="107" class="scp1" style="height: 30px; padding: 0px 14px; white-space: nowrap; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(196, 190, 174); font-family: &quot;Pixelify Sans&quot;, monospace; font-size: 12.5px; cursor: pointer;">Refine…</button>
+            <div data-dc-tpl="108" style="flex: 1 1 0%;"></div>
+            <span data-dc-tpl="109" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">2 changes pending</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  
+  <section data-dc-tpl="110" id="philosophy" style="background: rgb(22, 27, 34); border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="111" style="max-width: 1060px; margin: 0px auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="112" style="display: flex; align-items: baseline; gap: 14px;">
+        <span data-dc-tpl="113" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">03</span>
+        <span data-dc-tpl="114" style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">philosophy · on layering</span>
+      </div>
+      <div data-dc-tpl="115" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start;">
+        <div data-dc-tpl="116" style="display: flex; flex-direction: column; gap: 18px;">
+          <h2 data-dc-tpl="117" style="margin: 0px; font-weight: 600; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; color: rgb(230, 225, 212); text-wrap: balance;">Not a giant everything-engine. A cohesive workflow.</h2>
+          <p data-dc-tpl="118" style="margin: 0px; font-size: 14px; line-height: 1.6; color: rgb(196, 190, 174);">The goal is not just to render sprites. The goal is to make gameplay iteration, scripting, tooling, and editor workflows feel cohesive. Rust is the right layer for the parts you write once and lean on forever; Lua is the right layer for the gameplay you rewrite twenty times a day.</p>
+          <div data-dc-tpl="119" style="display: flex; flex-direction: column; gap: 8px;">
+            
+              <div data-dc-tpl="121" style="display: flex; gap: 10px; align-items: baseline;">
+                <span data-dc-tpl="122" style="color: rgb(155, 176, 112); font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px;">■</span>
+                <span data-dc-tpl="123" style="font-size: 13.5px; line-height: 1.5; color: rgb(196, 190, 174);"><span class="sc-interp">fast gameplay iteration</span></span>
+              </div>
+            
+              <div data-dc-tpl="121" style="display: flex; gap: 10px; align-items: baseline;">
+                <span data-dc-tpl="122" style="color: rgb(155, 176, 112); font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px;">■</span>
+                <span data-dc-tpl="123" style="font-size: 13.5px; line-height: 1.5; color: rgb(196, 190, 174);"><span class="sc-interp">lightweight ECS-style workflows</span></span>
+              </div>
+            
+              <div data-dc-tpl="121" style="display: flex; gap: 10px; align-items: baseline;">
+                <span data-dc-tpl="122" style="color: rgb(155, 176, 112); font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px;">■</span>
+                <span data-dc-tpl="123" style="font-size: 13.5px; line-height: 1.5; color: rgb(196, 190, 174);"><span class="sc-interp">editor/runtime convergence</span></span>
+              </div>
+            
+              <div data-dc-tpl="121" style="display: flex; gap: 10px; align-items: baseline;">
+                <span data-dc-tpl="122" style="color: rgb(155, 176, 112); font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px;">■</span>
+                <span data-dc-tpl="123" style="font-size: 13.5px; line-height: 1.5; color: rgb(196, 190, 174);"><span class="sc-interp">adoption parity between engine, editor, and AI tooling</span></span>
+              </div>
+            
+          </div>
+        </div>
+        <div data-dc-tpl="124" style="border: 1px solid rgb(42, 48, 56); background: rgb(13, 17, 23); min-width: 0px;">
+          <div data-dc-tpl="125" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid rgb(31, 36, 44);">
+            <span data-dc-tpl="126" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">workspace</span>
+          </div>
+          <pre data-dc-tpl="127" style="margin: 0px; padding: 16px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px; line-height: 1.7; color: rgb(196, 190, 174); overflow-x: auto;">crates/
+  sindri/          <span data-dc-tpl="128" style="color: rgb(90, 85, 78);">engine core</span>
+  sindri-server/   <span data-dc-tpl="129" style="color: rgb(90, 85, 78);">local engine/editor http server</span>
+  sindri-ai/       <span data-dc-tpl="130" style="color: rgb(90, 85, 78);">ollama client + ai action types</span>
+
+editor/            <span data-dc-tpl="131" style="color: rgb(90, 85, 78);">tauri 2 + react editor</span>
+examples/          <span data-dc-tpl="132" style="color: rgb(90, 85, 78);">curated examples, not subsystem spam</span>
+docs/              <span data-dc-tpl="133" style="color: rgb(90, 85, 78);">engine documentation</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  
+  <section data-dc-tpl="134" id="scripting" style="border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="135" style="max-width: 1060px; margin: 0px auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="136" style="display: flex; align-items: baseline; gap: 14px;">
+        <span data-dc-tpl="137" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">04</span>
+        <span data-dc-tpl="138" style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">scripting · lua with hot reload</span>
+      </div>
+      <div data-dc-tpl="139" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start;">
+        <div data-dc-tpl="140" style="border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); min-width: 0px; order: 0;">
+          <div data-dc-tpl="141" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid rgb(42, 48, 56);">
+            <svg data-dc-tpl="142" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8a8580" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"><path data-dc-tpl="143" d="M5 4L2 8l3 4M11 4l3 4-3 4"></path></svg>
+            <span data-dc-tpl="144" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(138, 133, 128);">player.lua</span>
+            <div data-dc-tpl="145" style="flex: 1 1 0%;"></div>
+            <span data-dc-tpl="146" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(155, 176, 112);">● hot reload</span>
+          </div>
+          <div data-dc-tpl="147" style="margin: 0px; padding: 16px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px; line-height: 1.7; color: rgb(196, 190, 174); overflow-x: auto; white-space: pre;">
+  <div data-dc-tpl="148"><span data-dc-tpl="149" style="color: rgb(138, 133, 128);">local</span> speed = params.speed <span data-dc-tpl="150" style="color: rgb(138, 133, 128);">or</span> <span data-dc-tpl="151" style="color: rgb(109, 188, 219);">220.0</span></div>
+  <div data-dc-tpl="152"></div>
+  <div data-dc-tpl="153"><span data-dc-tpl="154" style="color: rgb(138, 133, 128);">function</span> <span data-dc-tpl="155" style="color: rgb(230, 225, 212);">on_update</span>(self, dt)</div>
+  <div data-dc-tpl="156">  <span data-dc-tpl="157" style="color: rgb(138, 133, 128);">local</span> input = self:input()</div>
+  <div data-dc-tpl="158">  <span data-dc-tpl="159" style="color: rgb(138, 133, 128);">local</span> transform = self:transform()</div>
+  <div data-dc-tpl="160"></div>
+  <div data-dc-tpl="161">  <span data-dc-tpl="162" style="color: rgb(138, 133, 128);">local</span> move = input:axis(<span data-dc-tpl="163" style="color: rgb(155, 176, 112);">"A"</span>, <span data-dc-tpl="164" style="color: rgb(155, 176, 112);">"D"</span>)</div>
+  <div data-dc-tpl="165">  <span data-dc-tpl="166" style="color: rgb(138, 133, 128);">local</span> pos = transform:position()</div>
+  <div data-dc-tpl="167"></div>
+  <div data-dc-tpl="168">  transform:set_position(</div>
+  <div data-dc-tpl="169">    vec2(pos.x + move * speed * dt, pos.y)</div>
+  <div data-dc-tpl="170">  )</div>
+  <div data-dc-tpl="171"><span data-dc-tpl="172" style="color: rgb(138, 133, 128);">end</span></div></div>
+        </div>
+        <div data-dc-tpl="173" style="display: flex; flex-direction: column; gap: 18px;">
+          <h2 data-dc-tpl="174" style="margin: 0px; font-weight: 600; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; color: rgb(230, 225, 212); text-wrap: balance;">Entity-attached scripts. Save the file, see it live.</h2>
+          <p data-dc-tpl="175" style="margin: 0px; font-size: 14px; line-height: 1.6; color: rgb(196, 190, 174);">Lua 5.4 through mlua, with lifecycle callbacks, deferred world mutation, collision and trigger callbacks, and physics, camera, animation, and tilemap helpers. Scripts hot-reload while the game runs.</p>
+          <div data-dc-tpl="176" style="display: flex; flex-wrap: wrap; gap: 6px;">
+            
+              <span data-dc-tpl="178" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; padding: 4px 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(138, 133, 128);"><span class="sc-interp">player controllers</span></span>
+            
+              <span data-dc-tpl="178" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; padding: 4px 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(138, 133, 128);"><span class="sc-interp">enemy logic</span></span>
+            
+              <span data-dc-tpl="178" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; padding: 4px 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(138, 133, 128);"><span class="sc-interp">triggers</span></span>
+            
+              <span data-dc-tpl="178" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; padding: 4px 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(138, 133, 128);"><span class="sc-interp">camera behavior</span></span>
+            
+              <span data-dc-tpl="178" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; padding: 4px 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(138, 133, 128);"><span class="sc-interp">weapons</span></span>
+            
+              <span data-dc-tpl="178" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; padding: 4px 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(138, 133, 128);"><span class="sc-interp">editor-attached behavior</span></span>
+            
+          </div>
+          <div data-dc-tpl="179" style="border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34);">
+            <div data-dc-tpl="180" style="padding: 10px 14px; border-bottom: 1px solid rgb(31, 36, 44); font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">quick start</div>
+            <pre data-dc-tpl="181" style="margin: 0px; padding: 14px 16px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12px; line-height: 1.8; color: rgb(196, 190, 174); overflow-x: auto;"><span data-dc-tpl="182" style="color: rgb(90, 85, 78);">$</span> cargo run -p hello_sindri
+<span data-dc-tpl="183" style="color: rgb(90, 85, 78);">$</span> cargo run -p scripted_asteroids</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  
+  <section data-dc-tpl="184" id="examples" style="background: rgb(22, 27, 34); border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="185" style="max-width: 1060px; margin: 0px auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="186" style="display: flex; align-items: baseline; gap: 14px;">
+        <span data-dc-tpl="187" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">05</span>
+        <span data-dc-tpl="188" style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">curated example suite</span>
+      </div>
+      <div data-dc-tpl="189" style="display: flex; flex-direction: column; gap: 1px; background: rgb(42, 48, 56); border: 1px solid rgb(42, 48, 56);">
+        
+          <a data-dc-tpl="191" href="https://github.com/vardirhq/sindri-engine/tree/main/examples/hello_sindri" target="_blank" class="scp1" style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 14px 18px; background: rgb(13, 17, 23); color: rgb(196, 190, 174);">
+            <span data-dc-tpl="192" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: rgb(230, 225, 212); min-width: 180px;"><span class="sc-interp">hello_sindri</span></span>
+            <span data-dc-tpl="193" style="font-size: 13px; color: rgb(138, 133, 128);"><span class="sc-interp">minimal onboarding</span></span>
+          </a>
+        
+          <a data-dc-tpl="191" href="https://github.com/vardirhq/sindri-engine/tree/main/examples/platformer" target="_blank" class="scp1" style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 14px 18px; background: rgb(13, 17, 23); color: rgb(196, 190, 174);">
+            <span data-dc-tpl="192" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: rgb(230, 225, 212); min-width: 180px;"><span class="sc-interp">platformer</span></span>
+            <span data-dc-tpl="193" style="font-size: 13px; color: rgb(138, 133, 128);"><span class="sc-interp">rust-first gameplay and physics</span></span>
+          </a>
+        
+          <a data-dc-tpl="191" href="https://github.com/vardirhq/sindri-engine/tree/main/examples/scripted_asteroids" target="_blank" class="scp1" style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 14px 18px; background: rgb(13, 17, 23); color: rgb(196, 190, 174);">
+            <span data-dc-tpl="192" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: rgb(230, 225, 212); min-width: 180px;"><span class="sc-interp">scripted_asteroids</span></span>
+            <span data-dc-tpl="193" style="font-size: 13px; color: rgb(138, 133, 128);"><span class="sc-interp">lua scripting and hot reload flagship</span></span>
+          </a>
+        
+          <a data-dc-tpl="191" href="https://github.com/vardirhq/sindri-engine/tree/main/examples/editor_scene" target="_blank" class="scp1" style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 14px 18px; background: rgb(13, 17, 23); color: rgb(196, 190, 174);">
+            <span data-dc-tpl="192" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: rgb(230, 225, 212); min-width: 180px;"><span class="sc-interp">editor_scene</span></span>
+            <span data-dc-tpl="193" style="font-size: 13px; color: rgb(138, 133, 128);"><span class="sc-interp">scene loading and editor workflow</span></span>
+          </a>
+        
+          <a data-dc-tpl="191" href="https://github.com/vardirhq/sindri-engine/tree/main/examples/rendering" target="_blank" class="scp1" style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 14px 18px; background: rgb(13, 17, 23); color: rgb(196, 190, 174);">
+            <span data-dc-tpl="192" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: rgb(230, 225, 212); min-width: 180px;"><span class="sc-interp">rendering</span></span>
+            <span data-dc-tpl="193" style="font-size: 13px; color: rgb(138, 133, 128);"><span class="sc-interp">particles, lighting, camera effects</span></span>
+          </a>
+        
+      </div>
+    </div>
+  </section>
+
+  
+  <section data-dc-tpl="194" id="pixel" style="border-bottom: 1px solid rgb(42, 48, 56);">
+    <div data-dc-tpl="195" style="max-width: 1060px; margin: 0px auto; padding: clamp(48px, 7vw, 72px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="196" style="display: flex; align-items: baseline; gap: 14px;">
+        <span data-dc-tpl="197" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">06</span>
+        <span data-dc-tpl="198" style="font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(138, 133, 128);">sindri pixel · coming soon</span>
+      </div>
+      <div data-dc-tpl="199" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: clamp(24px, 4vw, 48px); align-items: center;">
+        <div data-dc-tpl="200" style="display: flex; flex-direction: column; gap: 18px; align-items: flex-start;">
+          <div data-dc-tpl="201" style="display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); padding: 5px 10px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(196, 190, 174);">
+            <span data-dc-tpl="202" style="width: 6px; height: 6px; background: rgb(212, 84, 30); display: inline-block;"></span>
+            <span data-dc-tpl="203">in development · coming soon</span>
+          </div>
+          <h2 data-dc-tpl="204" style="margin: 0px; font-weight: 600; font-size: clamp(22px, 3vw, 30px); line-height: 1.25; color: rgb(230, 225, 212); text-wrap: balance;">A pixel-art editor that speaks Sindri.</h2>
+          <p data-dc-tpl="205" style="margin: 0px; font-size: 14px; line-height: 1.6; color: rgb(196, 190, 174);">Sindri Pixel is a companion sprite and pixel-art editor, built on the Dream Pixel editor. The plan: draw sprites, animate frames, and hand them straight to your Sindri scenes — same local-first stack, same workspace.</p>
+          <a data-dc-tpl="206" href="https://github.com/vardirhq/sindri-pixel" target="_blank" class="scp1" style="display: inline-flex; align-items: center; height: 38px; padding: 0px 18px; border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); color: rgb(230, 225, 212); font-size: 13px;">Follow on GitHub</a>
+        </div>
+        <div data-dc-tpl="207" style="border: 1px solid rgb(42, 48, 56); background: rgb(22, 27, 34); min-width: 0px;">
+          <div data-dc-tpl="208" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid rgb(42, 48, 56);">
+            <span data-dc-tpl="209" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(138, 133, 128);">sprite · drone.png · 16 × 16</span>
+            <div data-dc-tpl="210" style="flex: 1 1 0%;"></div>
+            <span data-dc-tpl="211" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 10.5px; color: rgb(90, 85, 78);">4 frames</span>
+          </div>
+          <div data-dc-tpl="212" style="padding: clamp(20px, 4vw, 36px); display: flex; justify-content: center; background-image: linear-gradient(rgba(230, 225, 212, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(230, 225, 212, 0.04) 1px, transparent 1px); background-size: 20px 20px;">
+            <div data-dc-tpl="213" style="display: grid; grid-template-columns: repeat(8, clamp(14px, 3vw, 22px)); grid-auto-rows: clamp(14px, 3vw, 22px); border: 1px solid rgb(42, 48, 56);">
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(109, 188, 219); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(212, 84, 30); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(212, 84, 30); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(13, 17, 23); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(212, 84, 30); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(212, 84, 30); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(168, 162, 152); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+                <span data-dc-tpl="215" style="background: rgb(22, 27, 34); display: block;"></span>
+              
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  
+  <footer data-dc-tpl="216" style="background: rgb(13, 17, 23);">
+    <div data-dc-tpl="217" style="max-width: 1060px; margin: 0px auto; padding: clamp(36px, 6vw, 56px) clamp(16px, 4vw, 28px); display: flex; flex-direction: column; gap: 28px;">
+      <div data-dc-tpl="218" style="display: flex; flex-wrap: wrap; gap: 28px 56px; justify-content: space-between; align-items: flex-start;">
+        <div data-dc-tpl="219" style="display: flex; flex-direction: column; gap: 12px;">
+          <div data-dc-tpl="220" style="display: inline-flex; align-items: center; gap: 10px;">
+            <img data-dc-tpl="221" src="assets/sindri-forge-dark.svg" alt="" style="width: 20px; height: 20px; display: block;">
+            <span data-dc-tpl="222" style="font-weight: 700; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase;">S<span data-dc-tpl="223" style="color: rgb(240, 192, 80);">I</span>NDRI</span>
+          </div>
+          <span data-dc-tpl="224" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; color: rgb(90, 85, 78);">a vardir project · mit / apache-2.0</span>
+        </div>
+        <div data-dc-tpl="225" style="display: flex; flex-wrap: wrap; gap: 28px 48px;">
+          <div data-dc-tpl="226" style="display: flex; flex-direction: column; gap: 8px;">
+            <span data-dc-tpl="227" style="font-weight: 600; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(90, 85, 78);">sindri</span>
+            <a data-dc-tpl="228" href="https://github.com/vardirhq/sindri-engine" target="_blank" class="scp0" style="font-size: 13px; color: rgb(138, 133, 128);">sindri-engine</a>
+            <a data-dc-tpl="229" href="https://github.com/vardirhq/sindri-pixel" target="_blank" class="scp0" style="font-size: 13px; color: rgb(138, 133, 128);">sindri-pixel</a>
+            <a data-dc-tpl="230" href="https://github.com/vardirhq/sindri-engine/tree/main/docs" target="_blank" class="scp0" style="font-size: 13px; color: rgb(138, 133, 128);">docs</a>
+          </div>
+          <div data-dc-tpl="231" style="display: flex; flex-direction: column; gap: 8px;">
+            <span data-dc-tpl="232" style="font-weight: 600; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(90, 85, 78);">vardir</span>
+            <a data-dc-tpl="233" href="https://geyma.vardir.no/" target="_blank" class="scp0" style="font-size: 13px; color: rgb(138, 133, 128);">geyma · file manager</a>
+            <a data-dc-tpl="234" href="https://github.com/vardirhq" target="_blank" class="scp0" style="font-size: 13px; color: rgb(138, 133, 128);">github.com/vardirhq</a>
+          </div>
+        </div>
+      </div>
+      <div data-dc-tpl="235" style="border-top: 1px solid rgb(31, 36, 44); padding-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 11px; letter-spacing: 0.06em; color: rgb(90, 85, 78);">
+        <span data-dc-tpl="236">engine <span class="sc-interp">v0.1.4</span></span><span data-dc-tpl="237">·</span><span data-dc-tpl="238">local-first</span><span data-dc-tpl="239">·</span><span data-dc-tpl="240">no external ai api required</span>
+      </div>
+    </div>
+  </footer></div></div>
 </body>
 </html>
